@@ -52,7 +52,7 @@ export function PoolStandings({ poolShortName, teams, myTeamId, onTeamPress }: P
           : {};
         return (
           <RowContainer
-            key={t.TeamId}
+            key={t.TeamId ? `team-${t.TeamId}` : `slot-${idx}`}
             {...rowProps}
             style={[
               styles.row,
@@ -80,7 +80,10 @@ export function PoolStandings({ poolShortName, teams, myTeamId, onTeamPress }: P
             <Text style={[styles.cell, styles.statCol]}>{t.SetsWon}</Text>
             <Text style={[styles.cell, styles.statCol]}>{t.SetsLost}</Text>
             <Text style={[styles.cell, styles.ratioCol]} numberOfLines={1}>
-              {t.PointRatio || '-'}
+              {(() => {
+                const val = parseFloat(t.PointRatio);
+                return isNaN(val) ? '0.00' : val.toFixed(2);
+              })()}
             </Text>
           </RowContainer>
         );

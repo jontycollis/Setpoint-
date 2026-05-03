@@ -23,6 +23,8 @@ interface Props {
   division: AESDivision;
   myTeamId?: number;
   onBack: () => void;
+  initialPlayId?: number;
+  onTeamPress?: (teamId: number, teamName: string) => void;
 }
 
 interface BracketInfo {
@@ -31,7 +33,7 @@ interface BracketInfo {
   matches: FlatBracketMatch[];
 }
 
-export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
+export function BracketScreen({ event, division, myTeamId, onBack, initialPlayId, onTeamPress }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [brackets, setBrackets] = useState<BracketInfo[]>([]);
@@ -51,6 +53,10 @@ export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
       const bracketDays = playDays.filter((d: PlayDay) => d.HasBrackets);
 
       const allBrackets: BracketInfo[] = [];
+      // Track PlayIds we've already loaded — the same bracket can span
+      // multiple days (e.g. U18 Boys Div 1 playoffs on Day 2 and Day 3).
+      // Without dedup we'd show "Tier 1" twice.
+      const seenPlayIds = new Set<number>();
 
       for (const day of bracketDays) {
         const plays = await getPlays(event.Key, division.DivisionId, day.DateTime);
@@ -58,6 +64,8 @@ export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
         const bracketPlays = plays.filter((p: any) => p.Type === 1);
 
         for (const bp of bracketPlays) {
+          if (seenPlayIds.has(bp.PlayId)) continue; // Already loaded
+          seenPlayIds.add(bp.PlayId);
           try {
             const detail = await getPlayDetail(event.Key, bp.PlayId);
             if (detail.Roots && detail.Roots.length > 0) {
@@ -81,6 +89,8 @@ export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
           const plays = await getPlays(event.Key, division.DivisionId, day.DateTime);
           const bracketPlays = plays.filter((p: any) => p.Type === 1);
           for (const bp of bracketPlays) {
+            if (seenPlayIds.has(bp.PlayId)) continue;
+            seenPlayIds.add(bp.PlayId);
             try {
               const detail = await getPlayDetail(event.Key, bp.PlayId);
               if (detail.Roots && detail.Roots.length > 0) {
@@ -96,7 +106,34 @@ export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
         }
       }
 
-      setBrackets(allBrackets);
+      // Additional dedup: if two different PlayIds have the same name
+      // (e.g. both called "Tier 1"), merge them — the one with more
+      // matches is the most complete version.
+      const dedupedByName: BracketInfo[] = [];
+      const nameMap = new Map<string, BracketInfo>();
+      for (const b of allBrackets) {
+        const normalizedName = b.name.trim();
+        const existing = nameMap.get(normalizedName);
+        if (existing) {
+          // Keep the one with more matches (more complete data)
+          if (b.matches.length > existing.matches.length) {
+            nameMap.set(normalizedName, b);
+          }
+        } else {
+          nameMap.set(normalizedName, b);
+        }
+      }
+      dedupedByName.push(...nameMap.values());
+
+      setBrackets(dedupedByName);
+
+      // Auto-select the bracket matching initialPlayId (if provided)
+      if (initialPlayId) {
+        const idx = dedupedByName.findIndex((b) => b.playId === initialPlayId);
+        if (idx >= 0) {
+          setSelectedBracket(idx);
+        }
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -104,101 +141,141 @@ export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
     }
   }
 
-  function getRoundLabel(round: number, maxRound: number): string {
-    if (round === maxRound) return 'Final';
+  /**
+   * Check if the current bracket is a placement bracket (5th/7th, etc.)
+   * so we can adjust round labels accordingly.
+   */
+  function isPlacementBracket(bracketName: string): boolean {
+    const lower = bracketName.toLowerCase();
+    return (
+      /\b(5|7|9|11|13|15)(th|st|nd|rd)\b/.test(lower) ||
+      /\b(5\/[678]|7\/[89]|9\/1[01]|11\/1[23])\b/.test(lower) ||
+      lower.includes('placement')
+    );
+  }
+
+  function getRoundLabel(round: number, maxRound: number, bracketName?: string): string {
+    const isPlacement = bracketName ? isPlacementBracket(bracketName) : false;
+
+    if (round === maxRound) {
+      // For placement brackets, use the bracket name instead of "Final"
+      if (isPlacement) return bracketName || 'Final';
+      return 'Final';
+    }
     if (round === maxRound - 1) return 'Semi-Finals';
     if (round === maxRound - 2) return 'Quarter-Finals';
+    if (round === maxRound - 3) return 'Round of 16';
+    if (round === maxRound - 4) return 'Round of 32';
     return `Round ${round + 1}`;
   }
 
-  function renderMatchCard(item: FlatBracketMatch, maxRound: number) {
-    const m = item.match;
-    const team1Won = m.FirstTeamWon;
-    const team2Won = m.SecondTeamWon;
-    const hasResult = m.HasScores;
+  /**
+   * Check if a match is a bronze/3rd-place match.
+   * Strategy 1: Structural — if the match comes from a secondary root (rootIndex > 0)
+   *   and is in the final round, it's a bronze/consolation match.
+   * Strategy 2: Name-based fallback — check for common bronze match naming.
+   */
+  function isBronzeMatch(m: FlatBracketMatch): boolean {
+    // Structural: secondary roots in the final round are bronze matches
+    if (m.rootIndex > 0 && m.round === maxRound) return true;
+    // Name-based fallback
+    const name = (m.match.FullName || '').toLowerCase();
+    return (
+      name.includes('bronze') ||
+      name.includes('3rd') ||
+      name.includes('third') ||
+      name.includes('consolation') ||
+      name.includes('3rd/4th') ||
+      name.includes('3/4')
+    );
+  }
+
+  function renderTeamRow(
+    teamObj: any | null,
+    teamText: string,
+    won: boolean,
+    hasResult: boolean,
+    sets: BracketMatch['Sets'],
+    isFirst: boolean,
+  ) {
+    const hasTeam = teamObj?.TeamId != null && teamObj.TeamId !== 0;
+    const isMe = hasTeam && myTeamId === teamObj.TeamId;
+    const canTap = hasTeam && !isMe && !!onTeamPress;
+    const displayText = teamText || 'TBD';
+
+    const scores = sets.filter((s) =>
+      isFirst ? s.FirstTeamScore !== null : s.SecondTeamScore !== null
+    );
+
+    const Container: any = canTap ? TouchableOpacity : View;
+    const containerProps = canTap
+      ? {
+          onPress: () => onTeamPress!(teamObj.TeamId, teamObj.TeamName || teamText),
+          activeOpacity: 0.6,
+        }
+      : {};
 
     return (
-      <View key={`${item.round}-${item.position}`} style={styles.matchCard}>
-        <Text style={styles.matchName}>{m.FullName}</Text>
-
-        {/* Team 1 */}
-        <View
+      <Container
+        {...containerProps}
+        style={[
+          styles.teamRow,
+          hasResult && won && styles.teamRowWinner,
+        ]}
+      >
+        <Text
           style={[
-            styles.teamRow,
-            hasResult && team1Won && styles.teamRowWinner,
+            styles.teamText,
+            hasResult && won && styles.teamTextWinner,
+            hasResult && !won && styles.teamTextLoser,
+            isMe && styles.teamTextMe,
+            canTap && styles.teamTextTappable,
           ]}
+          numberOfLines={1}
         >
-          <Text
-            style={[
-              styles.teamText,
-              hasResult && team1Won && styles.teamTextWinner,
-              hasResult && !team1Won && styles.teamTextLoser,
-            ]}
-            numberOfLines={1}
-          >
-            {m.FirstTeamText || 'TBD'}
-          </Text>
-          {hasResult && (
-            <View style={styles.setsRow}>
-              {m.Sets.filter((s) => s.FirstTeamScore !== null).map((s, i) => (
+          {displayText}
+        </Text>
+        {hasResult && (
+          <View style={styles.setsRow}>
+            {scores.map((s, i) => {
+              const myScore = isFirst ? s.FirstTeamScore : s.SecondTeamScore;
+              const oppScore = isFirst ? s.SecondTeamScore : s.FirstTeamScore;
+              return (
                 <Text
                   key={i}
                   style={[
                     styles.setScore,
-                    (s.FirstTeamScore || 0) > (s.SecondTeamScore || 0)
+                    (myScore || 0) > (oppScore || 0)
                       ? styles.setWin
                       : styles.setLoss,
                   ]}
                 >
-                  {s.FirstTeamScore}
+                  {myScore}
                 </Text>
-              ))}
-            </View>
-          )}
-        </View>
+              );
+            })}
+          </View>
+        )}
+      </Container>
+    );
+  }
 
-        {/* VS divider */}
+  function renderMatchCard(item: FlatBracketMatch, maxRound: number, idx?: number) {
+    const m = item.match;
+
+    return (
+      <View key={`${item.rootIndex}-${item.round}-${item.position}-${m.MatchId || ''}-${idx ?? ''}`} style={styles.matchCard}>
+        <Text style={styles.matchName}>{m.FullName}</Text>
+
+        {renderTeamRow(m.FirstTeam, m.FirstTeamText, m.FirstTeamWon, m.HasScores, m.Sets, true)}
+
         <View style={styles.vsDivider}>
           <View style={styles.vsLine} />
           <Text style={styles.vsText}>vs</Text>
           <View style={styles.vsLine} />
         </View>
 
-        {/* Team 2 */}
-        <View
-          style={[
-            styles.teamRow,
-            hasResult && team2Won && styles.teamRowWinner,
-          ]}
-        >
-          <Text
-            style={[
-              styles.teamText,
-              hasResult && team2Won && styles.teamTextWinner,
-              hasResult && !team2Won && styles.teamTextLoser,
-            ]}
-            numberOfLines={1}
-          >
-            {m.SecondTeamText || 'TBD'}
-          </Text>
-          {hasResult && (
-            <View style={styles.setsRow}>
-              {m.Sets.filter((s) => s.SecondTeamScore !== null).map((s, i) => (
-                <Text
-                  key={i}
-                  style={[
-                    styles.setScore,
-                    (s.SecondTeamScore || 0) > (s.FirstTeamScore || 0)
-                      ? styles.setWin
-                      : styles.setLoss,
-                  ]}
-                >
-                  {s.SecondTeamScore}
-                </Text>
-              ))}
-            </View>
-          )}
-        </View>
+        {renderTeamRow(m.SecondTeam, m.SecondTeamText, m.SecondTeamWon, m.HasScores, m.Sets, false)}
       </View>
     );
   }
@@ -240,7 +317,7 @@ export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
+        <TouchableOpacity onPress={onBack} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text style={styles.backText}>{'< Back'}</Text>
         </TouchableOpacity>
         <Text style={styles.title}>Playoff Brackets</Text>
@@ -290,22 +367,70 @@ export function BracketScreen({ event, division, myTeamId, onBack }: Props) {
             {Object.keys(roundGroups)
               .map(Number)
               .sort((a, b) => a - b)
-              .map((round) => (
-                <View key={round} style={styles.roundSection}>
-                  <View style={styles.roundHeader}>
-                    <Text style={styles.roundTitle}>
-                      {getRoundLabel(round, maxRound)}
-                    </Text>
-                    <Text style={styles.roundCount}>
-                      {roundGroups[round].length} match
-                      {roundGroups[round].length !== 1 ? 'es' : ''}
-                    </Text>
+              .map((round) => {
+                const matches = roundGroups[round];
+
+                // For the final round of non-placement brackets, separate gold/silver from bronze
+                const bracketIsPlacement = currentBracket ? isPlacementBracket(currentBracket.name) : false;
+                if (round === maxRound && matches.length > 1 && !bracketIsPlacement) {
+                  const goldMatches = matches.filter((m) => !isBronzeMatch(m));
+                  const bronzeMatches = matches.filter((m) => isBronzeMatch(m));
+
+                  // If we detected bronze matches, render them separately
+                  if (bronzeMatches.length > 0) {
+                    return (
+                      <View key={round}>
+                        {/* Gold / Silver section */}
+                        <View style={styles.roundSection}>
+                          <View style={[styles.roundHeader, styles.goldRoundHeader]}>
+                            <View style={styles.medalHeaderRow}>
+                              <Text style={styles.medalEmoji}>🥇</Text>
+                              <Text style={[styles.roundTitle, styles.goldRoundTitle]}>
+                                Gold / Silver
+                              </Text>
+                            </View>
+                            <Text style={styles.roundCount}>
+                              {goldMatches.length} match{goldMatches.length !== 1 ? 'es' : ''}
+                            </Text>
+                          </View>
+                          {goldMatches.map((m, i) => renderMatchCard(m, maxRound, i))}
+                        </View>
+
+                        {/* Bronze section */}
+                        <View style={styles.roundSection}>
+                          <View style={[styles.roundHeader, styles.bronzeRoundHeader]}>
+                            <View style={styles.medalHeaderRow}>
+                              <Text style={styles.medalEmoji}>🥉</Text>
+                              <Text style={[styles.roundTitle, styles.bronzeRoundTitle]}>
+                                Bronze
+                              </Text>
+                            </View>
+                            <Text style={styles.roundCount}>
+                              {bronzeMatches.length} match{bronzeMatches.length !== 1 ? 'es' : ''}
+                            </Text>
+                          </View>
+                          {bronzeMatches.map((m, i) => renderMatchCard(m, maxRound, i))}
+                        </View>
+                      </View>
+                    );
+                  }
+                }
+
+                // Normal round rendering
+                return (
+                  <View key={round} style={styles.roundSection}>
+                    <View style={styles.roundHeader}>
+                      <Text style={styles.roundTitle}>
+                        {getRoundLabel(round, maxRound, currentBracket?.name)}
+                      </Text>
+                      <Text style={styles.roundCount}>
+                        {matches.length} match{matches.length !== 1 ? 'es' : ''}
+                      </Text>
+                    </View>
+                    {matches.map((m, i) => renderMatchCard(m, maxRound, i))}
                   </View>
-                  {roundGroups[round].map((m) =>
-                    renderMatchCard(m, maxRound)
-                  )}
-                </View>
-              ))}
+                );
+              })}
 
             <View style={{ height: spacing.xxxl }} />
           </ScrollView>
@@ -409,10 +534,35 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     backgroundColor: colors.primaryLight,
   },
+  goldRoundHeader: {
+    backgroundColor: '#FFF8E1',
+    borderBottomWidth: 2,
+    borderBottomColor: '#FFD54F',
+  },
+  bronzeRoundHeader: {
+    backgroundColor: '#FBE9E7',
+    borderBottomWidth: 2,
+    borderBottomColor: '#BCAAA4',
+  },
+  medalHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  medalEmoji: {
+    fontSize: 20,
+    lineHeight: 24,
+    marginRight: spacing.xs,
+  },
   roundTitle: {
     fontSize: fontSize.lg,
     fontWeight: '700',
     color: colors.primary,
+  },
+  goldRoundTitle: {
+    color: '#F57F17',
+  },
+  bronzeRoundTitle: {
+    color: '#795548',
   },
   roundCount: {
     fontSize: fontSize.sm,
@@ -455,6 +605,14 @@ const styles = StyleSheet.create({
   },
   teamTextLoser: {
     color: colors.textLight,
+  },
+  teamTextMe: {
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  teamTextTappable: {
+    color: colors.primary,
+    textDecorationLine: 'underline',
   },
   setsRow: {
     flexDirection: 'row',

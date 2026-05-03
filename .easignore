@@ -19,3 +19,6 @@ yarn-error.*
 *.tsbuildinfo
 android/
 ios/
+.git/
+*.log
+package-lock.json

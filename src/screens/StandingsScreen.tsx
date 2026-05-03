@@ -34,7 +34,29 @@ export function StandingsScreen({ event, division, myTeamId, onBack }: Props) {
     setError(null);
     try {
       const data = await getStandings(event.Key, division.DivisionId);
-      setStandings(data);
+      // Helper: extract seed number from TeamText e.g. "Team Name (32)" → 32
+      const getSeed = (s: AESStanding): number => {
+        const m = (s.TeamText || '').match(/\((\d+)\)\s*$/);
+        if (m) return parseInt(m[1], 10);
+        const c = parseInt(s.TeamCode, 10);
+        if (!isNaN(c)) return c;
+        return 9999;
+      };
+      // Always sort client-side; API order is not reliable
+      const sorted = [...data].sort((a, b) => {
+        // Treat 0 as "no rank" (API returns 0 when unranked)
+        const rankA = (a.OverallRank && a.OverallRank > 0) ? a.OverallRank : null;
+        const rankB = (b.OverallRank && b.OverallRank > 0) ? b.OverallRank : null;
+        if (rankA != null && rankB != null) return rankA - rankB;
+        if (rankA != null && rankB == null) return -1;
+        if (rankA == null && rankB != null) return 1;
+        // Sort by record (most wins first, then fewest losses)
+        if (a.MatchesWon !== b.MatchesWon) return b.MatchesWon - a.MatchesWon;
+        if (a.MatchesLost !== b.MatchesLost) return a.MatchesLost - b.MatchesLost;
+        // Fall back to seed number (from TeamText parenthetical or TeamCode)
+        return getSeed(a) - getSeed(b);
+      });
+      setStandings(sorted);
       setLastUpdated(Date.now());
     } catch (err: any) {
       setError(err.message);
@@ -80,7 +102,7 @@ export function StandingsScreen({ event, division, myTeamId, onBack }: Props) {
       }
     >
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
+        <TouchableOpacity onPress={onBack} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text style={styles.backText}>{'< Back'}</Text>
         </TouchableOpacity>
         <Text style={styles.title}>{division.Name} Standings</Text>
@@ -140,9 +162,11 @@ export function StandingsScreen({ event, division, myTeamId, onBack }: Props) {
             <Text style={[styles.cell, styles.statCol]}>{s.SetsWon}</Text>
             <Text style={[styles.cell, styles.statCol]}>{s.SetsLost}</Text>
             <Text style={[styles.cell, styles.pctCol]}>
-              {s.MatchPercent != null
-                ? `${(s.MatchPercent * 100).toFixed(0)}%`
-                : '-'}
+              {s.MatchesWon + s.MatchesLost === 0
+                ? '0%'
+                : s.MatchPercent != null && !isNaN(Number(s.MatchPercent))
+                ? `${(Number(s.MatchPercent) * 100).toFixed(0)}%`
+                : '0%'}
             </Text>
           </View>
         );

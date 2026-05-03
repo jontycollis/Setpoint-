@@ -86,12 +86,12 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
       const t = entry.team;
       const d = entry.division;
       return (
-        t.TeamName.toLowerCase().includes(q) ||
-        t.TeamText.toLowerCase().includes(q) ||
-        t.TeamCode.toLowerCase().includes(q) ||
-        t.TeamClub.Name.toLowerCase().includes(q) ||
-        d.Name.toLowerCase().includes(q) ||
-        d.CodeAlias.toLowerCase().includes(q)
+        (t.TeamName || '').toLowerCase().includes(q) ||
+        (t.TeamText || '').toLowerCase().includes(q) ||
+        (t.TeamCode || '').toLowerCase().includes(q) ||
+        (t.TeamClub?.Name || '').toLowerCase().includes(q) ||
+        (d.Name || '').toLowerCase().includes(q) ||
+        (d.CodeAlias || '').toLowerCase().includes(q)
       );
     });
   }, [search, index]);
@@ -111,10 +111,10 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
         />
         <View style={styles.teamInfo}>
           <Text style={styles.teamName} numberOfLines={1}>
-            {item.team.TeamText}
+            {item.team.TeamText || item.team.TeamName || 'Unknown Team'}
           </Text>
           <Text style={styles.clubName} numberOfLines={1}>
-            {item.team.TeamClub.Name}
+            {item.team.TeamClub?.Name || ''}
           </Text>
           <View style={styles.divisionRow}>
             <View
@@ -140,7 +140,7 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+        <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text style={styles.backText}>{'< Back'}</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Search Teams</Text>

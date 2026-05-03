@@ -32,6 +32,18 @@ interface OpponentStats {
   matchLosses: number;
   setsWon: number;
   setsLost: number;
+  // Deep-dive stats
+  avgPointsScored: number;
+  avgPointsConceded: number;
+  totalPointsScored: number;
+  totalPointsConceded: number;
+  totalSetsPlayed: number;
+  closeSets: number; // sets decided by 3 or fewer pts
+  blowoutSets: number; // sets won/lost by 8+ pts
+  bestSetScore: number; // highest single-set score
+  worstSetScore: number; // lowest single-set score
+  currentStreak: { count: number; type: 'W' | 'L' } | null;
+  setDistribution: { won2_0: number; won2_1: number; lost0_2: number; lost1_2: number };
 }
 
 function computeStats(
@@ -41,22 +53,85 @@ function computeStats(
   let matchWins = 0,
     matchLosses = 0,
     setsWon = 0,
-    setsLost = 0;
-  for (const m of matches) {
-    if (!m.HasScores) continue;
+    setsLost = 0,
+    totalPtsFor = 0,
+    totalPtsAgainst = 0,
+    totalSetsPlayed = 0,
+    closeSets = 0,
+    blowoutSets = 0,
+    bestSetScore = 0,
+    worstSetScore = 999;
+
+  const setDistribution = { won2_0: 0, won2_1: 0, lost0_2: 0, lost1_2: 0 };
+
+  // For streak, process in chronological order
+  const sorted = [...matches].filter((m) => m.HasScores).sort(
+    (a, b) => new Date(a.ScheduledStartDateTime).getTime() - new Date(b.ScheduledStartDateTime).getTime()
+  );
+
+  let streakCount = 0;
+  let streakType: 'W' | 'L' | null = null;
+
+  for (const m of sorted) {
     const isFirst = m.FirstTeamId === teamId;
     const won = isFirst ? m.FirstTeamWon : m.SecondTeamWon;
     if (won) matchWins++;
     else matchLosses++;
+
+    // Streak tracking
+    const thisType = won ? 'W' : 'L';
+    if (thisType === streakType) {
+      streakCount++;
+    } else {
+      streakType = thisType;
+      streakCount = 1;
+    }
+
+    let matchSetsWon = 0;
+    let matchSetsLost = 0;
     for (const s of m.Sets) {
       if (s.FirstTeamScore == null || s.SecondTeamScore == null) continue;
       const myScore = isFirst ? s.FirstTeamScore : s.SecondTeamScore;
       const oppScore = isFirst ? s.SecondTeamScore : s.FirstTeamScore;
-      if (myScore > oppScore) setsWon++;
-      else if (oppScore > myScore) setsLost++;
+      totalPtsFor += myScore;
+      totalPtsAgainst += oppScore;
+      totalSetsPlayed++;
+      if (myScore > oppScore) { setsWon++; matchSetsWon++; }
+      else if (oppScore > myScore) { setsLost++; matchSetsLost++; }
+      const diff = Math.abs(myScore - oppScore);
+      if (diff <= 3) closeSets++;
+      if (diff >= 8) blowoutSets++;
+      if (myScore > bestSetScore) bestSetScore = myScore;
+      if (myScore < worstSetScore) worstSetScore = myScore;
+    }
+
+    // Set distribution
+    if (won) {
+      if (matchSetsLost === 0) setDistribution.won2_0++;
+      else setDistribution.won2_1++;
+    } else {
+      if (matchSetsWon === 0) setDistribution.lost0_2++;
+      else setDistribution.lost1_2++;
     }
   }
-  return { matchWins, matchLosses, setsWon, setsLost };
+
+  return {
+    matchWins,
+    matchLosses,
+    setsWon,
+    setsLost,
+    avgPointsScored: totalSetsPlayed > 0 ? totalPtsFor / totalSetsPlayed : 0,
+    avgPointsConceded: totalSetsPlayed > 0 ? totalPtsAgainst / totalSetsPlayed : 0,
+    totalPointsScored: totalPtsFor,
+    totalPointsConceded: totalPtsAgainst,
+    totalSetsPlayed,
+    closeSets,
+    blowoutSets,
+    bestSetScore: bestSetScore > 0 ? bestSetScore : 0,
+    worstSetScore: worstSetScore < 999 ? worstSetScore : 0,
+    currentStreak: streakType ? { count: streakCount, type: streakType } : null,
+    setDistribution,
+  };
 }
 
 export function OpponentScoutScreen({
@@ -144,7 +219,7 @@ export function OpponentScoutScreen({
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={onBack}>
+        <TouchableOpacity onPress={onBack} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text style={styles.backText}>{'< Back'}</Text>
         </TouchableOpacity>
         <Text style={styles.scoutLabel}>OPPONENT SCOUTING REPORT</Text>
@@ -202,6 +277,113 @@ export function OpponentScoutScreen({
               />
             </View>
           </Card>
+
+          {/* Streak */}
+          {stats.currentStreak && stats.currentStreak.count >= 1 && (
+            <Card style={{ marginTop: spacing.sm }}>
+              <View style={styles.winRateRow}>
+                <Text style={styles.winRateLabel}>Current Streak</Text>
+                <Text style={[
+                  styles.winRateValue,
+                  stats.currentStreak.type === 'W'
+                    ? { color: colors.win }
+                    : { color: colors.loss },
+                ]}>
+                  {stats.currentStreak.count}{stats.currentStreak.type}
+                </Text>
+              </View>
+            </Card>
+          )}
+
+          {/* Scoring Deep Dive */}
+          {stats.totalSetsPlayed > 0 && (
+            <View style={{ marginTop: spacing.lg }}>
+              <Text style={styles.sectionTitle}>Scoring Analysis</Text>
+
+              {/* Avg scoring */}
+              <Card style={{ marginBottom: spacing.sm }}>
+                <View style={styles.deepDiveRow}>
+                  <View style={styles.deepDiveStat}>
+                    <Text style={styles.deepDiveValue}>{stats.avgPointsScored.toFixed(1)}</Text>
+                    <Text style={styles.deepDiveLabel}>Avg Scored/Set</Text>
+                  </View>
+                  <View style={styles.deepDiveDivider} />
+                  <View style={styles.deepDiveStat}>
+                    <Text style={styles.deepDiveValue}>{stats.avgPointsConceded.toFixed(1)}</Text>
+                    <Text style={styles.deepDiveLabel}>Avg Conceded/Set</Text>
+                  </View>
+                  <View style={styles.deepDiveDivider} />
+                  <View style={styles.deepDiveStat}>
+                    <Text style={[
+                      styles.deepDiveValue,
+                      (stats.avgPointsScored - stats.avgPointsConceded) >= 0
+                        ? { color: colors.win }
+                        : { color: colors.loss },
+                    ]}>
+                      {(stats.avgPointsScored - stats.avgPointsConceded) >= 0 ? '+' : ''}
+                      {(stats.avgPointsScored - stats.avgPointsConceded).toFixed(1)}
+                    </Text>
+                    <Text style={styles.deepDiveLabel}>Avg Margin</Text>
+                  </View>
+                </View>
+              </Card>
+
+              {/* Set score range */}
+              <Card style={{ marginBottom: spacing.sm }}>
+                <View style={styles.deepDiveRow}>
+                  <View style={styles.deepDiveStat}>
+                    <Text style={[styles.deepDiveValue, { color: colors.win }]}>{stats.bestSetScore}</Text>
+                    <Text style={styles.deepDiveLabel}>Best Set Score</Text>
+                  </View>
+                  <View style={styles.deepDiveDivider} />
+                  <View style={styles.deepDiveStat}>
+                    <Text style={[styles.deepDiveValue, { color: colors.loss }]}>{stats.worstSetScore}</Text>
+                    <Text style={styles.deepDiveLabel}>Worst Set Score</Text>
+                  </View>
+                </View>
+              </Card>
+
+              {/* Close sets & blowouts */}
+              <Card style={{ marginBottom: spacing.sm }}>
+                <View style={styles.deepDiveRow}>
+                  <View style={styles.deepDiveStat}>
+                    <Text style={styles.deepDiveValue}>{stats.closeSets}</Text>
+                    <Text style={styles.deepDiveLabel}>Close Sets ({'\u2264'}3 pts)</Text>
+                  </View>
+                  <View style={styles.deepDiveDivider} />
+                  <View style={styles.deepDiveStat}>
+                    <Text style={styles.deepDiveValue}>{stats.blowoutSets}</Text>
+                    <Text style={styles.deepDiveLabel}>Blowouts ({'\u2265'}8 pts)</Text>
+                  </View>
+                </View>
+              </Card>
+
+              {/* Match outcome patterns */}
+              {(stats.matchWins + stats.matchLosses) >= 2 && (
+                <Card>
+                  <Text style={[styles.winRateLabel, { marginBottom: spacing.sm }]}>Match Patterns</Text>
+                  <View style={styles.patternRow}>
+                    <View style={[styles.patternBadge, { backgroundColor: 'rgba(46,125,50,0.1)' }]}>
+                      <Text style={[styles.patternCount, { color: colors.win }]}>{stats.setDistribution.won2_0}</Text>
+                      <Text style={styles.patternLabel}>Won 2-0</Text>
+                    </View>
+                    <View style={[styles.patternBadge, { backgroundColor: 'rgba(46,125,50,0.1)' }]}>
+                      <Text style={[styles.patternCount, { color: colors.win }]}>{stats.setDistribution.won2_1}</Text>
+                      <Text style={styles.patternLabel}>Won 2-1</Text>
+                    </View>
+                    <View style={[styles.patternBadge, { backgroundColor: 'rgba(198,40,40,0.1)' }]}>
+                      <Text style={[styles.patternCount, { color: colors.loss }]}>{stats.setDistribution.lost1_2}</Text>
+                      <Text style={styles.patternLabel}>Lost 1-2</Text>
+                    </View>
+                    <View style={[styles.patternBadge, { backgroundColor: 'rgba(198,40,40,0.1)' }]}>
+                      <Text style={[styles.patternCount, { color: colors.loss }]}>{stats.setDistribution.lost0_2}</Text>
+                      <Text style={styles.patternLabel}>Lost 0-2</Text>
+                    </View>
+                  </View>
+                </Card>
+              )}
+            </View>
+          )}
         </View>
       )}
 
@@ -368,4 +550,50 @@ const styles = StyleSheet.create({
   },
   winChip: { backgroundColor: colors.win, color: colors.textOnPrimary },
   lossChip: { backgroundColor: colors.error, color: colors.textOnPrimary },
+  // Deep dive stats
+  deepDiveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  deepDiveStat: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.xs,
+  },
+  deepDiveValue: {
+    fontSize: fontSize.xxl,
+    fontWeight: '800',
+    color: colors.text,
+  },
+  deepDiveLabel: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  deepDiveDivider: {
+    width: 1,
+    height: 36,
+    backgroundColor: colors.divider,
+  },
+  // Match patterns
+  patternRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  patternBadge: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.sm,
+  },
+  patternCount: {
+    fontSize: fontSize.xl,
+    fontWeight: '800',
+  },
+  patternLabel: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
 });

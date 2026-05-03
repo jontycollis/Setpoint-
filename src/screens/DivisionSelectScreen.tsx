@@ -14,9 +14,10 @@ interface Props {
   event: AESEvent;
   onDivisionSelected: (division: AESDivision) => void;
   onBack: () => void;
+  onSearchTeams?: () => void;
 }
 
-export function DivisionSelectScreen({ event, onDivisionSelected, onBack }: Props) {
+export function DivisionSelectScreen({ event, onDivisionSelected, onBack, onSearchTeams }: Props) {
   function renderDivision({ item }: { item: AESDivision }) {
     return (
       <TouchableOpacity
@@ -39,7 +40,7 @@ export function DivisionSelectScreen({ event, onDivisionSelected, onBack }: Prop
   return (
     <View style={styles.container}>
       <View style={styles.eventHeader}>
-        <TouchableOpacity onPress={onBack} style={styles.backButton}>
+        <TouchableOpacity onPress={onBack} style={styles.backButton} hitSlop={{ top: 16, bottom: 16, left: 16, right: 16 }}>
           <Text style={styles.backText}>{'< Back'}</Text>
         </TouchableOpacity>
         <Text style={styles.eventName} numberOfLines={2}>{event.Name}</Text>
@@ -48,6 +49,12 @@ export function DivisionSelectScreen({ event, onDivisionSelected, onBack }: Prop
         </Text>
         <Text style={styles.eventLocation} numberOfLines={1}>{event.Location}</Text>
       </View>
+
+      {onSearchTeams && (
+        <TouchableOpacity style={styles.searchButton} onPress={onSearchTeams} activeOpacity={0.7}>
+          <Text style={styles.searchButtonText}>Search All Teams</Text>
+        </TouchableOpacity>
+      )}
 
       <Text style={styles.sectionTitle}>Select Division</Text>
 
@@ -67,6 +74,13 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     padding: spacing.xxl,
     paddingTop: spacing.lg,
+    borderBottomLeftRadius: borderRadius.xl,
+    borderBottomRightRadius: borderRadius.xl,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 6,
   },
   backButton: { marginBottom: spacing.sm },
   backText: {
@@ -75,10 +89,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   eventName: {
-    fontSize: fontSize.xl,
-    fontWeight: '700',
+    fontSize: fontSize.xxl,
+    fontWeight: '800',
     color: colors.textOnPrimary,
     marginBottom: spacing.xs,
+    letterSpacing: -0.3,
   },
   eventMeta: {
     fontSize: fontSize.sm,
@@ -89,9 +104,31 @@ const styles = StyleSheet.create({
     fontSize: fontSize.sm,
     color: 'rgba(255,255,255,0.7)',
   },
+  searchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.lg,
+    padding: spacing.md,
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  searchButtonText: {
+    fontSize: fontSize.md,
+    fontWeight: '700',
+    color: colors.primary,
+  },
   sectionTitle: {
     fontSize: fontSize.xl,
-    fontWeight: '700',
+    fontWeight: '800',
     color: colors.text,
     padding: spacing.lg,
     paddingBottom: spacing.sm,
@@ -104,19 +141,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.lg,
     marginBottom: spacing.sm,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
-    shadowRadius: 3,
-    elevation: 1,
+    shadowRadius: 4,
+    elevation: 2,
+    overflow: 'hidden',
   },
-  colorBar: { width: 5, alignSelf: 'stretch' },
+  colorBar: { width: 5, alignSelf: 'stretch', borderTopLeftRadius: borderRadius.lg, borderBottomLeftRadius: borderRadius.lg },
   divisionInfo: { flex: 1, padding: spacing.lg },
   divisionName: {
     fontSize: fontSize.lg,
-    fontWeight: '600',
+    fontWeight: '700',
     color: colors.text,
     marginBottom: spacing.xs,
   },

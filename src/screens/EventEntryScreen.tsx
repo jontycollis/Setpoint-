@@ -14,46 +14,52 @@ import {
 import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
 import { getEvent, extractEventKey } from '../api/aesClient';
 import type { AESEvent, SavedEvent } from '../types/aes';
+import type {
+  Country,
+  Tournament,
+  TournamentYear,
+  TournamentEvent,
+} from '../config/tournaments';
 
-const PIONEERS_LOGO = require('../../assets/pioneers-logo.png');
-const OC_LOGO = require('../../assets/oc-2026-logo.png');
-const OVA_LOGO = require('../../assets/ontario-volleyball-logo.png');
-
-// Ontario Championships 2026 events
-const OC_EVENTS = [
-  {
-    key: 'MjAyNl9PbnRhcmlvX0NoYW1waW9uc2hpcHNfX19FdmVudF8xX19UTFNCX18xNVVHX18xN1VCX0df0',
-    label: 'Event 1',
-    subtitle: 'TLSB, 15UG, 17UB/G',
-    dates: 'Apr 16 – 18',
+// Logos — loaded conditionally based on tournament
+const LOGO_MAP: Record<string, any> = {
+  'ontario-championships': {
+    centre: require('../../assets/oc-2026-logo.png'),
+    left: require('../../assets/ontario-volleyball-logo.png'),
+    right: require('../../assets/pioneers-logo.png'),
   },
-  {
-    key: 'MjAyNl9PbnRhcmlvX0NoYW1waW9uc2hpcHNfX19FdmVudF8yX182djZHX19UTFNHX18xNVVCXw2',
-    label: 'Event 2',
-    subtitle: '6v6G, TLSG, 15UB',
-    dates: 'Apr 19 – 21',
-  },
-  {
-    key: 'MjAyNl9PbnRhcmlvX0NoYW1waW9uc2hpcHNfX19FdmVudF8zX182djZCX18xNlVfXzE4VV81',
-    label: 'Event 3',
-    subtitle: '6v6B, 16U, 18U',
-    dates: 'Apr 23 – 25',
-  },
-];
-
-const VENUE_MAP_URL =
-  'https://cdn1.sportngin.com/attachments/document/b853-3557065/2026_OC_s_Map_Enercare.png';
+};
 
 interface Props {
   onEventLoaded: (event: AESEvent) => void;
-  onViewVenueMap: () => void;
+  onViewVenueMap: (venueMapUrl?: string, infoPageUrl?: string) => void;
+  onBack: () => void;
   savedEvents: SavedEvent[];
+  // Tournament context from selection screen
+  country: Country;
+  tournament: Tournament;
+  tournamentYear: TournamentYear;
 }
 
-export function EventEntryScreen({ onEventLoaded, onViewVenueMap, savedEvents }: Props) {
+export function EventEntryScreen({
+  onEventLoaded,
+  onViewVenueMap,
+  onBack,
+  savedEvents,
+  country,
+  tournament,
+  tournamentYear,
+}: Props) {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingEvent, setLoadingEvent] = useState<string | null>(null);
+
+  const logos = LOGO_MAP[tournament.id];
+  // Check if any events have venue maps, or if there's a year-level one
+  const hasAnyVenueMap =
+    !!tournamentYear.venueMapUrl ||
+    !!tournamentYear.infoPageUrl ||
+    tournamentYear.events.some((ev) => !!ev.venueMapUrl || !!ev.infoPageUrl);
 
   async function loadEvent(eventUrl: string) {
     const key = extractEventKey(eventUrl);
@@ -90,64 +96,91 @@ export function EventEntryScreen({ onEventLoaded, onViewVenueMap, savedEvents }:
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Logos Row */}
-        <View style={styles.logoContainer}>
-          <Image
-            source={OVA_LOGO}
-            style={styles.logoSide}
-            resizeMode="contain"
-          />
-          <Image
-            source={OC_LOGO}
-            style={styles.logoCentre}
-            resizeMode="contain"
-          />
-          <Image
-            source={PIONEERS_LOGO}
-            style={styles.logoSide}
-            resizeMode="contain"
-          />
-        </View>
+        {/* Back button */}
+        <TouchableOpacity
+          style={styles.backRow}
+          onPress={onBack}
+          activeOpacity={0.6}
+        >
+          <Text style={styles.backArrow}>{'‹'}</Text>
+          <Text style={styles.backLabel}>Tournaments</Text>
+        </TouchableOpacity>
 
-        {/* Ontario Championships Section */}
+        {/* Logos Row — tournament-specific or generic */}
+        {logos ? (
+          <View style={styles.logoContainer}>
+            <Image
+              source={logos.left}
+              style={styles.logoSide}
+              resizeMode="contain"
+            />
+            <Image
+              source={logos.centre}
+              style={styles.logoCentre}
+              resizeMode="contain"
+            />
+            <Image
+              source={logos.right}
+              style={styles.logoSide}
+              resizeMode="contain"
+            />
+          </View>
+        ) : (
+          <View style={styles.genericHeader}>
+            <Text style={styles.genericIcon}>{tournament.icon}</Text>
+          </View>
+        )}
+
+        {/* Tournament Title */}
         <View style={styles.ocSection}>
-          <Text style={styles.ocTitle}>2026 Ontario Championships</Text>
-          <Text style={styles.ocVenue}>Enercare Centre, Toronto</Text>
+          <Text style={styles.ocTitle}>
+            {tournamentYear.year} {tournament.name}
+          </Text>
+          {tournamentYear.venue && (
+            <Text style={styles.ocVenue}>{tournamentYear.venue}</Text>
+          )}
 
-          {OC_EVENTS.map((ev) => {
+          {/* Event Cards */}
+          {tournamentYear.events.map((ev) => {
             const isLoading = loadingEvent === ev.key;
+            const eventVenueMap = ev.venueMapUrl || tournamentYear.venueMapUrl;
+            const eventInfoPage = ev.infoPageUrl || tournamentYear.infoPageUrl;
+            const showMapButton = !!eventVenueMap || !!eventInfoPage;
             return (
-              <TouchableOpacity
-                key={ev.key}
-                style={[styles.eventCard, isLoading && styles.eventCardLoading]}
-                onPress={() => loadEventByKey(ev.key)}
-                disabled={!!loadingEvent}
-                activeOpacity={0.7}
-              >
-                <View style={styles.eventCardLeft}>
-                  <Text style={styles.eventLabel}>{ev.label}</Text>
-                  <Text style={styles.eventSubtitle}>{ev.subtitle}</Text>
-                </View>
-                <View style={styles.eventCardRight}>
-                  <Text style={styles.eventDates}>{ev.dates}</Text>
-                  <Text style={styles.eventArrow}>
-                    {isLoading ? '...' : '>'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+              <View key={ev.key}>
+                <TouchableOpacity
+                  style={[styles.eventCard, isLoading && styles.eventCardLoading]}
+                  onPress={() => loadEventByKey(ev.key)}
+                  disabled={!!loadingEvent}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.eventCardLeft}>
+                    <Text style={styles.eventLabel}>{ev.label}</Text>
+                    <Text style={styles.eventSubtitle}>{ev.subtitle}</Text>
+                    {ev.venue && (
+                      <Text style={styles.eventVenue}>{ev.venue}</Text>
+                    )}
+                  </View>
+                  <View style={styles.eventCardRight}>
+                    <Text style={styles.eventDates}>{ev.dates}</Text>
+                    <Text style={styles.eventArrow}>
+                      {isLoading ? '...' : '>'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
+                {showMapButton && (
+                  <TouchableOpacity
+                    style={styles.venueMapButtonInline}
+                    onPress={() => onViewVenueMap(eventVenueMap, eventInfoPage)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.venueMapIconSmall}>{'\u{1F5FA}'}</Text>
+                    <Text style={styles.venueMapTextSmall}>Venue Map</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             );
           })}
-
-          {/* Venue Map Button */}
-          <TouchableOpacity
-            style={styles.venueMapButton}
-            onPress={onViewVenueMap}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.venueMapIcon}>{'\u{1F5FA}'}</Text>
-            <Text style={styles.venueMapText}>Venue Map</Text>
-            <Text style={styles.venueMapArrow}>{'>'}</Text>
-          </TouchableOpacity>
         </View>
 
         {/* Divider */}
@@ -170,7 +203,10 @@ export function EventEntryScreen({ onEventLoaded, onViewVenueMap, savedEvents }:
             keyboardType="url"
           />
           <TouchableOpacity
-            style={[styles.button, (loading || !url.trim()) && styles.buttonDisabled]}
+            style={[
+              styles.button,
+              (loading || !url.trim()) && styles.buttonDisabled,
+            ]}
             onPress={() => loadEvent(url)}
             disabled={loading || !url.trim()}
           >
@@ -211,13 +247,31 @@ export function EventEntryScreen({ onEventLoaded, onViewVenueMap, savedEvents }:
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a1a' },
+  container: { flex: 1, backgroundColor: colors.background },
   scroll: { paddingBottom: spacing.xxxl },
+  backRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.xs,
+  },
+  backArrow: {
+    fontSize: 28,
+    color: colors.primary,
+    marginRight: spacing.xs,
+    lineHeight: 28,
+  },
+  backLabel: {
+    fontSize: fontSize.md,
+    color: colors.primary,
+    fontWeight: '600',
+  },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: spacing.xl,
+    paddingTop: spacing.md,
     paddingBottom: spacing.md,
     paddingHorizontal: spacing.lg,
   },
@@ -230,32 +284,46 @@ const styles = StyleSheet.create({
     height: 140,
     marginHorizontal: spacing.sm,
   },
+  genericHeader: {
+    alignItems: 'center',
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.md,
+  },
+  genericIcon: {
+    fontSize: 64,
+  },
   ocSection: {
-    paddingHorizontal: spacing.xxl,
+    paddingHorizontal: spacing.lg,
     paddingBottom: spacing.lg,
   },
   ocTitle: {
     fontSize: fontSize.xxl,
-    fontWeight: '800',
-    color: '#ffffff',
+    fontWeight: '900',
+    color: colors.text,
     textAlign: 'center',
     marginBottom: spacing.xs,
+    letterSpacing: -0.3,
   },
   ocVenue: {
     fontSize: fontSize.sm,
-    color: 'rgba(255,255,255,0.6)',
+    color: colors.textSecondary,
     textAlign: 'center',
     marginBottom: spacing.xl,
   },
   eventCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.sm,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
   eventCardLoading: {
     opacity: 0.6,
@@ -264,12 +332,17 @@ const styles = StyleSheet.create({
   eventLabel: {
     fontSize: fontSize.lg,
     fontWeight: '700',
-    color: '#ffffff',
+    color: colors.text,
     marginBottom: 2,
   },
   eventSubtitle: {
     fontSize: fontSize.sm,
-    color: 'rgba(255,255,255,0.6)',
+    color: colors.textSecondary,
+  },
+  eventVenue: {
+    fontSize: fontSize.xs,
+    color: colors.textLight,
+    marginTop: 2,
   },
   eventCardRight: {
     flexDirection: 'row',
@@ -277,37 +350,35 @@ const styles = StyleSheet.create({
   },
   eventDates: {
     fontSize: fontSize.sm,
-    color: colors.accent,
-    fontWeight: '600',
+    color: colors.primary,
+    fontWeight: '700',
     marginRight: spacing.sm,
+    backgroundColor: colors.primaryLight,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+    borderRadius: borderRadius.sm,
+    overflow: 'hidden',
   },
   eventArrow: {
     fontSize: 20,
-    color: 'rgba(255,255,255,0.4)',
+    color: colors.textLight,
   },
-  venueMapButton: {
+  venueMapButtonInline: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,107,53,0.15)',
-    borderRadius: borderRadius.md,
-    padding: spacing.lg,
-    marginTop: spacing.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255,107,53,0.3)',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
+    marginTop: -spacing.xs,
   },
-  venueMapIcon: {
-    fontSize: 22,
-    marginRight: spacing.sm,
+  venueMapIconSmall: {
+    fontSize: 14,
+    marginRight: spacing.xs,
   },
-  venueMapText: {
-    flex: 1,
-    fontSize: fontSize.lg,
+  venueMapTextSmall: {
+    fontSize: fontSize.xs,
     fontWeight: '600',
-    color: colors.accent,
-  },
-  venueMapArrow: {
-    fontSize: 20,
-    color: 'rgba(255,107,53,0.5)',
+    color: colors.primary,
   },
   divider: {
     flexDirection: 'row',
@@ -318,32 +389,37 @@ const styles = StyleSheet.create({
   dividerLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: colors.border,
   },
   dividerText: {
     fontSize: fontSize.sm,
-    color: 'rgba(255,255,255,0.4)',
+    color: colors.textLight,
     paddingHorizontal: spacing.md,
   },
   inputSection: {
-    paddingHorizontal: spacing.xxl,
+    paddingHorizontal: spacing.lg,
     marginBottom: spacing.lg,
   },
   input: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: borderRadius.md,
+    borderColor: colors.border,
+    borderRadius: borderRadius.lg,
     padding: spacing.lg,
     fontSize: fontSize.md,
-    color: '#ffffff',
+    color: colors.text,
     marginBottom: spacing.md,
   },
   button: {
     backgroundColor: colors.primary,
-    borderRadius: borderRadius.md,
+    borderRadius: borderRadius.lg,
     padding: spacing.lg,
     alignItems: 'center',
+    shadowColor: colors.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 4,
   },
   buttonDisabled: { opacity: 0.5 },
   buttonText: {
@@ -352,31 +428,37 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   savedSection: {
-    paddingHorizontal: spacing.xxl,
+    paddingHorizontal: spacing.lg,
     marginTop: spacing.md,
   },
   sectionTitle: {
     fontSize: fontSize.xl,
-    fontWeight: '700',
-    color: '#ffffff',
+    fontWeight: '800',
+    color: colors.text,
     marginBottom: spacing.md,
+    paddingHorizontal: spacing.xs,
   },
   savedEvent: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: borderRadius.md,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
     padding: spacing.lg,
     marginBottom: spacing.sm,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
   },
   savedEventName: {
     fontSize: fontSize.md,
     fontWeight: '600',
-    color: '#ffffff',
+    color: colors.text,
     marginBottom: spacing.xs,
   },
   savedEventLocation: {
     fontSize: fontSize.sm,
-    color: 'rgba(255,255,255,0.5)',
+    color: colors.textSecondary,
   },
 });

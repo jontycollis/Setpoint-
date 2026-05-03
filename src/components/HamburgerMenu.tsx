@@ -8,23 +8,27 @@ import {
   Pressable,
   ScrollView,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { colors, spacing, fontSize, borderRadius, useTheme } from '../utils/theme';
 import type { FavoriteTeam } from '../types/aes';
 
 export type MenuDestination =
   | 'Home'
+  | 'MyTeams'
   | 'TeamDashboard'
   | 'TeamSearch'
   | 'Standings'
   | 'Brackets'
   | 'CourtSchedule'
+  | 'LiveScoreboard'
+  | 'ClubView'
+  | 'TournamentHistory'
+  | 'TeamNotes'
   | 'VenueMap';
 
 interface Props {
   onNavigate: (destination: MenuDestination) => void;
   onNavigateToFavorite: (fav: FavoriteTeam) => void;
-  onSetDefaultTeam: () => void;
-  onClearDefaultTeam: () => void;
+  onRemoveFavorite: (fav: FavoriteTeam) => void;
   hasEvent: boolean;
   hasDivision: boolean;
   hasTeam: boolean;
@@ -35,8 +39,9 @@ interface Props {
   divisionName?: string;
   divisionColor?: string;
   teamName?: string;
+  // My Team (persistent)
+  myTeam: FavoriteTeam | null;
   // Favorites
-  defaultTeam: FavoriteTeam | null;
   favoriteTeams: FavoriteTeam[];
   currentTeamId?: number;
   currentEventKey?: string;
@@ -45,8 +50,7 @@ interface Props {
 export function HamburgerMenu({
   onNavigate,
   onNavigateToFavorite,
-  onSetDefaultTeam,
-  onClearDefaultTeam,
+  onRemoveFavorite,
   hasEvent,
   hasDivision,
   hasTeam,
@@ -56,12 +60,13 @@ export function HamburgerMenu({
   divisionName,
   divisionColor,
   teamName,
-  defaultTeam,
+  myTeam,
   favoriteTeams,
   currentTeamId,
   currentEventKey,
 }: Props) {
   const [visible, setVisible] = useState(false);
+  const theme = useTheme();
 
   function handleSelect(dest: MenuDestination) {
     setVisible(false);
@@ -79,21 +84,8 @@ export function HamburgerMenu({
     return key === currentScreen;
   }
 
-  const isDefaultTeamCurrent =
-    defaultTeam &&
-    currentTeamId === defaultTeam.teamId &&
-    currentEventKey === defaultTeam.eventKey;
-
-  // Whether we can show the "Set as Default" button
-  const canSetDefault =
-    hasTeam &&
-    currentTeamId != null &&
-    (!defaultTeam ||
-      defaultTeam.teamId !== currentTeamId ||
-      defaultTeam.eventKey !== currentEventKey);
-
   return (
-    <>
+    <View>
       {/* Hamburger Button */}
       <TouchableOpacity
         style={styles.hamburgerButton}
@@ -113,7 +105,7 @@ export function HamburgerMenu({
         </View>
       </TouchableOpacity>
 
-      {/* Menu Modal */}
+      {/* Menu Modal — rendered inside this View but Modal is portaled to root by RN */}
       <Modal
         visible={visible}
         transparent
@@ -166,53 +158,6 @@ export function HamburgerMenu({
                 </View>
               )}
 
-              {/* Default Team Quick Access */}
-              {defaultTeam && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>DEFAULT TEAM</Text>
-                  <TouchableOpacity
-                    style={[
-                      styles.favoriteItem,
-                      styles.defaultTeamItem,
-                      isDefaultTeamCurrent && styles.favoriteItemCurrent,
-                    ]}
-                    onPress={() => handleFavoriteSelect(defaultTeam)}
-                    disabled={!!isDefaultTeamCurrent}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.defaultStar}>{'\u2605'}</Text>
-                    <View style={styles.favoriteInfo}>
-                      <Text
-                        style={[
-                          styles.favoriteName,
-                          styles.defaultTeamName,
-                          isDefaultTeamCurrent && styles.favoriteNameCurrent,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {defaultTeam.teamText || defaultTeam.teamName}
-                      </Text>
-                      <Text style={styles.favoriteMeta} numberOfLines={1}>
-                        {defaultTeam.divisionName} — {defaultTeam.eventName}
-                      </Text>
-                    </View>
-                    {isDefaultTeamCurrent && (
-                      <View style={styles.currentDot} />
-                    )}
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.clearDefaultButton}
-                    onPress={() => {
-                      onClearDefaultTeam();
-                    }}
-                  >
-                    <Text style={styles.clearDefaultText}>
-                      Clear default
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
               {/* Navigation Items */}
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>NAVIGATE</Text>
@@ -226,22 +171,60 @@ export function HamburgerMenu({
                   onPress={() => handleSelect('Home')}
                 />
 
-                {/* My Team */}
+                {/* Team Tracker — unified dashboard for all tracked teams */}
                 <MenuRow
-                  icon={'\u{1F3D0}'}
-                  label={teamName ? `My Team` : 'My Team'}
-                  subtitle={teamName || undefined}
-                  available={hasTeam}
-                  isCurrent={isCurrentScreen('TeamDashboard')}
-                  onPress={() => handleSelect('TeamDashboard')}
-                  lockedHint="Select team first"
+                  icon={'\u{1F465}'}
+                  label="Team Tracker"
+                  subtitle={(() => {
+                    // Dedupe: myTeam may also be in favorites
+                    const myTeamInFavs = myTeam && favoriteTeams.some(
+                      (f) => f.teamId === myTeam.teamId && f.eventKey === myTeam.eventKey
+                    );
+                    const count = favoriteTeams.length + (myTeam && !myTeamInFavs ? 1 : 0);
+                    return count > 0
+                      ? `${count} team${count !== 1 ? 's' : ''}`
+                      : undefined;
+                  })()}
+                  available={!!myTeam || favoriteTeams.length > 0}
+                  isCurrent={isCurrentScreen('MyTeams')}
+                  onPress={() => handleSelect('MyTeams')}
+                  lockedHint="Star or set a team first"
                 />
 
-                {/* Search Teams */}
+                {/* My Team — uses persistent myTeam, navigates like a favorite */}
+                <MenuRow
+                  icon={'\u{1F3D0}'}
+                  label="My Team"
+                  subtitle={myTeam ? (myTeam.teamText || myTeam.teamName) : undefined}
+                  available={!!myTeam}
+                  isCurrent={
+                    !!myTeam &&
+                    currentTeamId === myTeam.teamId &&
+                    currentEventKey === myTeam.eventKey &&
+                    isCurrentScreen('TeamDashboard')
+                  }
+                  onPress={() => {
+                    if (myTeam) {
+                      // If already viewing this team, just close menu
+                      if (
+                        currentTeamId === myTeam.teamId &&
+                        currentEventKey === myTeam.eventKey &&
+                        isCurrentScreen('TeamDashboard')
+                      ) {
+                        setVisible(false);
+                        return;
+                      }
+                      handleFavoriteSelect(myTeam);
+                    }
+                  }}
+                  lockedHint="Set a team as My Team"
+                />
+
+                {/* Search Teams — available when inside a tournament */}
                 <MenuRow
                   icon={'\u{1F50D}'}
                   label="Search Teams"
-                  subtitle="Across all divisions"
+                  subtitle={hasDivision ? `In ${divisionName}` : hasEvent ? 'Across the event' : undefined}
                   available={hasEvent}
                   isCurrent={isCurrentScreen('TeamSearch')}
                   onPress={() => handleSelect('TeamSearch')}
@@ -255,6 +238,27 @@ export function HamburgerMenu({
                   available={hasEvent}
                   isCurrent={isCurrentScreen('CourtSchedule')}
                   onPress={() => handleSelect('CourtSchedule')}
+                  lockedHint="Select event first"
+                />
+
+                {/* Live Scoreboard */}
+                <MenuRow
+                  icon={'\u{1F4E1}'}
+                  label="Live Scoreboard"
+                  subtitle={divisionName || undefined}
+                  available={hasDivision}
+                  isCurrent={isCurrentScreen('LiveScoreboard')}
+                  onPress={() => handleSelect('LiveScoreboard')}
+                  lockedHint="Select division first"
+                />
+
+                {/* Club View */}
+                <MenuRow
+                  icon={'\u{1F3E2}'}
+                  label="Club View"
+                  available={hasEvent}
+                  isCurrent={isCurrentScreen('ClubView')}
+                  onPress={() => handleSelect('ClubView')}
                   lockedHint="Select event first"
                 />
 
@@ -280,6 +284,25 @@ export function HamburgerMenu({
                   lockedHint="Select division first"
                 />
 
+                {/* Tournament History */}
+                <MenuRow
+                  icon={'\u{1F4CA}'}
+                  label="Season History"
+                  available={true}
+                  isCurrent={isCurrentScreen('TournamentHistory')}
+                  onPress={() => handleSelect('TournamentHistory')}
+                />
+
+                {/* Team Notes */}
+                <MenuRow
+                  icon={'\u{1F4DD}'}
+                  label="Team Notes"
+                  available={hasTeam}
+                  isCurrent={isCurrentScreen('TeamNotes')}
+                  onPress={() => handleSelect('TeamNotes')}
+                  lockedHint="Select a team first"
+                />
+
                 {/* Venue Map */}
                 <MenuRow
                   icon={'\u{1F5FA}'}
@@ -288,6 +311,25 @@ export function HamburgerMenu({
                   isCurrent={isCurrentScreen('VenueMap')}
                   onPress={() => handleSelect('VenueMap')}
                 />
+              </View>
+
+              {/* Settings */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>SETTINGS</Text>
+                <TouchableOpacity
+                  style={styles.menuItem}
+                  onPress={() => theme.toggle()}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.menuIcon}>
+                    {theme.mode === 'dark' ? '\u{2600}' : '\u{1F319}'}
+                  </Text>
+                  <View style={styles.menuLabelCol}>
+                    <Text style={styles.menuLabel}>
+                      {theme.mode === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                    </Text>
+                  </View>
+                </TouchableOpacity>
               </View>
 
               {/* Favorite Teams */}
@@ -299,70 +341,58 @@ export function HamburgerMenu({
                       currentTeamId === fav.teamId &&
                       currentEventKey === fav.eventKey &&
                       currentScreen === 'TeamDashboard';
-                    const isDefault =
-                      defaultTeam?.teamId === fav.teamId &&
-                      defaultTeam?.eventKey === fav.eventKey;
                     return (
-                      <TouchableOpacity
+                      <View
                         key={`${fav.eventKey}-${fav.teamId}`}
                         style={[
                           styles.favoriteItem,
                           isCurrent && styles.favoriteItemCurrent,
                         ]}
-                        onPress={() => handleFavoriteSelect(fav)}
-                        disabled={isCurrent}
-                        activeOpacity={0.7}
                       >
-                        <View
-                          style={[
-                            styles.favDivDot,
-                            {
-                              backgroundColor:
-                                fav.divisionColorHex || colors.primary,
-                            },
-                          ]}
-                        />
-                        <View style={styles.favoriteInfo}>
-                          <Text
+                        <TouchableOpacity
+                          style={styles.favoriteMainArea}
+                          onPress={() => handleFavoriteSelect(fav)}
+                          disabled={isCurrent}
+                          activeOpacity={0.7}
+                        >
+                          <View
                             style={[
-                              styles.favoriteName,
-                              isCurrent && styles.favoriteNameCurrent,
+                              styles.favDivDot,
+                              {
+                                backgroundColor:
+                                  fav.divisionColorHex || colors.primary,
+                              },
                             ]}
-                            numberOfLines={1}
-                          >
-                            {isDefault ? '\u2605 ' : ''}
-                            {fav.teamText || fav.teamName}
-                          </Text>
-                          <Text style={styles.favoriteMeta} numberOfLines={1}>
-                            {fav.divisionName}
-                          </Text>
-                        </View>
-                        {isCurrent && <View style={styles.currentDot} />}
-                      </TouchableOpacity>
+                          />
+                          <View style={styles.favoriteInfo}>
+                            <Text
+                              style={[
+                                styles.favoriteName,
+                                isCurrent && styles.favoriteNameCurrent,
+                              ]}
+                              numberOfLines={1}
+                            >
+                              {fav.teamText || fav.teamName}
+                            </Text>
+                            <Text style={styles.favoriteMeta} numberOfLines={1}>
+                              {fav.divisionName} — {fav.eventName}
+                            </Text>
+                          </View>
+                          {isCurrent && <View style={styles.currentDot} />}
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={styles.removeFavButton}
+                          onPress={() => {
+                            onRemoveFavorite(fav);
+                            // Don't close the menu — let user remove multiple
+                          }}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Text style={styles.removeFavText}>{'\u2715'}</Text>
+                        </TouchableOpacity>
+                      </View>
                     );
                   })}
-                </View>
-              )}
-
-              {/* Set as Default / Add Favorite actions */}
-              {hasTeam && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>ACTIONS</Text>
-                  {canSetDefault && (
-                    <TouchableOpacity
-                      style={styles.actionButton}
-                      onPress={() => {
-                        onSetDefaultTeam();
-                        setVisible(false);
-                      }}
-                      activeOpacity={0.7}
-                    >
-                      <Text style={styles.actionIcon}>{'\u2605'}</Text>
-                      <Text style={styles.actionText}>
-                        Set {teamName || 'current team'} as default
-                      </Text>
-                    </TouchableOpacity>
-                  )}
                 </View>
               )}
 
@@ -371,7 +401,7 @@ export function HamburgerMenu({
           </Pressable>
         </Pressable>
       </Modal>
-    </>
+    </View>
   );
 }
 
@@ -593,16 +623,6 @@ const styles = StyleSheet.create({
   favoriteItemCurrent: {
     backgroundColor: colors.primaryLight,
   },
-  defaultTeamItem: {
-    backgroundColor: '#fffbf0',
-    borderBottomColor: '#f0e6cc',
-  },
-  defaultStar: {
-    fontSize: 20,
-    color: '#f5a623',
-    width: 32,
-    textAlign: 'center',
-  },
   favoriteInfo: {
     flex: 1,
     marginLeft: spacing.sm,
@@ -611,9 +631,6 @@ const styles = StyleSheet.create({
     fontSize: fontSize.md,
     fontWeight: '600',
     color: colors.text,
-  },
-  defaultTeamName: {
-    fontWeight: '700',
   },
   favoriteNameCurrent: {
     color: colors.primary,
@@ -629,36 +646,18 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     marginLeft: 4,
   },
-  clearDefaultButton: {
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.xs,
-    alignItems: 'flex-end',
-  },
-  clearDefaultText: {
-    fontSize: fontSize.xs,
-    color: colors.textLight,
-    textDecorationLine: 'underline',
-  },
-  // Actions
-  actionButton: {
+  favoriteMainArea: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
   },
-  actionIcon: {
-    fontSize: 18,
-    width: 32,
-    textAlign: 'center',
-    color: '#f5a623',
-  },
-  actionText: {
-    flex: 1,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    color: colors.accent,
+  removeFavButton: {
+    padding: spacing.xs,
     marginLeft: spacing.sm,
+  },
+  removeFavText: {
+    fontSize: 14,
+    color: colors.textLight,
+    fontWeight: '600',
   },
 });

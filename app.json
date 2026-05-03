@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "AES Score Tracker",
+    "name": "SetPoint",
     "slug": "aes-score-tracker",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -28,8 +28,8 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a73e8"
       },
+      "versionCode": 2,
       "package": "com.aesscoretracker.app",
-      "versionCode": 1,
       "permissions": [
         "INTERNET"
       ]
@@ -42,12 +42,6 @@
         "projectId": "f809fef2-3bf0-4186-8619-96afe8d581b8"
       }
     },
-    "owner": "joncollis",
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
-    "updates": {
-      "url": ""
-    }
+    "owner": "joncollis"
   }
 }

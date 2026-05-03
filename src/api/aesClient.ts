@@ -7,6 +7,8 @@ import type {
   AESTeamAssignment,
   AESStanding,
 } from '../types/aes';
+import { cachedFetch } from '../utils/apiCache';
+import type { CacheFetchOptions } from '../utils/apiCache';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -31,6 +33,10 @@ async function fetchJson<T>(url: string): Promise<T> {
     throw new Error(`AES API error: ${response.status} ${response.statusText}`);
   }
   const text = await response.text();
+  if (!text || text.trim().length === 0) {
+    // AES API sometimes returns empty body for endpoints with no data
+    return [] as unknown as T;
+  }
   if (text.startsWith('<')) {
     throw new Error('API returned HTML instead of JSON');
   }
@@ -114,6 +120,25 @@ export async function getPlays(
   date: string
 ): Promise<PoolData[]> {
   return fetchJson<PoolData[]>(apiUrl(eventKey, `division/${divisionId}/plays/${date}`));
+}
+
+/** Find a specific pool/play by PlayId (scans all play days) */
+export async function getPoolByPlayId(
+  eventKey: string,
+  divisionId: number,
+  playId: number
+): Promise<PoolData | null> {
+  const days = await getPlayDays(eventKey, divisionId);
+  for (const day of days) {
+    try {
+      const plays = await getPlays(eventKey, divisionId, day.DateTime);
+      const found = plays.find((p) => p.PlayId === playId);
+      if (found) return found;
+    } catch {
+      // Skip days that fail
+    }
+  }
+  return null;
 }
 
 // ─── Teams (OData) ──────────────────────────────────────────────────────────
@@ -265,23 +290,43 @@ export async function getTeamPastSchedule(
   );
 }
 
+/** A TeamScheduleMatch enriched with play context */
+export interface EnrichedScheduleMatch extends TeamScheduleMatch {
+  PlayId?: number;
+  PlayType?: number; // 0 = pool, 1 = bracket
+  PlayName?: string;
+}
+
 /**
  * Helper: extract all TeamScheduleMatch objects from both current and past
  * schedule responses, normalising the two different shapes into a flat list.
+ * Each match is enriched with PlayId and PlayType from its parent play.
  */
 export function extractAllScheduleMatches(
   currentSchedule: TeamSchedulePlay[],
   pastSchedule: TeamPastScheduleItem[]
-): TeamScheduleMatch[] {
-  const matches: TeamScheduleMatch[] = [];
+): EnrichedScheduleMatch[] {
+  const matches: EnrichedScheduleMatch[] = [];
   for (const sp of currentSchedule) {
     if (Array.isArray(sp.Matches)) {
-      matches.push(...sp.Matches);
+      for (const m of sp.Matches) {
+        matches.push({
+          ...m,
+          PlayId: sp.Play?.PlayId,
+          PlayType: sp.PlayType ?? sp.Play?.Type,
+          PlayName: sp.Play?.CompleteShortName || sp.Play?.ShortName || sp.Play?.FullName,
+        });
+      }
     }
   }
   for (const item of pastSchedule) {
     if (item.Match) {
-      matches.push(item.Match);
+      matches.push({
+        ...item.Match,
+        PlayId: item.Play?.PlayId,
+        PlayType: item.PlayType ?? item.Play?.Type,
+        PlayName: item.Play?.CompleteShortName || item.Play?.ShortName || item.Play?.FullName,
+      });
     }
   }
   return matches;
@@ -296,7 +341,7 @@ export async function getStandings(
   const url = odataUrl(
     eventKey,
     `standings(dId=${divisionId},cId=null,tIds=[])`,
-    '$skip=0&$orderby=OverallRank,FinishRank,TeamName,TeamCode'
+    '$skip=0&$orderby=OverallRank,FinishRank,TeamCode'
   );
   const result = await fetchJson<{ value: AESStanding[] }>(url);
   return result.value;
@@ -349,13 +394,14 @@ export async function getCourtSchedule(
 /** Flatten court schedule into a flat list of matches with court name attached */
 export interface FlatCourtMatch extends CourtMatch {
   CourtName: string;
+  CourtVideoLink: string;
 }
 
 export function flattenCourtSchedule(response: CourtScheduleResponse): FlatCourtMatch[] {
   const matches: FlatCourtMatch[] = [];
   for (const court of response.CourtSchedules) {
     for (const match of court.CourtMatches) {
-      matches.push({ ...match, CourtName: court.Name });
+      matches.push({ ...match, CourtName: court.Name, CourtVideoLink: court.VideoLink || '' });
     }
   }
   matches.sort((a, b) => a.ScheduledStartDateTime - b.ScheduledStartDateTime);
@@ -404,6 +450,8 @@ export interface BracketMatch {
   FirstTeamWon: boolean;
   SecondTeamWon: boolean;
   Sets: BracketSet[];
+  ScheduledStartDateTime?: number;
+  Court?: { Name: string; VideoLink?: string } | null;
 }
 
 export interface BracketNode {
@@ -445,24 +493,27 @@ export interface FlatBracketMatch {
   round: number;
   position: number;
   match: BracketMatch;
+  /** Index of the root this match belongs to (0 = main championship tree) */
+  rootIndex: number;
 }
 
 export function flattenBracketTree(roots: BracketNode[]): FlatBracketMatch[] {
   const matches: FlatBracketMatch[] = [];
 
-  function walk(node: BracketNode | null) {
+  function walk(node: BracketNode | null, rootIdx: number) {
     if (!node) return;
     matches.push({
       round: node.X,
       position: node.Y,
       match: node.Match,
+      rootIndex: rootIdx,
     });
-    walk(node.TopSource);
-    walk(node.BottomSource);
+    walk(node.TopSource, rootIdx);
+    walk(node.BottomSource, rootIdx);
   }
 
-  for (const root of roots) {
-    walk(root);
+  for (let i = 0; i < roots.length; i++) {
+    walk(roots[i], i);
   }
 
   // Sort by round then position
@@ -714,4 +765,363 @@ export function extractEventKey(url: string): string | null {
     /results\.advancedeventsystems\.com\/event\/([A-Za-z0-9_\-=]+)/
   );
   return match ? match[1] : null;
+}
+
+// ─── Cached API wrappers ──────────────────────────────────────────────────
+// These wrap existing functions with offline-first caching. Use these from
+// screens/components; the uncached versions remain available for internal use.
+
+/** Cached getEvent — TTL 5 min (event metadata rarely changes) */
+export function getCachedEvent(
+  eventKey: string,
+  opts?: CacheFetchOptions
+): Promise<AESEvent> {
+  return cachedFetch(
+    'event',
+    { eventKey },
+    () => getEvent(eventKey),
+    { ttl: 300_000, ...opts }
+  );
+}
+
+/** Cached team schedule (current) — TTL 60s (live scores) */
+export function getCachedTeamCurrentSchedule(
+  eventKey: string,
+  divisionId: number,
+  teamId: number,
+  opts?: CacheFetchOptions
+): Promise<TeamSchedulePlay[]> {
+  return cachedFetch(
+    'teamCurrentSchedule',
+    { eventKey, divisionId, teamId },
+    () => getTeamCurrentSchedule(eventKey, divisionId, teamId),
+    { ttl: 60_000, ...opts }
+  );
+}
+
+/** Cached team schedule (past) — TTL 5 min (completed games don't change often) */
+export function getCachedTeamPastSchedule(
+  eventKey: string,
+  divisionId: number,
+  teamId: number,
+  opts?: CacheFetchOptions
+): Promise<TeamPastScheduleItem[]> {
+  return cachedFetch(
+    'teamPastSchedule',
+    { eventKey, divisionId, teamId },
+    () => getTeamPastSchedule(eventKey, divisionId, teamId),
+    { ttl: 300_000, ...opts }
+  );
+}
+
+/** Cached team assignments — TTL 2 min */
+export function getCachedTeamAssignments(
+  eventKey: string,
+  divisionId: number,
+  clubId?: number | null,
+  teamIds?: number[],
+  opts?: CacheFetchOptions
+): Promise<AESTeamAssignment[]> {
+  return cachedFetch(
+    'teamAssignments',
+    { eventKey, divisionId, clubId, teamIds },
+    () => getTeamAssignments(eventKey, divisionId, clubId, teamIds),
+    { ttl: 120_000, ...opts }
+  );
+}
+
+/** Cached standings — TTL 2 min */
+export function getCachedStandings(
+  eventKey: string,
+  divisionId: number,
+  opts?: CacheFetchOptions
+): Promise<AESStanding[]> {
+  return cachedFetch(
+    'standings',
+    { eventKey, divisionId },
+    () => getStandings(eventKey, divisionId),
+    { ttl: 120_000, ...opts }
+  );
+}
+
+/** Cached court schedule — TTL 60s */
+export function getCachedCourtSchedule(
+  eventKey: string,
+  date: string,
+  minuteOffset?: number,
+  opts?: CacheFetchOptions
+): Promise<CourtScheduleResponse> {
+  return cachedFetch(
+    'courtSchedule',
+    { eventKey, date, minuteOffset },
+    () => getCourtSchedule(eventKey, date, minuteOffset),
+    { ttl: 60_000, ...opts }
+  );
+}
+
+// ─── Dynamic Tournament Discovery ─────────────────────────────────────────
+
+const AES_EVENTS_API =
+  'https://www.advancedeventsystems.com/api/landing/events';
+
+/** Shape of an event object from the AES events listing API */
+export interface AESListingEvent {
+  eventSchedulerId: number;
+  eventSchedulerKey: string;
+  name: string;
+  startDate: string; // ISO
+  endDate: string; // ISO
+  locationName: string | null;
+  address: {
+    line1?: string;
+    line2?: string;
+    city?: string;
+    state?: string;
+    zip?: string;
+  } | null;
+  affiliation: { name?: string } | null;
+  eventType: { name?: string } | null;
+  isSchedulerPosted: boolean;
+  isPastEvent: boolean;
+}
+
+interface AESListingResponse {
+  '@odata.count'?: number;
+  value: AESListingEvent[];
+}
+
+/** Canadian province/territory codes for filtering */
+const CA_PROVINCE_CODES = new Set([
+  'AB', 'BC', 'MB', 'NB', 'NL', 'NS', 'NT', 'NU', 'ON', 'PE', 'QC', 'SK', 'YT',
+]);
+
+/** Keywords that identify a Canadian event by name */
+const CA_NAME_PATTERNS = [
+  /\bcanad/i,
+  /\bova\b/i,
+  /\bontario\b/i,
+  /\balberta\b/i,
+  /\bbritish.?columbia\b/i,
+  /\bquebec\b/i,
+  /\bmanitoba\b/i,
+  /\bsaskatchewan\b/i,
+  /\bnova.?scotia\b/i,
+  /\bnew.?brunswick\b/i,
+  /\bvolleyball.?canada\b/i,
+];
+
+/** Check whether an event looks Canadian */
+function isCanadianEvent(event: AESListingEvent): boolean {
+  // Check state/province code
+  const state = event.address?.state;
+  if (typeof state === 'string' && state.length > 0 && CA_PROVINCE_CODES.has(state.toUpperCase())) {
+    return true;
+  }
+  // Check name patterns
+  return CA_NAME_PATTERNS.some((re) => re.test(event.name));
+}
+
+/**
+ * Normalize an event object from the API. The AES OData API may return
+ * either camelCase or PascalCase field names depending on the endpoint
+ * version, so we handle both defensively.
+ */
+function normalizeListingEvent(raw: any): AESListingEvent {
+  return {
+    eventSchedulerId: raw.eventSchedulerId ?? raw.EventSchedulerId ?? 0,
+    eventSchedulerKey: raw.eventSchedulerKey ?? raw.EventSchedulerKey ?? '',
+    name: raw.name ?? raw.Name ?? '',
+    startDate: raw.startDate ?? raw.StartDate ?? '',
+    endDate: raw.endDate ?? raw.EndDate ?? '',
+    locationName: raw.locationName ?? raw.LocationName ?? null,
+    address: raw.address ?? raw.Address ?? null,
+    affiliation: raw.affiliation ?? raw.Affiliation ?? null,
+    eventType: raw.eventType ?? raw.EventType ?? null,
+    isSchedulerPosted: raw.isSchedulerPosted ?? raw.IsSchedulerPosted ?? false,
+    isPastEvent: raw.isPastEvent ?? raw.IsPastEvent ?? false,
+  };
+}
+
+export async function fetchCanadianEvents(): Promise<AESListingEvent[]> {
+  const params = new URLSearchParams({
+    $count: 'true',
+    $format: 'json',
+    $orderby: 'startDate,name',
+    $top: '200',
+    // Don't filter by isPastEvent — we want all recent events including
+    // ones that just ended (useful for viewing final results)
+  });
+  const url = `${AES_EVENTS_API}?${params.toString()}`;
+  const response = await fetch(url, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`AES listing API error: ${response.status}`);
+  }
+  const data = await response.json();
+  // OData wraps results in "value"; fall back to array if the response is
+  // already a plain array (some OData implementations vary)
+  const rawEvents: any[] = data.value ?? data ?? [];
+  return rawEvents.map(normalizeListingEvent).filter(isCanadianEvent);
+}
+
+/**
+ * Attempt to group events into logical tournament buckets by analysing their
+ * names. For example "2025 Volleyball Canada Nationals - 15UG & 17UB" should
+ * map to tournament id "canadian-nationals" and year 2025.
+ */
+export interface DiscoveredTournament {
+  tournamentId: string;
+  tournamentName: string;
+  shortName: string;
+  icon: string;
+  year: number;
+  events: {
+    key: string;
+    label: string;
+    subtitle: string;
+    dates: string;
+    venue?: string;
+    isSchedulerPosted: boolean;
+  }[];
+}
+
+/** Well-known tournament patterns for grouping */
+const TOURNAMENT_PATTERNS: {
+  id: string;
+  name: string;
+  shortName: string;
+  icon: string;
+  pattern: RegExp;
+}[] = [
+  {
+    id: 'ontario-championships',
+    name: 'Ontario Championships',
+    shortName: 'OCs',
+    icon: '🏐',
+    pattern: /ontario.?champion/i,
+  },
+  {
+    id: 'canadian-nationals',
+    name: 'Canadian National Championships',
+    shortName: 'Nationals',
+    icon: '🏆',
+    pattern: /(?:volleyball.?canada|canadian).{0,10}national|national.{0,10}(?:volleyball.?canada|canadian)/i,
+  },
+  {
+    id: 'new-year-classic',
+    name: 'New Year Classic',
+    shortName: 'NYC',
+    icon: '🎆',
+    pattern: /new.?year/i,
+  },
+];
+
+function extractYearFromEvent(event: AESListingEvent): number {
+  // Try to extract year from the event name first (e.g. "2026_OVA_New_Year...")
+  const nameMatch = event.name.match(/\b(20\d{2})\b/);
+  if (nameMatch) return parseInt(nameMatch[1], 10);
+  // Fall back to start date
+  return new Date(event.startDate).getFullYear();
+}
+
+function formatDateRange(startDate: string, endDate: string): string {
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  const months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
+  if (start.getMonth() === end.getMonth()) {
+    return `${months[start.getMonth()]} ${start.getDate()} – ${end.getDate()}`;
+  }
+  return `${months[start.getMonth()]} ${start.getDate()} – ${months[end.getMonth()]} ${end.getDate()}`;
+}
+
+/** Simplify a long AES event name into a readable label + subtitle */
+function parseEventLabel(name: string): { label: string; subtitle: string } {
+  // Common pattern: "2025 Volleyball Canada Nationals - 15UG & 17UB"
+  const dashIdx = name.lastIndexOf(' - ');
+  if (dashIdx >= 0) {
+    const after = name.substring(dashIdx + 3).trim();
+    return { label: after, subtitle: after };
+  }
+  // Try "__ " separator from decoded base64 names
+  const parts = name.split(/\s*[-–—]\s*/);
+  if (parts.length > 1) {
+    const last = parts[parts.length - 1].trim();
+    return { label: last, subtitle: last };
+  }
+  return { label: name, subtitle: name };
+}
+
+export function groupIntoTournaments(
+  events: AESListingEvent[]
+): DiscoveredTournament[] {
+  // Map each event to its tournament group
+  const groupMap = new Map<string, DiscoveredTournament>();
+
+  for (const event of events) {
+    const year = extractYearFromEvent(event);
+
+    // Try to match to a known tournament pattern
+    let matched = false;
+    for (const tp of TOURNAMENT_PATTERNS) {
+      if (tp.pattern.test(event.name)) {
+        const groupKey = `${tp.id}:${year}`;
+        let group = groupMap.get(groupKey);
+        if (!group) {
+          group = {
+            tournamentId: tp.id,
+            tournamentName: tp.name,
+            shortName: tp.shortName,
+            icon: tp.icon,
+            year,
+            events: [],
+          };
+          groupMap.set(groupKey, group);
+        }
+
+        const { label, subtitle } = parseEventLabel(event.name);
+        group.events.push({
+          key: event.eventSchedulerKey,
+          label,
+          subtitle,
+          dates: formatDateRange(event.startDate, event.endDate),
+          venue: event.locationName || undefined,
+          isSchedulerPosted: event.isSchedulerPosted,
+        });
+        matched = true;
+        break;
+      }
+    }
+
+    // Unmatched Canadian events go into an "Other" group per year
+    if (!matched) {
+      const groupKey = `other-ca:${year}`;
+      let group = groupMap.get(groupKey);
+      if (!group) {
+        group = {
+          tournamentId: `other-ca-${year}`,
+          tournamentName: 'Other Canadian Events',
+          shortName: 'Other',
+          icon: '🇨🇦',
+          year,
+          events: [],
+        };
+        groupMap.set(groupKey, group);
+      }
+      const { label, subtitle } = parseEventLabel(event.name);
+      group.events.push({
+        key: event.eventSchedulerKey,
+        label: event.name, // Use full name for unknown tournaments
+        subtitle,
+        dates: formatDateRange(event.startDate, event.endDate),
+        venue: event.locationName || undefined,
+        isSchedulerPosted: event.isSchedulerPosted,
+      });
+    }
+  }
+
+  return Array.from(groupMap.values());
 }

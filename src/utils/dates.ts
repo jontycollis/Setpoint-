@@ -50,7 +50,14 @@ export function getRelativeTime(date: string | number): string {
 
   if (diffMins < 60) return `In ${diffMins}m`;
   if (diffMins < 1440) return `In ${Math.round(diffMins / 60)}h`;
-  if (diffMins < 2880) return 'Tomorrow';
+
+  // Use calendar day comparison for "Tomorrow" instead of hour-based math
+  const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const targetMidnight = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  const dayDiff = Math.round((targetMidnight.getTime() - todayMidnight.getTime()) / 86400000);
+
+  if (dayDiff === 1) return 'Tomorrow';
+  if (dayDiff === 2) return formatDate(date); // Show actual day name (e.g., "Wed, Apr 23")
   return formatDate(date);
 }
 
