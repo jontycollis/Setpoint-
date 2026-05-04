@@ -1,6 +1,7 @@
 // Persistent storage helpers using AsyncStorage
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { FavoriteTeam, SavedEvent } from '../types/aes';
+import type { SavedTimuTournament } from '../types/timu';
 
 const KEYS = {
   savedEvents: 'aes.savedEvents',
@@ -10,6 +11,7 @@ const KEYS = {
   tournamentHistory: 'aes.tournamentHistory', // cross-tournament results
   themeMode: 'aes.themeMode', // 'light' | 'dark'
   teamNotes: 'aes.teamNotes', // per-team coordination notes
+  timuTournaments: 'timu.savedTournaments', // recent Timu tournaments
 };
 
 async function getJson<T>(key: string, fallback: T): Promise<T> {
@@ -70,6 +72,28 @@ export async function saveCourtStreams(eventKey: string, streams: CourtStreamMap
   const all = await getJson<Record<string, CourtStreamMap>>(KEYS.courtStreams, {});
   all[eventKey] = streams;
   return setJson(KEYS.courtStreams, all);
+}
+
+// ── Timu ──────────────────────────────────────────────────────────────────
+
+export async function loadSavedTimuTournaments(): Promise<SavedTimuTournament[]> {
+  const list = await getJson<SavedTimuTournament[]>(KEYS.timuTournaments, []);
+  // Self-heal: drop entries written by earlier buggy parser versions
+  // where the name field captured inline JavaScript or CSS.
+  const healed = list.filter((t) => {
+    if (!t || !t.name) return false;
+    if (/[{};=]/.test(t.name) || t.name.length > 120) return false;
+    if (!/[A-Za-z]/.test(t.name)) return false;
+    return true;
+  });
+  if (healed.length !== list.length) {
+    await saveSavedTimuTournaments(healed);
+  }
+  return healed;
+}
+
+export async function saveSavedTimuTournaments(tournaments: SavedTimuTournament[]): Promise<void> {
+  return setJson(KEYS.timuTournaments, tournaments);
 }
 
 // ─── Cross-Tournament History ────────────────────────────────────────────────

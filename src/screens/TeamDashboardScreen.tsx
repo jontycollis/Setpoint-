@@ -10,6 +10,7 @@ import {
   Animated,
   AppState,
   Share,
+  Alert,
 } from 'react-native';
 import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
 import { BracketPredictions } from '../components/BracketPredictions';
@@ -46,6 +47,8 @@ import { scheduleAllMatchNotifications } from '../utils/notifications';
 import type { MatchNotification } from '../utils/notifications';
 import { formatTime, formatDate, getRelativeTime } from '../utils/dates';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
+import { ensureAesIndexed, indexAesSnapshot, loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
+import { addMyTeamAlias } from '../utils/seasonTeamIdentity';
 
 interface Props {
   event: AESEvent;
@@ -61,6 +64,8 @@ interface Props {
   isMyTeam: boolean;
   onSetAsMyTeam: () => void;
   onClearMyTeam: () => void;
+  /** Open the cross-source Timu+AES season history for the given team. */
+  onViewSeasonHistory?: (teamName: string) => void;
 }
 
 export function TeamDashboardScreen({
@@ -77,6 +82,7 @@ export function TeamDashboardScreen({
   isMyTeam,
   onSetAsMyTeam,
   onClearMyTeam,
+  onViewSeasonHistory,
 }: Props) {
   // Each pool the team belongs to (Day 1 pools, Day 2 power pools, etc.)
   interface PoolEntry {
@@ -103,6 +109,49 @@ export function TeamDashboardScreen({
   const [leaderboardRank, setLeaderboardRank] = useState<{ rank: number; total: number } | null>(null);
   const [divisionStandings, setDivisionStandings] = useState<import('../types/aes').AESStanding[]>([]);
   const [shareMatch, setShareMatch] = useState<EnrichedScheduleMatch | null>(null);
+  // ─── Manual season-history index state ───────────────────────────────
+  // Tracks whether THIS event/division is already in the AES season index
+  // (so we can show "Indexed ✓" vs "Add to Season History"). Refreshed on
+  // mount and after a successful manual add.
+  const [aesIndexed, setAesIndexed] = useState<boolean>(false);
+  const [adding, setAdding] = useState<boolean>(false);
+  const refreshIndexedFlag = useCallback(async () => {
+    try {
+      const idx = await loadAesSeasonIndex();
+      setAesIndexed(!!idx[aesSnapshotKey(event.Key, division.DivisionId)]);
+    } catch {
+      /* ignore */
+    }
+  }, [event.Key, division.DivisionId]);
+  useEffect(() => {
+    refreshIndexedFlag();
+  }, [refreshIndexedFlag]);
+  const handleAddToSeasonHistory = useCallback(async () => {
+    if (adding) return;
+    setAdding(true);
+    try {
+      // Add this team's text/name to the alias list so cross-source matching
+      // picks it up when assembling unified history. This is safe even if
+      // it's not literally MyTeam — the alias list is purely additive.
+      const aliasName = team.TeamText || team.TeamName;
+      if (aliasName) {
+        await addMyTeamAlias(aliasName).catch(() => undefined);
+      }
+      await indexAesSnapshot(event.Key, division.DivisionId, team.TeamId);
+      setAesIndexed(true);
+      Alert.alert(
+        'Added to season history',
+        `"${aliasName}" at ${event.Name} is now part of your season history.`,
+      );
+    } catch (err: any) {
+      Alert.alert(
+        'Could not add to season history',
+        err?.message || 'Something went wrong while indexing this event. Try again in a moment.',
+      );
+    } finally {
+      setAdding(false);
+    }
+  }, [adding, event.Key, event.Name, division.DivisionId, team.TeamId, team.TeamText, team.TeamName]);
 
   // ─── Live countdown tick (updates every 30s) ───────────────────────────
   const [now, setNow] = useState(Date.now());
@@ -175,7 +224,23 @@ export function TeamDashboardScreen({
   useEffect(() => {
     loadData();
     loadCourtStreams(event.Key).then(setCourtStreamMap);
-  }, []);
+    // Auto-snapshot this event+division for the cross-source season view.
+    // Non-blocking; uses a 2-minute freshness window. Also adds the team's
+    // text to My-Team aliases so cross-source matching picks it up later.
+    if (isMyTeam) {
+      ensureAesIndexed(event.Key, division.DivisionId, team.TeamId)
+        .then(() => refreshIndexedFlag())
+        .catch(() => {
+          /* ignore */
+        });
+      const nameForAlias = team.TeamText || team.TeamName;
+      if (nameForAlias) {
+        addMyTeamAlias(nameForAlias).catch(() => {
+          /* ignore */
+        });
+      }
+    }
+  }, [event.Key, division.DivisionId, team.TeamId, isMyTeam, refreshIndexedFlag]);
 
   async function loadData(silent = false) {
     if (!silent) setLoading(true);
@@ -569,6 +634,27 @@ export function TeamDashboardScreen({
             >
               <Text style={isMyTeam ? styles.myTeamBadgeActive : styles.myTeamBadge}>
                 {isMyTeam ? '\u{1F3D0} My Team' : '\u{1F3D0} Set My Team'}
+              </Text>
+            </TouchableOpacity>
+            {/* Compact "+Season" pill so the manual add is reachable from the
+                header \u2014 the long-form button further down only appears if the
+                user scrolls past upcoming matches. */}
+            <TouchableOpacity
+              onPress={handleAddToSeasonHistory}
+              disabled={aesIndexed || adding}
+              style={[
+                styles.seasonAddPill,
+                (aesIndexed || adding) && styles.seasonAddPillDone,
+              ]}
+              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            >
+              <Text
+                style={[
+                  styles.seasonAddPillText,
+                  (aesIndexed || adding) && styles.seasonAddPillTextDone,
+                ]}
+              >
+                {adding ? '\u2026' : aesIndexed ? '\u2713 Season' : '+ Season'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={onToggleFavorite} style={styles.favButton}>
@@ -1307,6 +1393,34 @@ export function TeamDashboardScreen({
         >
           <Text style={styles.actionButtonText}>Playoff Brackets</Text>
         </TouchableOpacity>
+        {/* Manual "Add to Season History" — shown for any team. For MyTeam
+            this also runs automatically on dashboard mount, so the button
+            doubles as a confirmation badge. */}
+        <TouchableOpacity
+          style={[
+            styles.actionButton,
+            styles.actionButtonSecondary,
+            (aesIndexed || adding) && styles.actionButtonSecondaryDisabled,
+          ]}
+          disabled={aesIndexed || adding}
+          onPress={handleAddToSeasonHistory}
+        >
+          <Text style={styles.actionButtonTextSecondary}>
+            {adding
+              ? 'Adding…'
+              : aesIndexed
+                ? '✓ In Season History'
+                : 'Add to Season History'}
+          </Text>
+        </TouchableOpacity>
+        {onViewSeasonHistory && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.actionButtonSecondary]}
+            onPress={() => onViewSeasonHistory(team.TeamText || team.TeamName)}
+          >
+            <Text style={styles.actionButtonTextSecondary}>My Season History</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* Division Overview — at the bottom of the dashboard */}
@@ -1467,6 +1581,26 @@ const styles = StyleSheet.create({
   favButton: { padding: spacing.sm },
   favStar: { fontSize: 28, color: 'rgba(255,255,255,0.4)' },
   favStarActive: { fontSize: 28, color: '#fdd835' },
+  // Compact pill in the header for "Add to Season History". White-on-blue
+  // by default; flips to ghosted state once the event is indexed.
+  seasonAddPill: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: borderRadius.sm,
+    marginRight: spacing.xs,
+  },
+  seasonAddPillDone: {
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  seasonAddPillText: {
+    color: '#fff',
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+  },
+  seasonAddPillTextDone: {
+    color: 'rgba(255,255,255,0.7)',
+  },
   statsRow: { flexDirection: 'row', marginTop: spacing.lg },
   statBox: {
     flex: 1,
@@ -1684,6 +1818,10 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.primary,
+  },
+  actionButtonSecondaryDisabled: {
+    backgroundColor: colors.background,
+    borderColor: colors.border,
   },
   actionButtonText: { color: colors.textOnPrimary, fontSize: fontSize.lg, fontWeight: '600' },
   actionButtonTextSecondary: { color: colors.primary, fontSize: fontSize.lg, fontWeight: '600' },

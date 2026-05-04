@@ -140,17 +140,27 @@ export interface AESCourtScheduleEntry {
 }
 
 // App-specific types
+//
+// FavoriteTeam covers both AES and Timu tournaments. AES favorites pin a
+// specific (teamId, eventKey) pair. Timu favorites match by team NAME,
+// since Timu has no stable IDs across tournaments — the `lastTid` field
+// is used for navigation ("take me back to where I saw this team").
 export interface FavoriteTeam {
-  eventKey: string;
-  eventName: string;
-  teamId: number;
+  /** 'aes' (default when undefined) or 'timu'. */
+  source?: 'aes' | 'timu';
+  // AES fields (required for AES; filled with sentinels for Timu)
+  eventKey: string;       // AES: Base64 event key. Timu: `timu:${tid}` for uniqueness
+  eventName: string;      // AES event name or Timu tournament name
+  teamId: number;         // AES: numeric team id. Timu: 0 (not used)
   teamName: string;
   teamText: string;
-  teamCode: string;
-  clubName: string;
-  divisionId: number;
-  divisionName: string;
-  divisionColorHex: string;
+  teamCode: string;       // "" for Timu
+  clubName: string;       // "" for Timu (Timu doesn't expose club)
+  divisionId: number;     // 0 for Timu
+  divisionName: string;   // "" for Timu
+  divisionColorHex: string; // neutral color for Timu (we use accent)
+  // Timu-only
+  lastTid?: number;       // Most recently seen Timu tournament id for this team
 }
 
 export interface SavedEvent {

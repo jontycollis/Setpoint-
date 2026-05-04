@@ -943,13 +943,20 @@ function normalizeListingEvent(raw: any): AESListingEvent {
 }
 
 export async function fetchCanadianEvents(): Promise<AESListingEvent[]> {
+  // Server-side filter is required — the AES landing endpoint has 23k+ events
+  // globally, so an unfiltered $top=200 page never reaches Canadian content.
+  // Match by name keyword since address.state is null on Canadian events.
+  const caNameFilter = [
+    "contains(tolower(name),'canada')",
+    "contains(tolower(name),'ontario')",
+    "contains(tolower(name),'ova')",
+  ].join(' or ');
   const params = new URLSearchParams({
     $count: 'true',
     $format: 'json',
     $orderby: 'startDate,name',
     $top: '200',
-    // Don't filter by isPastEvent — we want all recent events including
-    // ones that just ended (useful for viewing final results)
+    $filter: `isPastEvent eq false and (${caNameFilter})`,
   });
   const url = `${AES_EVENTS_API}?${params.toString()}`;
   const response = await fetch(url, {

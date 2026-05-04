@@ -12,6 +12,13 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TournamentSelectScreen } from './src/screens/TournamentSelectScreen';
+import { MyHomeScreen } from './src/screens/MyHomeScreen';
+import { AddTeamChooserScreen } from './src/screens/AddTeamChooserScreen';
+import {
+  ConnectionScreen,
+  MRS_CONFIG,
+  CAC_LOCKER_CONFIG,
+} from './src/screens/ConnectionScreen';
 import { EventEntryScreen } from './src/screens/EventEntryScreen';
 import { DivisionSelectScreen } from './src/screens/DivisionSelectScreen';
 import { TeamSelectScreen } from './src/screens/TeamSelectScreen';
@@ -27,6 +34,12 @@ import { LiveScoreboardScreen } from './src/screens/LiveScoreboardScreen';
 import { ClubViewScreen } from './src/screens/ClubViewScreen';
 import { CrossTournamentScreen } from './src/screens/CrossTournamentScreen';
 import { TeamNotesScreen } from './src/screens/TeamNotesScreen';
+import { TimuTournamentScreen } from './src/screens/TimuTournamentScreen';
+import { TimuTeamDashboardScreen } from './src/screens/TimuTeamDashboardScreen';
+import { TimuOpponentScoutScreen } from './src/screens/TimuOpponentScoutScreen';
+import { TimuManageSeasonScreen } from './src/screens/TimuManageSeasonScreen';
+import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
+import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { HamburgerMenu } from './src/components/HamburgerMenu';
 import type { MenuDestination } from './src/components/HamburgerMenu';
 import { getEvent, getTeamAssignments } from './src/api/aesClient';
@@ -39,7 +52,19 @@ import {
   saveMyTeam,
   loadThemeMode,
   saveThemeMode,
+  loadSavedTimuTournaments,
+  saveSavedTimuTournaments,
 } from './src/utils/storage';
+import {
+  loadOrMigrateUserProfile,
+  saveUserProfile,
+} from './src/utils/userProfile';
+import {
+  upsertTeamProfileForFavorite,
+  addWatchingTeamProfile,
+  setActiveTeamId,
+} from './src/utils/activeTeamProfile';
+import type { UserProfile } from './src/types/profile';
 import {
   ThemeContext,
   lightColors,
@@ -58,8 +83,13 @@ import type {
   Tournament,
   TournamentYear,
 } from './src/config/tournaments';
+import type { SavedTimuTournament, TimuTournamentInfo } from './src/types/timu';
 
 type Screen =
+  | 'MyHome'
+  | 'AddTeamChooser'
+  | 'MrsConnection'
+  | 'CacConnection'
   | 'TournamentSelect'
   | 'EventEntry'
   | 'DivisionSelect'
@@ -75,7 +105,35 @@ type Screen =
   | 'LiveScoreboard'
   | 'ClubView'
   | 'TournamentHistory'
-  | 'TeamNotes';
+  | 'TeamNotes'
+  | 'TimuTournament'
+  | 'TimuTeamDashboard'
+  | 'TimuOpponentScout'
+  | 'TimuManageSeason'
+  | 'SeasonHistory'
+  | 'OvaRankings';
+
+/**
+ * Phase 4: which hamburger context to render. Home covers MyHome /
+ * AddTeamChooser / TournamentSelect / EventEntry / OvaRankings / the
+ * connection screens — anything not pinned to a specific team. Team
+ * covers everything else (TeamDashboard / TimuTeamDashboard / Standings /
+ * Brackets / Tournaments / etc.).
+ */
+function menuContextForScreen(screen: Screen): 'home' | 'team' {
+  switch (screen) {
+    case 'MyHome':
+    case 'AddTeamChooser':
+    case 'MrsConnection':
+    case 'CacConnection':
+    case 'TournamentSelect':
+    case 'EventEntry':
+    case 'OvaRankings':
+      return 'home';
+    default:
+      return 'team';
+  }
+}
 
 export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('light');
@@ -110,6 +168,10 @@ export default function App() {
   const [savedEvents, setSavedEvents] = useState<SavedEvent[]>([]);
   const [favoriteTeams, setFavoriteTeams] = useState<FavoriteTeam[]>([]);
   const [myTeam, setMyTeam] = useState<FavoriteTeam | null>(null);
+  // Phase 2/3: profile-and-teams layer. Legacy `myTeam` is still the
+  // primary read path for existing screens; we keep `userProfile` in
+  // lockstep on every set so both stay correct during the transition.
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [scoutParams, setScoutParams] = useState<{
     opponentTeamId: number;
     opponentName: string;
@@ -122,61 +184,40 @@ export default function App() {
   const [hydrated, setHydrated] = useState(false);
   const [navigatingToFav, setNavigatingToFav] = useState(false);
 
+  // Timu state — independent of AES event/division/team context.
+  const [savedTimuTournaments, setSavedTimuTournaments] = useState<SavedTimuTournament[]>([]);
+  const [currentTimuTid, setCurrentTimuTid] = useState<number | null>(null);
+  const [currentTimuTeamName, setCurrentTimuTeamName] = useState<string | null>(null);
+  const [currentTimuScoutOpponent, setCurrentTimuScoutOpponent] = useState<string | null>(null);
+  const [currentHistoryTeamName, setCurrentHistoryTeamName] = useState<string | null>(null);
+  const [ovaInitialDivision, setOvaInitialDivision] = useState<{ key?: string; gender?: 'girls' | 'boys' } | null>(null);
+
   useEffect(() => {
     (async () => {
       try {
-        const [events, favs, saved, savedTheme] = await Promise.all([
+        const [events, favs, saved, savedTheme, timu, profile] = await Promise.all([
           loadSavedEvents(),
           loadFavoriteTeams(),
           loadMyTeam(),
           loadThemeMode(),
+          loadSavedTimuTournaments(),
+          loadOrMigrateUserProfile(),
         ]);
         setSavedEvents(events);
         setFavoriteTeams(favs);
         setMyTeam(saved);
         setThemeMode(savedTheme);
+        setSavedTimuTournaments(timu);
+        setUserProfile(profile);
 
-        // Auto-navigate to My Team on launch
-        if (saved) {
-          try {
-            const event = await getEvent(saved.eventKey);
-            const division = event.Divisions.find(
-              (d) => d.DivisionId === saved.divisionId
-            );
-            if (division) {
-              const teams = await getTeamAssignments(
-                saved.eventKey,
-                saved.divisionId,
-                null,
-                [saved.teamId]
-              );
-              const teamAssignment = teams.find((t) => t.TeamId === saved.teamId);
-              if (teamAssignment) {
-                setCurrentEvent(event);
-                setCurrentDivision(division);
-                setCurrentTeam(teamAssignment);
-                setScreenHistory(['TournamentSelect']);
-                setScreen('TeamDashboard');
-                // Save event to recent list
-                setSavedEvents((prev) => {
-                  if (prev.some((e) => e.key === event.Key)) return prev;
-                  return [
-                    ...prev,
-                    {
-                      key: event.Key,
-                      name: event.Name,
-                      startDate: event.StartDate,
-                      endDate: event.EndDate,
-                      location: event.Location,
-                    },
-                  ];
-                });
-              }
-            }
-          } catch {
-            // If auto-nav fails (e.g. no network), just land on home screen
-          }
-        }
+        // Phase 4 boot decision: always land on MyHome.
+        //   - Returning user with teams → MyHome shows their teams list.
+        //   - Fresh user with no teams → MyHome shows the empty state with
+        //     '+ Add team' as the only CTA.
+        // The previous auto-jump-to-team-dashboard fallbacks have been
+        // removed — boot is now one decision, simpler and more predictable.
+        setScreenHistory([]);
+        setScreen('MyHome');
       } catch {
         //
       } finally {
@@ -200,9 +241,165 @@ export default function App() {
     saveMyTeam(myTeam);
   }, [myTeam, hydrated]);
 
+  useEffect(() => {
+    if (!hydrated) return;
+    saveSavedTimuTournaments(savedTimuTournaments);
+  }, [savedTimuTournaments, hydrated]);
+
+  useEffect(() => {
+    if (!hydrated || !userProfile) return;
+    saveUserProfile(userProfile);
+  }, [userProfile, hydrated]);
+
+  // ── Profile/MyTeam sync ─────────────────────────────────────────────────
+  //
+  // setMyTeamAndProfile wraps the legacy `setMyTeam` so every call site
+  // that pins a team also creates/updates the matching TeamProfile and
+  // sets it as active. Existing screens still call this with their
+  // FavoriteTeam shape; the user-profile layer just rides along.
+  const setMyTeamAndProfile = useCallback((fav: FavoriteTeam | null) => {
+    setMyTeam(fav);
+    setUserProfile((prev) => {
+      if (!prev) return prev;
+      if (fav == null) {
+        return setActiveTeamId(prev, null);
+      }
+      return upsertTeamProfileForFavorite(prev, fav).profile;
+    });
+  }, []);
+
+  // Switching the active team via the new MyHome / HamburgerMenu UI:
+  // updates profile, then mirrors into legacy `myTeam` so existing
+  // screens (TeamDashboard, etc.) stay correct without code changes.
+  const handleSwitchActiveTeam = useCallback(
+    (teamId: string) => {
+      setUserProfile((prev) => {
+        if (!prev) return prev;
+        const next = setActiveTeamId(prev, teamId);
+        const team = next.teams.find((t) => t.id === teamId);
+        if (team?.primaryRef) {
+          // Primary ref exists — sync legacy myTeam.
+          setMyTeam(team.primaryRef);
+        }
+        return next;
+      });
+    },
+    []
+  );
+
+  // ── Timu callbacks ──────────────────────────────────────────────────────
+
+  const onTimuLoaded = useCallback((tid: number) => {
+    setCurrentTimuTid(tid);
+    setCurrentEvent(null);
+    setCurrentDivision(null);
+    setCurrentTeam(null);
+    setScreenHistory((prev) => [...prev, 'TournamentSelect']);
+    setScreen('TimuTournament');
+  }, []);
+
+  const onTimuInfoLoaded = useCallback((info: TimuTournamentInfo) => {
+    setSavedTimuTournaments((prev) => {
+      const next = prev.filter((t) => t.tid !== info.tid);
+      next.unshift({
+        source: 'timu',
+        tid: info.tid,
+        name: info.name || `Tournament ${info.tid}`,
+        subtitle: info.subtitle,
+        dateText: info.dateText,
+        venueName: info.venueName,
+      });
+      return next.slice(0, 10);
+    });
+  }, []);
+
+  const handleTimuTeamPress = useCallback(
+    (teamName: string) => {
+      if (!currentTimuTid) return;
+      setCurrentTimuTeamName(teamName);
+      setScreenHistory((prev) => [...prev, screen]);
+      setScreen('TimuTeamDashboard');
+    },
+    [currentTimuTid, screen]
+  );
+
+  const isTimuFavorite = useCallback(
+    (teamName: string) =>
+      favoriteTeams.some(
+        (f) =>
+          f.source === 'timu' &&
+          f.teamName.toLowerCase().trim() === teamName.toLowerCase().trim()
+      ),
+    [favoriteTeams]
+  );
+
+  const toggleTimuFavorite = useCallback(
+    (teamName: string, tournamentName: string) => {
+      if (!currentTimuTid) return;
+      const key = teamName.toLowerCase().trim();
+      let willAdd = false;
+      let newFav: FavoriteTeam | null = null;
+      setFavoriteTeams((prev) => {
+        const exists = prev.some(
+          (f) => f.source === 'timu' && f.teamName.toLowerCase().trim() === key
+        );
+        willAdd = !exists;
+        if (exists) {
+          return prev.filter(
+            (f) => !(f.source === 'timu' && f.teamName.toLowerCase().trim() === key)
+          );
+        }
+        newFav = {
+          source: 'timu',
+          eventKey: `timu:${currentTimuTid}`,
+          eventName: tournamentName,
+          teamId: 0,
+          teamName,
+          teamText: teamName,
+          teamCode: '',
+          clubName: '',
+          divisionId: 0,
+          divisionName: '',
+          divisionColorHex: '#ff6b35',
+          lastTid: currentTimuTid,
+        };
+        return [...prev, newFav];
+      });
+      if (willAdd && newFav) {
+        setUserProfile((prev) => {
+          if (!prev) return prev;
+          const { profile: next } = addWatchingTeamProfile(prev, newFav!);
+          return next;
+        });
+      }
+    },
+    [currentTimuTid]
+  );
+
+  const setTimuAsMyTeam = useCallback(
+    (teamName: string, tournamentName: string) => {
+      if (!currentTimuTid) return;
+      setMyTeamAndProfile({
+        source: 'timu',
+        eventKey: `timu:${currentTimuTid}`,
+        eventName: tournamentName,
+        teamId: 0,
+        teamName,
+        teamText: teamName,
+        teamCode: '',
+        clubName: '',
+        divisionId: 0,
+        divisionName: '',
+        divisionColorHex: '#ff6b35',
+        lastTid: currentTimuTid,
+      });
+    },
+    [currentTimuTid, setMyTeamAndProfile]
+  );
+
   const handleSetMyTeam = useCallback(() => {
     if (!currentEvent || !currentDivision || !currentTeam) return;
-    setMyTeam({
+    setMyTeamAndProfile({
       eventKey: currentEvent.Key,
       eventName: currentEvent.Name,
       teamId: currentTeam.TeamId,
@@ -214,11 +411,11 @@ export default function App() {
       divisionName: currentDivision.Name,
       divisionColorHex: currentDivision.ColorHex,
     });
-  }, [currentEvent, currentDivision, currentTeam]);
+  }, [currentEvent, currentDivision, currentTeam, setMyTeamAndProfile]);
 
   const handleClearMyTeam = useCallback(() => {
-    setMyTeam(null);
-  }, []);
+    setMyTeamAndProfile(null);
+  }, [setMyTeamAndProfile]);
 
   const handleRemoveFavorite = useCallback(
     (fav: FavoriteTeam) => {
@@ -421,6 +618,26 @@ export default function App() {
 
   const handleNavigateToFavorite = useCallback(
     async (fav: FavoriteTeam) => {
+      // Timu favorites: route to TimuTeamDashboard using lastTid.
+      if (fav.source === 'timu') {
+        const tid = fav.lastTid;
+        if (!tid) {
+          Alert.alert(
+            'Missing tournament',
+            `We don't have a tournament id for ${fav.teamName}. Re-open the team from a Timu tournament to refresh the link.`
+          );
+          return;
+        }
+        setCurrentTimuTid(tid);
+        setCurrentTimuTeamName(fav.teamName);
+        setCurrentEvent(null);
+        setCurrentDivision(null);
+        setCurrentTeam(null);
+        setScreenHistory((prev) => [...prev, screen]);
+        setScreen('TimuTeamDashboard');
+        return;
+      }
+
       // Guard: make sure the favorite has the fields we need
       if (!fav || !fav.eventKey || !fav.divisionId || !fav.teamId) {
         Alert.alert('Error', 'This favorite is missing data. Try removing and re-adding it.');
@@ -500,6 +717,9 @@ export default function App() {
     (dest: MenuDestination) => {
       switch (dest) {
         case 'Home':
+          // "Home" is now the legacy "Browse tournaments" entry — always
+          // routes to TournamentSelect. The new landing screen for users
+          // with teams is reachable via the dedicated MyHome destination.
           setScreen('TournamentSelect');
           setScreenHistory([]);
           setCurrentEvent(null);
@@ -508,6 +728,25 @@ export default function App() {
           setSelectedCountry(null);
           setSelectedTournament(null);
           setSelectedTournamentYear(null);
+          break;
+        case 'MyHome':
+          setScreen('MyHome');
+          setScreenHistory([]);
+          setCurrentEvent(null);
+          setCurrentDivision(null);
+          setCurrentTeam(null);
+          break;
+        case 'AddTeamChooser':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('AddTeamChooser');
+          break;
+        case 'MrsConnection':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('MrsConnection');
+          break;
+        case 'CacConnection':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('CacConnection');
           break;
         case 'MyTeams':
           setScreenHistory((prev) => [...prev, screen]);
@@ -596,9 +835,39 @@ export default function App() {
             setScreen('TeamNotes');
           }
           break;
+        case 'TimuTournament':
+          if (currentTimuTid) {
+            setScreenHistory((prev) => [...prev, screen]);
+            setScreen('TimuTournament');
+          }
+          break;
+        case 'TimuTeamDashboard':
+          if (currentTimuTid && currentTimuTeamName) {
+            setScreenHistory((prev) => [...prev, screen]);
+            setScreen('TimuTeamDashboard');
+          }
+          break;
+        case 'TimuManageSeason':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('TimuManageSeason');
+          break;
+        case 'SeasonHistory':
+          if (myTeam) {
+            setCurrentHistoryTeamName(
+              myTeam.teamText || myTeam.teamName || ''
+            );
+            setScreenHistory((prev) => [...prev, screen]);
+            setScreen('SeasonHistory');
+          }
+          break;
+        case 'OvaRankings':
+          setOvaInitialDivision(null);
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('OvaRankings');
+          break;
       }
     },
-    [screen, currentEvent, currentDivision, currentTeam]
+    [screen, currentEvent, currentDivision, currentTeam, currentTimuTid, currentTimuTeamName, myTeam, userProfile]
   );
 
   const darkHeaderScreens: Screen[] = [
@@ -610,14 +879,22 @@ export default function App() {
     'ClubView',
     'TournamentHistory',
     'TeamNotes',
+    'TimuTournament',
+    'TimuTeamDashboard',
+    'TimuOpponentScout',
+    'TimuManageSeason',
+    'SeasonHistory',
+    'OvaRankings',
   ];
 
   const toggleFavorite = useCallback(
     (team: FavoriteTeam) => {
+      let willAdd = false;
       setFavoriteTeams((prev) => {
         const exists = prev.some(
           (f) => f.teamId === team.teamId && f.eventKey === team.eventKey
         );
+        willAdd = !exists;
         if (exists) {
           return prev.filter(
             (f) =>
@@ -626,6 +903,18 @@ export default function App() {
         }
         return [...prev, team];
       });
+      // Phase 4: when adding a favorite, also append the team to the
+      // user's profile as a 'watching' TeamProfile so it shows up on
+      // MyHome's Watching section without waiting for next launch.
+      // Removing a favorite does NOT auto-remove the watching profile —
+      // the user can explicitly remove it via the team-management UI.
+      if (willAdd) {
+        setUserProfile((prev) => {
+          if (!prev) return prev;
+          const { profile: next } = addWatchingTeamProfile(prev, team);
+          return next;
+        });
+      }
     },
     []
   );
@@ -640,6 +929,118 @@ export default function App() {
 
   function renderScreen() {
     switch (screen) {
+      case 'MyHome':
+        if (!userProfile) {
+          // Profile still loading on first paint — fall through to the
+          // browse path so the user isn't stuck on a blank screen.
+          return (
+            <TournamentSelectScreen
+              onTournamentSelected={onTournamentSelected}
+            />
+          );
+        }
+        return (
+          <MyHomeScreen
+            profile={userProfile}
+            onOpenTeam={(team) => {
+              // Make the tapped team the active team, then navigate to
+              // its dashboard if a primaryRef exists. If not, stay on
+              // MyHome — the team card will show the "no tournament
+              // linked yet" warning.
+              handleSwitchActiveTeam(team.id);
+              if (team.primaryRef) {
+                handleNavigateToFavorite(team.primaryRef);
+              }
+            }}
+            onAddTeam={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTeamChooser');
+            }}
+            onOpenMrsConnection={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MrsConnection');
+            }}
+            onOpenCacConnection={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('CacConnection');
+            }}
+            onBrowseTournaments={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TournamentSelect');
+            }}
+          />
+        );
+      case 'AddTeamChooser':
+        return (
+          <AddTeamChooserScreen
+            onBack={goBack}
+            onChooseAes={() => {
+              // AES path → existing TournamentSelect → EventEntry → ...
+              // After the user picks a team, "Set As My Team" upserts
+              // their TeamProfile through Phase 2's wrapper.
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TournamentSelect');
+            }}
+            onChooseTimu={() => {
+              // Timu path → TimuManageSeason where they paste a URL/tid.
+              // From the indexed tournament they tap into the team and
+              // hit "Set As My Team" the same way.
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuManageSeason');
+            }}
+          />
+        );
+      case 'MrsConnection':
+        return (
+          <ConnectionScreen
+            config={MRS_CONFIG}
+            connected={!!userProfile?.mrsLinked}
+            onBack={goBack}
+            onConnect={() => {
+              // First post-login navigation event — flip the flag.
+              setUserProfile((prev) =>
+                prev ? { ...prev, mrsLinked: true, updatedAt: Date.now() } : prev
+              );
+            }}
+            onDisconnect={() => {
+              setUserProfile((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      mrsLinked: false,
+                      mrsMemberId: undefined,
+                      updatedAt: Date.now(),
+                    }
+                  : prev
+              );
+            }}
+          />
+        );
+      case 'CacConnection':
+        return (
+          <ConnectionScreen
+            config={CAC_LOCKER_CONFIG}
+            connected={!!userProfile?.cacLinked}
+            onBack={goBack}
+            onConnect={() => {
+              setUserProfile((prev) =>
+                prev ? { ...prev, cacLinked: true, updatedAt: Date.now() } : prev
+              );
+            }}
+            onDisconnect={() => {
+              setUserProfile((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      cacLinked: false,
+                      coach: undefined,
+                      updatedAt: Date.now(),
+                    }
+                  : prev
+              );
+            }}
+          />
+        );
       case 'TournamentSelect':
         return (
           <TournamentSelectScreen
@@ -731,6 +1132,17 @@ export default function App() {
             }
             onSetAsMyTeam={handleSetMyTeam}
             onClearMyTeam={handleClearMyTeam}
+            onViewSeasonHistory={(_name) => {
+              const primary =
+                myTeam?.teamText ||
+                myTeam?.teamName ||
+                currentTeam?.TeamText ||
+                currentTeam?.TeamName ||
+                'My Team';
+              setCurrentHistoryTeamName(primary);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('SeasonHistory');
+            }}
           />
         );
       case 'MyTeams':
@@ -830,6 +1242,194 @@ export default function App() {
             matchInfo={courtMatchInfo}
           />
         );
+      case 'TimuTournament':
+        if (!currentTimuTid) return null;
+        return (
+          <TimuTournamentScreen
+            tid={currentTimuTid}
+            onBack={goBack}
+            onInfoLoaded={onTimuInfoLoaded}
+            onTeamPress={handleTimuTeamPress}
+            isFavorite={isTimuFavorite}
+          />
+        );
+      case 'TimuTeamDashboard':
+        if (!currentTimuTid || !currentTimuTeamName) return null;
+        return (
+          <TimuTeamDashboardScreen
+            tid={currentTimuTid}
+            teamName={currentTimuTeamName}
+            onBack={goBack}
+            onViewAllPools={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuTournament');
+            }}
+            onViewSchedule={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuTournament');
+            }}
+            onViewRankings={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuTournament');
+            }}
+            onNavigateToTeam={(name) => setCurrentTimuTeamName(name)}
+            onScoutOpponent={(name) => {
+              setCurrentTimuScoutOpponent(name);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuOpponentScout');
+            }}
+            onViewSeasonHistory={(_name) => {
+              const primary =
+                myTeam?.teamText ||
+                myTeam?.teamName ||
+                currentTimuTeamName ||
+                'My Team';
+              setCurrentHistoryTeamName(primary);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('SeasonHistory');
+            }}
+            onManageSeason={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuManageSeason');
+            }}
+            isFavorite={isTimuFavorite(currentTimuTeamName)}
+            onToggleFavorite={() =>
+              toggleTimuFavorite(
+                currentTimuTeamName,
+                savedTimuTournaments.find((t: SavedTimuTournament) => t.tid === currentTimuTid)?.name || ''
+              )
+            }
+            isMyTeam={
+              !!myTeam &&
+              myTeam.source === 'timu' &&
+              myTeam.teamName.toLowerCase().trim() ===
+                currentTimuTeamName.toLowerCase().trim()
+            }
+            onSetAsMyTeam={() =>
+              setTimuAsMyTeam(
+                currentTimuTeamName,
+                savedTimuTournaments.find((t: SavedTimuTournament) => t.tid === currentTimuTid)?.name || ''
+              )
+            }
+            onClearMyTeam={() => setMyTeamAndProfile(null)}
+            onInfoLoaded={onTimuInfoLoaded}
+          />
+        );
+      case 'TimuOpponentScout':
+        if (!currentTimuTid || !currentTimuScoutOpponent) return null;
+        return (
+          <TimuOpponentScoutScreen
+            tid={currentTimuTid}
+            opponentName={currentTimuScoutOpponent}
+            myTeamName={currentTimuTeamName || undefined}
+            onBack={goBack}
+            onNavigateToTeam={(name) => {
+              setCurrentTimuTeamName(name);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuTeamDashboard');
+            }}
+            onNavigateToTournament={(tid) => {
+              setCurrentTimuTid(tid);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuTournament');
+            }}
+            onManageSeason={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuManageSeason');
+            }}
+          />
+        );
+      case 'TimuManageSeason':
+        return (
+          <TimuManageSeasonScreen
+            onBack={goBack}
+            onOpenTid={(tid) => {
+              setCurrentTimuTid(tid);
+              setCurrentTimuTeamName(null);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuTournament');
+            }}
+          />
+        );
+      case 'OvaRankings':
+        return (
+          <OvaRankingsScreen
+            onBack={goBack}
+            initialDivisionKey={ovaInitialDivision?.key}
+            initialGender={ovaInitialDivision?.gender}
+          />
+        );
+      case 'SeasonHistory':
+        if (!currentHistoryTeamName) return null;
+        return (
+          <SeasonHistoryScreen
+            primaryName={currentHistoryTeamName}
+            onBack={goBack}
+            onOpenTimuTournament={(tid, myTeamAsSeen) => {
+              setCurrentTimuTid(tid);
+              // Use the team's name AS IT APPEARED in this specific
+              // tournament (e.g. "Defensa U17 Rob") so the dashboard
+              // selects the right pool row. Fall back to the screen's
+              // primary alias if the entry didn't carry a captured name.
+              setCurrentTimuTeamName(myTeamAsSeen || currentHistoryTeamName);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuTeamDashboard');
+            }}
+            onOpenAesTournament={(eventKey, divisionId, _myTeamAsSeen) => {
+              (async () => {
+                try {
+                  const event = await getEvent(eventKey);
+                  const division = event.Divisions.find((d) => d.DivisionId === divisionId);
+                  if (!division) return;
+                  let teamId = 0;
+                  const matchedFav = favoriteTeams.find(
+                    (f) =>
+                      f.source !== 'timu' &&
+                      f.eventKey === eventKey &&
+                      f.divisionId === divisionId
+                  );
+                  if (matchedFav) teamId = matchedFav.teamId;
+                  else if (myTeam && myTeam.source !== 'timu' && myTeam.eventKey === eventKey) {
+                    teamId = myTeam.teamId;
+                  }
+                  if (!teamId) {
+                    setCurrentEvent(event);
+                    setCurrentDivision(division);
+                    setScreenHistory((prev) => [...prev, screen]);
+                    setScreen('TeamSelect');
+                    return;
+                  }
+                  const teams = await getTeamAssignments(eventKey, divisionId, null, [teamId]);
+                  const teamAssignment = teams.find((t) => t.TeamId === teamId);
+                  if (!teamAssignment) {
+                    setCurrentEvent(event);
+                    setCurrentDivision(division);
+                    setScreenHistory((prev) => [...prev, screen]);
+                    setScreen('TeamSelect');
+                    return;
+                  }
+                  setCurrentEvent(event);
+                  setCurrentDivision(division);
+                  setCurrentTeam(teamAssignment);
+                  setScreenHistory((prev) => [...prev, screen]);
+                  setScreen('TeamDashboard');
+                } catch (err: any) {
+                  Alert.alert('Error', err?.message || 'Failed to open AES event');
+                }
+              })();
+            }}
+            onScoutOpponent={(name) => {
+              if (!currentTimuTid) return;
+              setCurrentTimuScoutOpponent(name);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuOpponentScout');
+            }}
+            onManageSeason={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TimuManageSeason');
+            }}
+          />
+        );
       default:
         return null;
     }
@@ -846,11 +1446,30 @@ export default function App() {
         currentEvent={currentEvent}
         currentDivision={currentDivision}
         currentTeam={currentTeam}
+        currentTimuTid={currentTimuTid}
+        currentTimuTeamName={currentTimuTeamName}
+        savedTimuTournaments={savedTimuTournaments}
         screen={screen}
         darkHeaderScreens={darkHeaderScreens}
         myTeam={myTeam}
         favoriteTeams={favoriteTeams}
         navigatingToFav={navigatingToFav}
+        userProfile={userProfile}
+        onSwitchTeam={(teamId: string) => {
+          handleSwitchActiveTeam(teamId);
+          // Mirror the MyHome behaviour: opening the team's dashboard if
+          // it has a primaryRef. Caller in HamburgerMenu closes the modal
+          // before invoking this.
+          const team = userProfile?.teams.find((t) => t.id === teamId);
+          if (team?.primaryRef) {
+            handleNavigateToFavorite(team.primaryRef);
+          } else {
+            // No tournament linked yet — drop them on MyHome so they can
+            // see the active team and add a tournament.
+            setScreenHistory([]);
+            setScreen('MyHome');
+          }
+        }}
       />
     </SafeAreaProvider>
     </ThemeContext.Provider>
@@ -865,11 +1484,16 @@ function AppContent({
   currentEvent,
   currentDivision,
   currentTeam,
+  currentTimuTid,
+  currentTimuTeamName,
+  savedTimuTournaments,
   screen,
   darkHeaderScreens,
   myTeam,
   favoriteTeams,
   navigatingToFav,
+  userProfile,
+  onSwitchTeam,
 }: any) {
   const insets = useSafeAreaInsets();
 
@@ -888,19 +1512,35 @@ function AppContent({
           onNavigate={handleMenuNavigate}
           onNavigateToFavorite={handleNavigateToFavorite}
           onRemoveFavorite={handleRemoveFavorite}
-          hasEvent={!!currentEvent}
+          hasEvent={!!currentEvent || !!currentTimuTid}
           hasDivision={!!currentDivision}
-          hasTeam={!!currentTeam}
+          hasTeam={!!currentTeam || !!currentTimuTeamName}
+          onTimu={!!currentTimuTid}
           currentScreen={screen === 'TournamentSelect' || screen === 'EventEntry' ? 'Home' : screen}
           light={darkHeaderScreens.includes(screen)}
-          eventName={currentEvent?.Name}
+          eventName={
+            currentEvent?.Name ||
+            savedTimuTournaments.find((t: SavedTimuTournament) => t.tid === currentTimuTid)?.name ||
+            (currentTimuTid ? `Timu tournament ${currentTimuTid}` : undefined)
+          }
           divisionName={currentDivision?.Name}
           divisionColor={currentDivision?.ColorHex}
-          teamName={currentTeam?.TeamText || currentTeam?.TeamName}
+          teamName={
+            currentTeam?.TeamText ||
+            currentTeam?.TeamName ||
+            currentTimuTeamName ||
+            undefined
+          }
           myTeam={myTeam}
           favoriteTeams={favoriteTeams}
           currentTeamId={currentTeam?.TeamId}
-          currentEventKey={currentEvent?.Key}
+          currentEventKey={
+            currentEvent?.Key ||
+            (currentTimuTid ? `timu:${currentTimuTid}` : undefined)
+          }
+          userProfile={userProfile}
+          onSwitchTeam={onSwitchTeam}
+          menuContext={menuContextForScreen(screen)}
         />
       </View>
     </View>

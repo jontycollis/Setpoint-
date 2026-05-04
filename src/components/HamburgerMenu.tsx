@@ -10,9 +10,12 @@ import {
 } from 'react-native';
 import { colors, spacing, fontSize, borderRadius, useTheme } from '../utils/theme';
 import type { FavoriteTeam } from '../types/aes';
+import type { UserProfile, TeamProfile } from '../types/profile';
+import { sortedTeamsForDisplay } from '../utils/activeTeamProfile';
 
 export type MenuDestination =
   | 'Home'
+  | 'MyHome'
   | 'MyTeams'
   | 'TeamDashboard'
   | 'TeamSearch'
@@ -23,7 +26,23 @@ export type MenuDestination =
   | 'ClubView'
   | 'TournamentHistory'
   | 'TeamNotes'
-  | 'VenueMap';
+  | 'VenueMap'
+  | 'TimuTournament'
+  | 'TimuTeamDashboard'
+  | 'TimuManageSeason'
+  | 'SeasonHistory'
+  | 'OvaRankings'
+  | 'AddTeamChooser'
+  | 'MrsConnection'
+  | 'CacConnection';
+
+/**
+ * The hamburger renders different items depending on whether the user is
+ * on Home (MyHome / browse / OVA Rankings / connection screens) or
+ * inside a team context (any team-bound screen). The split keeps each
+ * mode focused on what's actually relevant.
+ */
+export type MenuContext = 'home' | 'team';
 
 interface Props {
   onNavigate: (destination: MenuDestination) => void;
@@ -32,6 +51,12 @@ interface Props {
   hasEvent: boolean;
   hasDivision: boolean;
   hasTeam: boolean;
+  /**
+   * True when the current screen is a Timu tournament/team view. The menu
+   * hides AES-only nav (Standings, Brackets, etc.) and shows a "Tournament
+   * Overview" shortcut to the Timu Pools/Schedule/Rankings screen.
+   */
+  onTimu?: boolean;
   currentScreen?: string;
   light?: boolean;
   // Context info
@@ -45,6 +70,25 @@ interface Props {
   favoriteTeams: FavoriteTeam[];
   currentTeamId?: number;
   currentEventKey?: string;
+  // ── Phase 2/3: profile + team-switcher ───────────────────────────────
+  /**
+   * UserProfile drives the new "My Teams" section + team switcher.
+   * Optional: when undefined, the menu renders without these new
+   * sections (used during the initial render before the profile loads).
+   */
+  userProfile?: UserProfile | null;
+  /**
+   * Tap-to-switch on a team row in the new "My Teams" section. Caller is
+   * responsible for setting the active team and (optionally) navigating
+   * to its dashboard.
+   */
+  onSwitchTeam?: (teamId: string) => void;
+  // ── Phase 4: context-aware menu ───────────────────────────────────────
+  /**
+   * Which mode to render the menu in. Caller computes from screen +
+   * active team. Defaults to 'home' if unspecified.
+   */
+  menuContext?: MenuContext;
 }
 
 export function HamburgerMenu({
@@ -54,6 +98,7 @@ export function HamburgerMenu({
   hasEvent,
   hasDivision,
   hasTeam,
+  onTimu = false,
   currentScreen,
   light = false,
   eventName,
@@ -64,6 +109,9 @@ export function HamburgerMenu({
   favoriteTeams,
   currentTeamId,
   currentEventKey,
+  userProfile,
+  onSwitchTeam,
+  menuContext = 'home',
 }: Props) {
   const [visible, setVisible] = useState(false);
   const theme = useTheme();
@@ -158,160 +206,269 @@ export function HamburgerMenu({
                 </View>
               )}
 
-              {/* Navigation Items */}
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>NAVIGATE</Text>
+              {/* ── Team context: Home button + active team banner ─── */}
+              {menuContext === 'team' && userProfile && (
+                <View style={styles.section}>
+                  <MenuRow
+                    icon={'\u{1F3E0}'}
+                    label="Home"
+                    subtitle="Back to my teams"
+                    available={true}
+                    isCurrent={false}
+                    onPress={() => handleSelect('MyHome')}
+                  />
+                </View>
+              )}
 
-                {/* Home */}
-                <MenuRow
-                  icon={'\u{1F3E0}'}
-                  label="Home"
-                  available={true}
-                  isCurrent={isCurrentScreen('Home')}
-                  onPress={() => handleSelect('Home')}
-                />
-
-                {/* Team Tracker — unified dashboard for all tracked teams */}
-                <MenuRow
-                  icon={'\u{1F465}'}
-                  label="Team Tracker"
-                  subtitle={(() => {
-                    // Dedupe: myTeam may also be in favorites
-                    const myTeamInFavs = myTeam && favoriteTeams.some(
-                      (f) => f.teamId === myTeam.teamId && f.eventKey === myTeam.eventKey
-                    );
-                    const count = favoriteTeams.length + (myTeam && !myTeamInFavs ? 1 : 0);
-                    return count > 0
-                      ? `${count} team${count !== 1 ? 's' : ''}`
-                      : undefined;
-                  })()}
-                  available={!!myTeam || favoriteTeams.length > 0}
-                  isCurrent={isCurrentScreen('MyTeams')}
-                  onPress={() => handleSelect('MyTeams')}
-                  lockedHint="Star or set a team first"
-                />
-
-                {/* My Team — uses persistent myTeam, navigates like a favorite */}
-                <MenuRow
-                  icon={'\u{1F3D0}'}
-                  label="My Team"
-                  subtitle={myTeam ? (myTeam.teamText || myTeam.teamName) : undefined}
-                  available={!!myTeam}
-                  isCurrent={
-                    !!myTeam &&
-                    currentTeamId === myTeam.teamId &&
-                    currentEventKey === myTeam.eventKey &&
-                    isCurrentScreen('TeamDashboard')
-                  }
-                  onPress={() => {
-                    if (myTeam) {
-                      // If already viewing this team, just close menu
-                      if (
-                        currentTeamId === myTeam.teamId &&
-                        currentEventKey === myTeam.eventKey &&
-                        isCurrentScreen('TeamDashboard')
-                      ) {
+              {/* ── Team switcher (both contexts when teams exist) ─── */}
+              {userProfile && userProfile.teams.length > 0 && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>
+                    {menuContext === 'team' ? 'SWITCH TEAM' : 'MY TEAMS'}
+                  </Text>
+                  {sortedTeamsForDisplay(userProfile).map((team) => (
+                    <TeamSwitcherRow
+                      key={team.id}
+                      team={team}
+                      isActive={team.id === userProfile.activeTeamId}
+                      onPress={() => {
+                        if (!onSwitchTeam) return;
                         setVisible(false);
-                        return;
-                      }
-                      handleFavoriteSelect(myTeam);
+                        onSwitchTeam(team.id);
+                      }}
+                    />
+                  ))}
+                </View>
+              )}
+
+              {/* ── Home context: minimal navigation ─────────────────── */}
+              {menuContext === 'home' && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>NAVIGATE</Text>
+
+                  {/* My Home — explicit when not already there */}
+                  {userProfile && (
+                    <MenuRow
+                      icon={'\u{1F3E0}'}
+                      label="My Home"
+                      available={true}
+                      isCurrent={isCurrentScreen('MyHome')}
+                      onPress={() => handleSelect('MyHome')}
+                    />
+                  )}
+
+                  {/* Add team — clear CTA */}
+                  <MenuRow
+                    icon={'➕'}
+                    label="Add team"
+                    subtitle="AES or Timu"
+                    available={true}
+                    isCurrent={isCurrentScreen('AddTeamChooser')}
+                    onPress={() => handleSelect('AddTeamChooser')}
+                  />
+
+                  {/* Browse tournaments — explore-mode without pinning */}
+                  <MenuRow
+                    icon={'\u{1F4C5}'}
+                    label="Browse tournaments"
+                    subtitle="Look around without adding a team"
+                    available={true}
+                    isCurrent={isCurrentScreen('Home')}
+                    onPress={() => handleSelect('Home')}
+                  />
+
+                  {/* OVA Rankings */}
+                  <MenuRow
+                    icon={'\u{1F4C8}'}
+                    label="OVA Rankings"
+                    subtitle="Girls + Boys, all divisions"
+                    available={true}
+                    isCurrent={isCurrentScreen('OvaRankings')}
+                    onPress={() => handleSelect('OvaRankings')}
+                  />
+
+                  {/* Connections — real entry points (Phase 4) */}
+                  <MenuRow
+                    icon={'\u{1F517}'}
+                    label="OVA MRS"
+                    subtitle={
+                      userProfile?.mrsLinked
+                        ? 'Connected'
+                        : 'Connect to view affiliations'
                     }
-                  }}
-                  lockedHint="Set a team as My Team"
-                />
+                    available={true}
+                    isCurrent={isCurrentScreen('MrsConnection')}
+                    onPress={() => handleSelect('MrsConnection')}
+                  />
+                  <MenuRow
+                    icon={'\u{1F3CB}'}
+                    label="CAC Locker"
+                    subtitle={
+                      userProfile?.cacLinked
+                        ? 'Connected'
+                        : 'Connect to view NCCP'
+                    }
+                    available={true}
+                    isCurrent={isCurrentScreen('CacConnection')}
+                    onPress={() => handleSelect('CacConnection')}
+                  />
+                </View>
+              )}
 
-                {/* Search Teams — available when inside a tournament */}
-                <MenuRow
-                  icon={'\u{1F50D}'}
-                  label="Search Teams"
-                  subtitle={hasDivision ? `In ${divisionName}` : hasEvent ? 'Across the event' : undefined}
-                  available={hasEvent}
-                  isCurrent={isCurrentScreen('TeamSearch')}
-                  onPress={() => handleSelect('TeamSearch')}
-                  lockedHint="Select event first"
-                />
+              {/* ── Team context: team-bound navigation ──────────────── */}
+              {menuContext === 'team' && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>TEAM</Text>
 
-                {/* Court Schedule */}
-                <MenuRow
-                  icon={'\u{1F4CB}'}
-                  label="Court Schedule"
-                  available={hasEvent}
-                  isCurrent={isCurrentScreen('CourtSchedule')}
-                  onPress={() => handleSelect('CourtSchedule')}
-                  lockedHint="Select event first"
-                />
+                  {/* Dashboard — works for both AES and Timu via My Team */}
+                  <MenuRow
+                    icon={'\u{1F3D0}'}
+                    label="Dashboard"
+                    subtitle={myTeam ? myTeam.teamText || myTeam.teamName : undefined}
+                    available={!!myTeam}
+                    isCurrent={
+                      isCurrentScreen('TeamDashboard') ||
+                      isCurrentScreen('TimuTeamDashboard')
+                    }
+                    onPress={() => {
+                      if (myTeam) {
+                        if (
+                          (currentTeamId === myTeam.teamId &&
+                            currentEventKey === myTeam.eventKey &&
+                            isCurrentScreen('TeamDashboard')) ||
+                          (myTeam.source === 'timu' &&
+                            isCurrentScreen('TimuTeamDashboard'))
+                        ) {
+                          setVisible(false);
+                          return;
+                        }
+                        handleFavoriteSelect(myTeam);
+                      }
+                    }}
+                  />
 
-                {/* Live Scoreboard */}
-                <MenuRow
-                  icon={'\u{1F4E1}'}
-                  label="Live Scoreboard"
-                  subtitle={divisionName || undefined}
-                  available={hasDivision}
-                  isCurrent={isCurrentScreen('LiveScoreboard')}
-                  onPress={() => handleSelect('LiveScoreboard')}
-                  lockedHint="Select division first"
-                />
+                  {/* My Season History */}
+                  {myTeam && (
+                    <MenuRow
+                      icon={'\u{1F3C5}'}
+                      label="Season History"
+                      subtitle="All tournaments, both systems"
+                      available={true}
+                      isCurrent={isCurrentScreen('SeasonHistory')}
+                      onPress={() => handleSelect('SeasonHistory')}
+                    />
+                  )}
 
-                {/* Club View */}
-                <MenuRow
-                  icon={'\u{1F3E2}'}
-                  label="Club View"
-                  available={hasEvent}
-                  isCurrent={isCurrentScreen('ClubView')}
-                  onPress={() => handleSelect('ClubView')}
-                  lockedHint="Select event first"
-                />
+                  {/* Tournaments (Manage Season) */}
+                  <MenuRow
+                    icon={'\u{1F5C2}'}
+                    label="Tournaments"
+                    subtitle="Add AES or Timu, refresh, browse"
+                    available={true}
+                    isCurrent={isCurrentScreen('TimuManageSeason')}
+                    onPress={() => handleSelect('TimuManageSeason')}
+                  />
+                </View>
+              )}
 
-                {/* Standings */}
-                <MenuRow
-                  icon={'\u{1F3C6}'}
-                  label="Standings"
-                  subtitle={divisionName || undefined}
-                  available={hasDivision}
-                  isCurrent={isCurrentScreen('Standings')}
-                  onPress={() => handleSelect('Standings')}
-                  lockedHint="Select division first"
-                />
+              {/* ── Tournament-scoped items (only in team context with
+                    an event currently loaded) ────────────────────────── */}
+              {menuContext === 'team' && (hasEvent || onTimu) && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>TOURNAMENT</Text>
 
-                {/* Playoff Brackets */}
-                <MenuRow
-                  icon={'\u{1F3C5}'}
-                  label="Playoff Brackets"
-                  subtitle={divisionName || undefined}
-                  available={hasDivision}
-                  isCurrent={isCurrentScreen('Brackets')}
-                  onPress={() => handleSelect('Brackets')}
-                  lockedHint="Select division first"
-                />
-
-                {/* Tournament History */}
-                <MenuRow
-                  icon={'\u{1F4CA}'}
-                  label="Season History"
-                  available={true}
-                  isCurrent={isCurrentScreen('TournamentHistory')}
-                  onPress={() => handleSelect('TournamentHistory')}
-                />
-
-                {/* Team Notes */}
-                <MenuRow
-                  icon={'\u{1F4DD}'}
-                  label="Team Notes"
-                  available={hasTeam}
-                  isCurrent={isCurrentScreen('TeamNotes')}
-                  onPress={() => handleSelect('TeamNotes')}
-                  lockedHint="Select a team first"
-                />
-
-                {/* Venue Map */}
-                <MenuRow
-                  icon={'\u{1F5FA}'}
-                  label="Venue Map"
-                  available={true}
-                  isCurrent={isCurrentScreen('VenueMap')}
-                  onPress={() => handleSelect('VenueMap')}
-                />
-              </View>
+                  {onTimu && (
+                    <MenuRow
+                      icon={'\u{1F4CA}'}
+                      label="Tournament Overview"
+                      subtitle="Pools, Schedule, Rankings"
+                      available={true}
+                      isCurrent={isCurrentScreen('TimuTournament')}
+                      onPress={() => handleSelect('TimuTournament')}
+                    />
+                  )}
+                  <MenuRow
+                    icon={'\u{1F50D}'}
+                    label="Search Teams"
+                    subtitle={
+                      hasDivision
+                        ? `In ${divisionName}`
+                        : hasEvent
+                        ? 'Across the event'
+                        : undefined
+                    }
+                    available={hasEvent}
+                    isCurrent={isCurrentScreen('TeamSearch')}
+                    onPress={() => handleSelect('TeamSearch')}
+                    lockedHint="Select event first"
+                  />
+                  <MenuRow
+                    icon={'\u{1F4CB}'}
+                    label="Court Schedule"
+                    available={hasEvent}
+                    isCurrent={isCurrentScreen('CourtSchedule')}
+                    onPress={() => handleSelect('CourtSchedule')}
+                    lockedHint="Select event first"
+                  />
+                  <MenuRow
+                    icon={'\u{1F4E1}'}
+                    label="Live Scoreboard"
+                    subtitle={divisionName || undefined}
+                    available={hasDivision}
+                    isCurrent={isCurrentScreen('LiveScoreboard')}
+                    onPress={() => handleSelect('LiveScoreboard')}
+                    lockedHint="Select division first"
+                  />
+                  <MenuRow
+                    icon={'\u{1F3E2}'}
+                    label="Club View"
+                    available={hasEvent}
+                    isCurrent={isCurrentScreen('ClubView')}
+                    onPress={() => handleSelect('ClubView')}
+                    lockedHint="Select event first"
+                  />
+                  <MenuRow
+                    icon={'\u{1F3C6}'}
+                    label="Standings"
+                    subtitle={divisionName || undefined}
+                    available={hasDivision}
+                    isCurrent={isCurrentScreen('Standings')}
+                    onPress={() => handleSelect('Standings')}
+                    lockedHint="Select division first"
+                  />
+                  <MenuRow
+                    icon={'\u{1F3C5}'}
+                    label="Playoff Brackets"
+                    subtitle={divisionName || undefined}
+                    available={hasDivision}
+                    isCurrent={isCurrentScreen('Brackets')}
+                    onPress={() => handleSelect('Brackets')}
+                    lockedHint="Select division first"
+                  />
+                  <MenuRow
+                    icon={'\u{1F4CA}'}
+                    label="Cross-tournament History"
+                    available={true}
+                    isCurrent={isCurrentScreen('TournamentHistory')}
+                    onPress={() => handleSelect('TournamentHistory')}
+                  />
+                  <MenuRow
+                    icon={'\u{1F4DD}'}
+                    label="Team Notes"
+                    available={hasTeam}
+                    isCurrent={isCurrentScreen('TeamNotes')}
+                    onPress={() => handleSelect('TeamNotes')}
+                    lockedHint="Select a team first"
+                  />
+                  <MenuRow
+                    icon={'\u{1F5FA}'}
+                    label="Venue Map"
+                    available={true}
+                    isCurrent={isCurrentScreen('VenueMap')}
+                    onPress={() => handleSelect('VenueMap')}
+                  />
+                </View>
+              )}
 
               {/* Settings */}
               <View style={styles.section}>
@@ -332,18 +489,26 @@ export function HamburgerMenu({
                 </TouchableOpacity>
               </View>
 
+
               {/* Favorite Teams */}
               {favoriteTeams.length > 0 && (
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>FAVORITE TEAMS</Text>
                   {favoriteTeams.map((fav) => {
-                    const isCurrent =
-                      currentTeamId === fav.teamId &&
-                      currentEventKey === fav.eventKey &&
-                      currentScreen === 'TeamDashboard';
+                    const isTimu = fav.source === 'timu';
+                    // AES favorites match by teamId+eventKey; Timu favorites
+                    // match by source+teamName since IDs aren't stable.
+                    const isCurrent = isTimu
+                      ? currentScreen === 'TimuTeamDashboard' && !!fav.teamName
+                      : currentTeamId === fav.teamId &&
+                        currentEventKey === fav.eventKey &&
+                        currentScreen === 'TeamDashboard';
+                    const key = isTimu
+                      ? `timu:${fav.teamName}`
+                      : `${fav.eventKey}-${fav.teamId}`;
                     return (
                       <View
-                        key={`${fav.eventKey}-${fav.teamId}`}
+                        key={key}
                         style={[
                           styles.favoriteItem,
                           isCurrent && styles.favoriteItemCurrent,
@@ -365,17 +530,26 @@ export function HamburgerMenu({
                             ]}
                           />
                           <View style={styles.favoriteInfo}>
-                            <Text
-                              style={[
-                                styles.favoriteName,
-                                isCurrent && styles.favoriteNameCurrent,
-                              ]}
-                              numberOfLines={1}
-                            >
-                              {fav.teamText || fav.teamName}
-                            </Text>
+                            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Text
+                                style={[
+                                  styles.favoriteName,
+                                  isCurrent && styles.favoriteNameCurrent,
+                                ]}
+                                numberOfLines={1}
+                              >
+                                {fav.teamText || fav.teamName}
+                              </Text>
+                              {isTimu && (
+                                <View style={styles.timuBadge}>
+                                  <Text style={styles.timuBadgeText}>Timu</Text>
+                                </View>
+                              )}
+                            </View>
                             <Text style={styles.favoriteMeta} numberOfLines={1}>
-                              {fav.divisionName} — {fav.eventName}
+                              {isTimu
+                                ? fav.eventName || 'Timu tournament'
+                                : `${fav.divisionName} — ${fav.eventName}`}
                             </Text>
                           </View>
                           {isCurrent && <View style={styles.currentDot} />}
@@ -402,6 +576,61 @@ export function HamburgerMenu({
         </Pressable>
       </Modal>
     </View>
+  );
+}
+
+// Sub-component for the new "MY TEAMS" team-switcher rows. Active team
+// is highlighted; tap any other team to switch.
+function TeamSwitcherRow({
+  team,
+  isActive,
+  onPress,
+}: {
+  team: TeamProfile;
+  isActive: boolean;
+  onPress: () => void;
+}) {
+  const sourceLabel =
+    team.source === 'mrs-linked'
+      ? 'OVA'
+      : team.source === 'mixed'
+      ? 'AES+TIMU'
+      : team.source.toUpperCase();
+  const sourceColor =
+    team.source === 'timu' || team.source === 'mixed'
+      ? colors.accent
+      : colors.primary;
+  return (
+    <TouchableOpacity
+      style={[
+        styles.menuItem,
+        isActive && styles.menuItemCurrent,
+      ]}
+      onPress={onPress}
+      disabled={isActive}
+      activeOpacity={0.7}
+    >
+      <View style={[styles.teamSwitcherBadge, { backgroundColor: sourceColor }]}>
+        <Text style={styles.teamSwitcherBadgeText}>{sourceLabel}</Text>
+      </View>
+      <View style={styles.menuLabelCol}>
+        <Text
+          style={[
+            styles.menuLabel,
+            isActive && styles.menuLabelCurrent,
+          ]}
+          numberOfLines={1}
+        >
+          {team.label}
+        </Text>
+        <Text style={styles.menuSubtitle} numberOfLines={1}>
+          {team.kind === 'watching' ? 'Watching' : 'Me'}
+          {team.seasonLabel ? ` · ${team.seasonLabel}` : ''}
+          {team.club ? ` · ${team.club}` : ''}
+        </Text>
+      </View>
+      {isActive && <View style={styles.currentDot} />}
+    </TouchableOpacity>
   );
 }
 
@@ -460,6 +689,19 @@ function MenuRow({
 }
 
 const styles = StyleSheet.create({
+  timuBadge: {
+    marginLeft: spacing.sm,
+    backgroundColor: colors.accent,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: 4,
+  },
+  timuBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
   hamburgerButton: {
     padding: spacing.sm,
   },
@@ -659,5 +901,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textLight,
     fontWeight: '600',
+  },
+  // ── Team switcher (Phase 2/3) ─────────────────────────────────────────
+  teamSwitcherBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    minWidth: 36,
+    alignItems: 'center',
+  },
+  teamSwitcherBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
 });
