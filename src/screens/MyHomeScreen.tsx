@@ -1,28 +1,27 @@
 // ── MyHomeScreen ──────────────────────────────────────────────────────────
 //
-// The user's landing page (Phase 4 restructure). The app boots here and
-// the team-context Home button comes back here.
+// The user's landing page. The app boots here and the team-context Home
+// button comes back here.
 //
 // Layout, top-to-bottom:
 //   - Hero (optional display name + role kicker, generic fallback)
+//   - "Recently viewed" horizontal strip (skipped when empty)
 //   - "My Teams" section (TeamProfiles with kind === 'me')
 //       Each team is a tappable card → enters that team's context.
+//       Card carries a forward-looking "next tournament" line beneath the
+//       meta — "No upcoming tournaments" placeholder when empty.
 //       "+ Add team" CTA after the last me-team card.
-//   - "Watching" section (kind === 'watching') — skipped if empty.
+//   - "Watching" section (kind === 'watching') — skipped if empty. Same
+//     per-team "next tournament" treatment as My Teams.
 //   - Connections section (OVA MRS + CAC Locker tiles).
-//       Each tile shows "Connected" / "Connect" state and routes to the
-//       ConnectionScreen which embeds the live authenticated site.
 //   - Career totals card (only when at least one me-team has indexed
 //     tournaments matching its aliases).
-//   - Browse Tournaments — low-emphasis link for explore-mode without
-//     pinning a team.
 //
-// Note: this screen does NOT host the team-switcher on its own — switching
-// is done by tapping a team card. The hamburger has the same switcher when
-// the user is inside a team context (Phase 4 hamburger split).
+// Note: the prior "Browse tournaments →" link was removed because Browse
+// is now a bottom tab — the link became redundant.
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -30,6 +29,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import { Card } from '../components/Card';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
@@ -39,13 +39,19 @@ import {
   buildMySeasonHistory,
   loadAllSeasonIndices,
   aggregateUnifiedStats,
+  type LoadedIndices,
   type UnifiedAggregateStats,
+  type UnifiedTournamentEntry,
 } from '../utils/unifiedSeasonHistory';
 import type { AutoDiscoverProgress } from '../utils/teamAutoDiscover';
 import {
   DiscoveryProgressBanner,
   DiscoveryResultBanner,
 } from '../components/DiscoveryBanners';
+import {
+  useRecentlyViewed,
+  type RecentItem,
+} from '../utils/recentlyViewed';
 
 interface Props {
   profile: UserProfile;
@@ -57,8 +63,10 @@ interface Props {
   onOpenMrsConnection: () => void;
   /** Tap the CAC Locker connection tile. */
   onOpenCacConnection: () => void;
-  /** Low-emphasis "Browse tournaments" entry (explore mode, no pin). */
-  onBrowseTournaments: () => void;
+  /** Low-emphasis "Browse tournaments" entry. Optional now that Browse is
+   *  a bottom tab — kept on the prop list for backwards compat with
+   *  callers that still pass it. */
+  onBrowseTournaments?: () => void;
   /** True while the boot refresh or a manual sync is running. */
   syncing?: boolean;
   /** {done, total} counts for the in-flight sync, or null when idle. */
@@ -80,6 +88,8 @@ interface Props {
   onViewDiscoveryResult?: () => void;
   /** Long-press a team card → confirm removal. */
   onRemoveTeam?: (team: TeamProfile) => void;
+  /** Tap a recently-viewed entry — App routes by kind. */
+  onOpenRecent?: (item: RecentItem) => void;
 }
 
 export function MyHomeScreen({
@@ -98,6 +108,7 @@ export function MyHomeScreen({
   onDismissDiscoveryResult,
   onViewDiscoveryResult,
   onRemoveTeam,
+  onOpenRecent,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -114,6 +125,42 @@ export function MyHomeScreen({
       : profile.role === 'athlete'
       ? 'ATHLETE'
       : '';
+
+  // ── Upcoming-tournament map ────────────────────────────────────────────
+  // Read both indices once and compute the earliest future entry per team.
+  // Reuses the existing `buildMySeasonHistory` adapter — no new fetchers.
+  const [indices, setIndices] = useState<LoadedIndices | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const loaded = await loadAllSeasonIndices();
+        if (!cancelled) setIndices(loaded);
+      } catch {
+        /* ignore — strip just won't show anything */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const upcomingByTeamId = useMemo(() => {
+    const out = new Map<string, UnifiedTournamentEntry | null>();
+    if (!indices) return out;
+    const now = Date.now();
+    for (const team of profile.teams) {
+      const aliases = team.aliases.length ? team.aliases : [team.label];
+      const history = buildMySeasonHistory(indices, aliases);
+      const future = history
+        .filter((e) => e.dateMs != null && e.dateMs > now)
+        .sort((a, b) => (a.dateMs ?? 0) - (b.dateMs ?? 0));
+      out.set(team.id, future[0] ?? null);
+    }
+    return out;
+  }, [indices, profile.teams]);
+
+  const recents = useRecentlyViewed(5);
 
   return (
     <View style={styles.container}>
@@ -144,8 +191,14 @@ export function MyHomeScreen({
             onSync={onSyncSeason}
           />
         )}
+        {recents.length > 0 && onOpenRecent ? (
+          <RecentlyViewedStrip recents={recents} onOpen={onOpenRecent} />
+        ) : null}
+
         <MyTeamsSection
           teams={meTeams}
+          upcomingByTeamId={upcomingByTeamId}
+          indicesLoaded={indices != null}
           onOpenTeam={onOpenTeam}
           onAddTeam={onAddTeam}
           onRemoveTeam={onRemoveTeam}
@@ -154,6 +207,8 @@ export function MyHomeScreen({
         {watchingTeams.length > 0 ? (
           <WatchingSection
             teams={watchingTeams}
+            upcomingByTeamId={upcomingByTeamId}
+            indicesLoaded={indices != null}
             onOpenTeam={onOpenTeam}
             onRemoveTeam={onRemoveTeam}
           />
@@ -167,16 +222,99 @@ export function MyHomeScreen({
         />
 
         {meTeams.length > 0 ? <CareerCard profile={profile} /> : null}
-
-        <TouchableOpacity
-          style={styles.browseLink}
-          onPress={onBrowseTournaments}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.browseLinkText}>Browse tournaments →</Text>
-        </TouchableOpacity>
       </ScrollView>
     </View>
+  );
+}
+
+// ── Recently viewed ───────────────────────────────────────────────────────
+
+function RecentlyViewedStrip({
+  recents,
+  onOpen,
+}: {
+  recents: RecentItem[];
+  onOpen: (item: RecentItem) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.section}>
+      <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
+        RECENTLY VIEWED
+      </Text>
+      <FlatList
+        horizontal
+        data={recents}
+        keyExtractor={recentKey}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingVertical: 2 }}
+        ItemSeparatorComponent={() => <View style={{ width: spacing.sm }} />}
+        renderItem={({ item }) => (
+          <RecentChip item={item} onPress={() => onOpen(item)} />
+        )}
+      />
+    </View>
+  );
+}
+
+function recentKey(item: RecentItem): string {
+  if (item.kind === 'team-aes') {
+    return `${item.kind}:${item.eventKey}:${item.divisionId}:${item.teamId}`;
+  }
+  if (item.kind === 'team-timu') {
+    return `${item.kind}:${item.tid}:${item.teamName}`;
+  }
+  if (item.kind === 'tournament-aes') {
+    return `${item.kind}:${item.eventKey}`;
+  }
+  return `${item.kind}:${item.tid}`;
+}
+
+function RecentChip({
+  item,
+  onPress,
+}: {
+  item: RecentItem;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const isTimu = item.kind === 'team-timu' || item.kind === 'tournament-timu';
+  const isTournament =
+    item.kind === 'tournament-aes' || item.kind === 'tournament-timu';
+  const badgeColor = isTimu ? colors.accent : colors.primary;
+  const badgeLabel = isTournament ? 'TOUR' : isTimu ? 'TIMU' : 'AES';
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[
+        styles.recentChip,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.divider,
+        },
+      ]}
+    >
+      <View style={[styles.recentBadge, { backgroundColor: badgeColor }]}>
+        <Text style={styles.recentBadgeText}>{badgeLabel}</Text>
+      </View>
+      <Text
+        style={[styles.recentLabel, { color: colors.text }]}
+        numberOfLines={1}
+      >
+        {item.label}
+      </Text>
+      {item.subtitle ? (
+        <Text
+          style={[styles.recentSubtitle, { color: colors.textSecondary }]}
+          numberOfLines={1}
+        >
+          {item.subtitle}
+        </Text>
+      ) : null}
+    </TouchableOpacity>
   );
 }
 
@@ -184,11 +322,15 @@ export function MyHomeScreen({
 
 function MyTeamsSection({
   teams,
+  upcomingByTeamId,
+  indicesLoaded,
   onOpenTeam,
   onAddTeam,
   onRemoveTeam,
 }: {
   teams: TeamProfile[];
+  upcomingByTeamId: Map<string, UnifiedTournamentEntry | null>;
+  indicesLoaded: boolean;
   onOpenTeam: (team: TeamProfile) => void;
   onAddTeam: () => void;
   onRemoveTeam?: (team: TeamProfile) => void;
@@ -197,11 +339,17 @@ function MyTeamsSection({
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>MY TEAMS</Text>
+      <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
+        MY TEAMS
+      </Text>
       {teams.length === 0 ? (
         <Card variant="outlined" style={styles.emptyCard}>
-          <Text style={styles.emptyTitle}>No teams yet</Text>
-          <Text style={styles.emptyBody}>
+          <Text style={[styles.emptyTitle, { color: colors.text }]}>
+            No teams yet
+          </Text>
+          <Text
+            style={[styles.emptyBody, { color: colors.textSecondary }]}
+          >
             Find a tournament you're playing in and add the team you (or
             your child) play for. Past tournaments build career history.
           </Text>
@@ -211,17 +359,21 @@ function MyTeamsSection({
           <TeamCard
             key={team.id}
             team={team}
+            upcoming={upcomingByTeamId.get(team.id) ?? null}
+            indicesLoaded={indicesLoaded}
             onOpen={() => onOpenTeam(team)}
             onLongPress={onRemoveTeam ? () => onRemoveTeam(team) : undefined}
           />
         ))
       )}
       <TouchableOpacity
-        style={styles.addTeamBtn}
+        style={[styles.addTeamBtn, { backgroundColor: colors.primary }]}
         onPress={onAddTeam}
         activeOpacity={0.7}
       >
-        <Text style={styles.addTeamBtnText}>+ Add team</Text>
+        <Text style={[styles.addTeamBtnText, { color: colors.textOnPrimary }]}>
+          + Add team
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -231,10 +383,14 @@ function MyTeamsSection({
 
 function WatchingSection({
   teams,
+  upcomingByTeamId,
+  indicesLoaded,
   onOpenTeam,
   onRemoveTeam,
 }: {
   teams: TeamProfile[];
+  upcomingByTeamId: Map<string, UnifiedTournamentEntry | null>;
+  indicesLoaded: boolean;
   onOpenTeam: (team: TeamProfile) => void;
   onRemoveTeam?: (team: TeamProfile) => void;
 }) {
@@ -242,8 +398,10 @@ function WatchingSection({
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>WATCHING</Text>
-      <Text style={styles.sectionHint}>
+      <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
+        WATCHING
+      </Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
         Teams you're tracking inside a tournament. Doesn't count toward
         your Career rollup.
       </Text>
@@ -251,6 +409,8 @@ function WatchingSection({
         <TeamCard
           key={team.id}
           team={team}
+          upcoming={upcomingByTeamId.get(team.id) ?? null}
+          indicesLoaded={indicesLoaded}
           onOpen={() => onOpenTeam(team)}
           onLongPress={onRemoveTeam ? () => onRemoveTeam(team) : undefined}
           compact
@@ -264,11 +424,16 @@ function WatchingSection({
 
 function TeamCard({
   team,
+  upcoming,
+  indicesLoaded,
   onOpen,
   onLongPress,
   compact,
 }: {
   team: TeamProfile;
+  upcoming: UnifiedTournamentEntry | null;
+  /** Have we attempted to read indices yet? Guards the empty placeholder. */
+  indicesLoaded: boolean;
   onOpen: () => void;
   onLongPress?: () => void;
   compact?: boolean;
@@ -294,32 +459,98 @@ function TeamCard({
       onLongPress={onLongPress}
       delayLongPress={400}
       activeOpacity={0.7}
-      style={[styles.teamCard, compact && styles.teamCardCompact]}
+      style={[
+        styles.teamCard,
+        compact && styles.teamCardCompact,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.divider,
+        },
+      ]}
     >
       <View style={[styles.sourceBadge, { backgroundColor: sourceColor }]}>
         <Text style={styles.sourceBadgeText}>{sourceLabel}</Text>
       </View>
       <View style={{ flex: 1 }}>
         <Text
-          style={[styles.teamCardTitle, compact && styles.teamCardTitleCompact]}
+          style={[
+            styles.teamCardTitle,
+            compact && styles.teamCardTitleCompact,
+            { color: colors.text },
+          ]}
           numberOfLines={1}
         >
           {team.label}
         </Text>
         {meta ? (
-          <Text style={styles.teamCardMeta} numberOfLines={1}>
+          <Text
+            style={[styles.teamCardMeta, { color: colors.textSecondary }]}
+            numberOfLines={1}
+          >
             {meta}
           </Text>
         ) : null}
         {!team.primaryRef ? (
-          <Text style={styles.teamCardWarn}>
+          <Text style={[styles.teamCardWarn, { color: colors.warning }]}>
             No tournament linked yet — open to add one
           </Text>
+        ) : indicesLoaded ? (
+          <UpcomingLine entry={upcoming} />
         ) : null}
       </View>
-      <Text style={styles.teamCardArrow}>›</Text>
+      <Text style={[styles.teamCardArrow, { color: colors.textLight }]}>
+        ›
+      </Text>
     </TouchableOpacity>
   );
+}
+
+function UpcomingLine({ entry }: { entry: UnifiedTournamentEntry | null }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  if (!entry) {
+    return (
+      <Text
+        style={[
+          styles.upcomingPlaceholder,
+          { color: colors.textLight },
+        ]}
+        numberOfLines={1}
+      >
+        No upcoming tournaments
+      </Text>
+    );
+  }
+  const days = daysUntil(entry.dateMs);
+  const trailing = [
+    days != null
+      ? days <= 0
+        ? 'Today'
+        : days === 1
+        ? 'Tomorrow'
+        : `in ${days}d`
+      : null,
+    entry.venueName,
+    entry.dateText,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  return (
+    <Text
+      style={[styles.upcomingLine, { color: colors.primary }]}
+      numberOfLines={1}
+    >
+      <Text style={{ fontWeight: '700' }}>{'\u{1F4C5} '}{entry.tournamentName}</Text>
+      {trailing ? <Text style={{ fontWeight: '500' }}> · {trailing}</Text> : null}
+    </Text>
+  );
+}
+
+function daysUntil(dateMs?: number): number | null {
+  if (dateMs == null) return null;
+  const ms = dateMs - Date.now();
+  if (ms <= 0) return 0;
+  return Math.ceil(ms / 86_400_000);
 }
 
 // ── Connections ───────────────────────────────────────────────────────────
@@ -339,9 +570,11 @@ function ConnectionsSection({
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.section}>
-      <Text style={styles.sectionLabel}>CONNECTIONS</Text>
-      <Text style={styles.sectionHint}>
-        Sign in to OVA and CAC inside VBPlus to view your data without
+      <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
+        CONNECTIONS
+      </Text>
+      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
+        Sign in to OVA and CAC inside Setpoint to view your data without
         switching apps.
       </Text>
       <ConnectionRow
@@ -389,29 +622,40 @@ function ConnectionRow({
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.7}
-      style={styles.connectionRow}
+      style={[
+        styles.connectionRow,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.divider,
+        },
+      ]}
     >
       <Text style={styles.connectionIcon}>{icon}</Text>
       <View style={{ flex: 1 }}>
-        <Text style={styles.connectionTitle} numberOfLines={1}>
+        <Text style={[styles.connectionTitle, { color: colors.text }]} numberOfLines={1}>
           {title}
         </Text>
-        <Text style={styles.connectionSubtitle} numberOfLines={1}>
+        <Text
+          style={[styles.connectionSubtitle, { color: colors.textSecondary }]}
+          numberOfLines={1}
+        >
           {subtitle}
         </Text>
       </View>
       <View
         style={[
           styles.connectionStatus,
-          connected ? styles.connectionStatusOn : styles.connectionStatusOff,
+          connected
+            ? { backgroundColor: colors.primaryLight }
+            : { backgroundColor: colors.primary },
         ]}
       >
         <Text
           style={[
             styles.connectionStatusText,
             connected
-              ? styles.connectionStatusTextOn
-              : styles.connectionStatusTextOff,
+              ? { color: colors.primary }
+              : { color: '#fff' },
           ]}
         >
           {connected ? 'Connected' : 'Connect'}
@@ -465,11 +709,13 @@ function CareerCard({ profile }: { profile: UserProfile }) {
 
   return (
     <Card style={styles.careerCard}>
-      <Text style={styles.careerKicker}>
+      <Text style={[styles.careerKicker, { color: colors.textLight }]}>
         {meCount > 1 ? 'CAREER TOTALS' : 'SEASON TOTALS'}
       </Text>
       {loading ? (
-        <Text style={styles.careerLoading}>Loading…</Text>
+        <Text style={[styles.careerLoading, { color: colors.textSecondary }]}>
+          Loading…
+        </Text>
       ) : stats ? (
         <View style={styles.careerGrid}>
           <CareerCell
@@ -498,7 +744,7 @@ function CareerCard({ profile }: { profile: UserProfile }) {
           />
         </View>
       ) : (
-        <Text style={styles.careerLoading}>
+        <Text style={[styles.careerLoading, { color: colors.textSecondary }]}>
           No tournaments indexed yet for your teams.
         </Text>
       )}
@@ -519,10 +765,17 @@ function CareerCell({
   const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.careerCell}>
-      <Text style={[styles.careerValue, accent && styles.careerValueAccent]}>
+      <Text
+        style={[
+          styles.careerValue,
+          { color: accent ? colors.primary : colors.text },
+        ]}
+      >
         {value}
       </Text>
-      <Text style={styles.careerLabel}>{label}</Text>
+      <Text style={[styles.careerLabel, { color: colors.textSecondary }]}>
+        {label}
+      </Text>
     </View>
   );
 }
@@ -580,7 +833,6 @@ function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   hero: {
-    backgroundColor: colors.primary,
     padding: spacing.xxl,
     paddingBottom: spacing.lg,
   },
@@ -592,7 +844,6 @@ function makeStyles(colors: ThemeColors) {
     marginBottom: spacing.xs,
   },
   heroTitle: {
-    color: colors.textOnPrimary,
     fontSize: fontSize.xxl,
     fontWeight: '800',
   },
@@ -681,13 +932,11 @@ function makeStyles(colors: ThemeColors) {
   sectionLabel: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textLight,
     letterSpacing: 1,
     marginBottom: spacing.xs,
   },
   sectionHint: {
     fontSize: fontSize.xs,
-    color: colors.textSecondary,
     marginBottom: spacing.sm,
   },
 
@@ -695,12 +944,10 @@ function makeStyles(colors: ThemeColors) {
   emptyTitle: {
     fontSize: fontSize.lg,
     fontWeight: '700',
-    color: colors.text,
     marginBottom: spacing.xs,
   },
   emptyBody: {
     fontSize: fontSize.sm,
-    color: colors.textSecondary,
     lineHeight: 20,
   },
 
@@ -708,43 +955,45 @@ function makeStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     borderRadius: borderRadius.md,
     marginBottom: spacing.xs,
     borderWidth: 1,
-    borderColor: colors.divider,
   },
   teamCardCompact: { paddingVertical: spacing.sm },
-  teamCardTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
+  teamCardTitle: { fontSize: fontSize.md, fontWeight: '700' },
   teamCardTitleCompact: { fontSize: fontSize.sm, fontWeight: '600' },
   teamCardMeta: {
     fontSize: fontSize.xs,
-    color: colors.textSecondary,
     marginTop: 2,
   },
   teamCardWarn: {
     fontSize: fontSize.xs,
-    color: colors.warning,
     marginTop: 2,
     fontStyle: 'italic',
   },
+  upcomingLine: {
+    fontSize: fontSize.xs,
+    marginTop: 4,
+  },
+  upcomingPlaceholder: {
+    fontSize: fontSize.xs,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
   teamCardArrow: {
-    color: colors.textLight,
     fontSize: fontSize.lg,
     fontWeight: '600',
   },
 
   addTeamBtn: {
     paddingVertical: spacing.md,
-    backgroundColor: colors.primary,
     borderRadius: borderRadius.md,
     alignItems: 'center',
     marginTop: spacing.xs,
   },
   addTeamBtnText: {
-    color: colors.textOnPrimary,
     fontWeight: '700',
     fontSize: fontSize.md,
   },
@@ -763,23 +1012,50 @@ function makeStyles(colors: ThemeColors) {
     letterSpacing: 0.5,
   },
 
+  // Recently viewed strip
+  recentChip: {
+    width: 160,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+  },
+  recentBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    borderRadius: borderRadius.sm,
+    marginBottom: 4,
+  },
+  recentBadgeText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  recentLabel: {
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+  recentSubtitle: {
+    fontSize: fontSize.xs,
+    marginTop: 2,
+  },
+
   connectionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
-    backgroundColor: colors.surface,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     borderRadius: borderRadius.md,
     marginBottom: spacing.xs,
     borderWidth: 1,
-    borderColor: colors.divider,
   },
   connectionIcon: { fontSize: 22 },
-  connectionTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
+  connectionTitle: { fontSize: fontSize.md, fontWeight: '700' },
   connectionSubtitle: {
     fontSize: fontSize.xs,
-    color: colors.textSecondary,
     marginTop: 2,
   },
   connectionStatus: {
@@ -787,48 +1063,29 @@ function makeStyles(colors: ThemeColors) {
     paddingVertical: 4,
     borderRadius: borderRadius.sm,
   },
-  connectionStatusOn: { backgroundColor: colors.primaryLight },
-  connectionStatusOff: { backgroundColor: colors.primary },
   connectionStatusText: {
     fontSize: 11,
     fontWeight: '800',
     letterSpacing: 0.5,
   },
-  connectionStatusTextOn: { color: colors.primary },
-  connectionStatusTextOff: { color: '#fff' },
 
   careerCard: { marginTop: spacing.xs },
   careerKicker: {
     fontSize: 11,
     fontWeight: '700',
-    color: colors.textLight,
     letterSpacing: 1,
     marginBottom: spacing.sm,
   },
   careerLoading: {
     fontSize: fontSize.sm,
-    color: colors.textSecondary,
     fontStyle: 'italic',
   },
   careerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   careerCell: { flexBasis: '47%', flexGrow: 1 },
-  careerValue: { fontSize: fontSize.lg, fontWeight: '800', color: colors.text },
-  careerValueAccent: { color: colors.primary },
+  careerValue: { fontSize: fontSize.lg, fontWeight: '800' },
   careerLabel: {
     fontSize: fontSize.xs,
-    color: colors.textSecondary,
     marginTop: 2,
-  },
-
-  browseLink: {
-    alignSelf: 'center',
-    paddingVertical: spacing.md,
-    marginTop: spacing.lg,
-  },
-  browseLinkText: {
-    color: colors.textLight,
-    fontSize: fontSize.sm,
-    textDecorationLine: 'underline',
   },
 });
 }

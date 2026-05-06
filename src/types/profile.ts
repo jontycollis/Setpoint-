@@ -293,11 +293,14 @@ export interface UserProfile {
    */
   coach?: CoachCredentials;
 
+  // ── Tools tab gating ───────────────────────────────────────────────────
   /**
-   * Tier 2 scorer mode. When true, the hamburger Tools section
-   * surfaces "Score a Match" and the official-scorer flow becomes
-   * reachable. Defaults to undefined / false. Per-user setting; per-
-   * team gating not in v1.
+   * Tier 2 scorer mode. When true, the Tools tab surfaces the "Score a
+   * Match" entry and the official-scorer flow becomes reachable.
+   * Defaults to undefined / false — most users aren't scoring matches and
+   * don't need the row cluttering the Tools list. Per-user setting; per-
+   * team gating not in v1. Used by both the navigation pass (to gate the
+   * Tools row) and the Tier 2 scoring screens (to gate the entry point).
    */
   scorerMode?: boolean;
 
