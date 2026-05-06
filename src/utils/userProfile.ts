@@ -15,10 +15,23 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { FavoriteTeam } from '../types/aes';
 import type {
   UserProfile,
+  UserProfileV1,
   TeamProfile,
   TeamProfileSource,
 } from '../types/profile';
 import { normalizeName, matchesAnyAlias } from './seasonTeamIdentity';
+import { buildV2FromV1 } from './userProfileMigration';
+
+// Re-export the pure helpers so callers that already import from
+// './userProfile' don't need to change. The functions themselves live in
+// `userProfileMigration.ts` so the migration logic is exercisable without
+// pulling AsyncStorage into the test harness.
+export {
+  buildV2FromV1,
+  makeAthleteProfileId,
+  getActiveAthlete,
+  getTeamsForAthlete,
+} from './userProfileMigration';
 
 // New storage key. Old keys (`aes.myTeam`, `season.myTeamAliases.v1`)
 // remain in place during Phase 1 — they're cleaned up in Phase 2 once
@@ -90,11 +103,17 @@ export function dedupeAliases(aliases: Array<string | undefined>): string[] {
  * favorites collapse onto the user's own profile rather than producing
  * a redundant watching entry.
  *
+ * Internally builds a v1-shape result and immediately upgrades it through
+ * `buildV2FromV1`, so the caller always receives a v2 profile. This keeps
+ * the legacy-keys → v2 path consistent with the v1-stored → v2 path.
+ *
  * In every case, the resulting profile has:
- *   - version: 1
+ *   - version: 2
  *   - mrsLinked: false / cacLinked: false (no integrations yet)
  *   - migratedFromLegacyAt: now
+ *   - migratedFromV1At: now (the v1→v2 step also runs in this path)
  *   - activeTeamId set to the migrated me-team's id (or null if none)
+ *   - athletes: [<self athlete>] when an me-team was created, else []
  */
 export function buildProfileFromLegacy(
   legacyMyTeam: FavoriteTeam | null,
@@ -184,7 +203,7 @@ export function buildProfileFromLegacy(
   const firstMe = teams.find((t) => t.kind === 'me');
   const activeTeamId = firstMe?.id ?? null;
 
-  return {
+  const v1: UserProfileV1 = {
     version: 1,
     teams,
     activeTeamId,
@@ -194,6 +213,7 @@ export function buildProfileFromLegacy(
     updatedAt: now,
     migratedFromLegacyAt: now,
   };
+  return buildV2FromV1(v1, now);
 }
 
 
@@ -232,10 +252,30 @@ async function setJson(key: string, value: unknown): Promise<void> {
  * app still reads them. Phase 2 cleanup removes them once readers migrate.
  */
 export async function loadOrMigrateUserProfile(): Promise<UserProfile> {
-  const existing = await getJson<UserProfile | null>(PROFILE_KEY, null);
-  if (existing && existing.version === 1) return existing;
+  // Persisted shape may be v1 (pre-multi-athlete) or v2. Read as the
+  // discriminated union and branch on `version`.
+  const existing = await getJson<UserProfileV1 | UserProfile | null>(
+    PROFILE_KEY,
+    null
+  );
 
-  // First-time read after Phase 1 ships — build from legacy and persist.
+  if (existing && existing.version === 2) {
+    // Already v2; return as-is. (Defensive activeAthleteId reset is
+    // deferred to Phase 2 once athletes can actually be deleted; in
+    // Phase 1 nothing in the app mutates the athletes array.)
+    return existing;
+  }
+
+  if (existing && existing.version === 1) {
+    // Forward-migrate v1 → v2 and persist the upgraded shape.
+    const upgraded = buildV2FromV1(existing);
+    await setJson(PROFILE_KEY, upgraded);
+    return upgraded;
+  }
+
+  // First-time read — build from the original legacy keys (pre-v1).
+  // `buildProfileFromLegacy` already produces a v2 profile via
+  // `buildV2FromV1` internally.
   const [legacyMyTeam, legacyAliases, legacyFavorites] = await Promise.all([
     loadLegacyMyTeam(),
     loadLegacyAliases(),

@@ -55,6 +55,13 @@ export interface TeamProfile {
   /** Whether this team rolls up into the Career view. Defaults to 'me'. */
   kind: TeamProfileKind;
   /**
+   * The athlete this team belongs to. Set when kind === 'me'; absent when
+   * kind === 'watching' (watching is account-holder-scoped). v1 → v2
+   * migration tags every existing 'me' team with the auto-created self
+   * athlete's id.
+   */
+  athleteId?: string;
+  /**
    * Names the team has gone by across snapshots (Timu/AES + spelling drift).
    * Replaces the global `season.myTeamAliases.v1` list — now scoped per team.
    */
@@ -164,14 +171,76 @@ export interface LockerModule {
   expiresAt?: number;
 }
 
+// ── AthleteProfile ────────────────────────────────────────────────────────
+//
+// An explicitly-added linked person whose teams we track. Sibling of
+// UserProfile — the account holder (parent / coach) is *not* implicitly an
+// athlete; if they also play or coach a team they care about, they add
+// themselves with `relation: 'self'`. The v1 → v2 migration auto-creates
+// one 'self' athlete to anchor any existing 'me' teams (see
+// `userProfile.ts` / `userProfileMigration.ts`).
+//
+// Per-athlete MRS / CAC fields are reserved here; v1 ships with all such
+// state on UserProfile (account-holder-scoped). A future per-child-MRS or
+// older-sibling-coach world fills these in.
+export interface AthleteProfile {
+  /** Stable id, e.g. `ath_<base36-time>_<random>`. */
+  id: string;
+
+  /** Display label — "Sarah", "Emily", "Me". Required. */
+  displayName: string;
+
+  /**
+   *   'self'  — the account holder added themselves (they also play/coach)
+   *   'child' — the account holder's child
+   *   'other' — niece, friend, sibling, etc.
+   * At most one 'self' entry exists at a time (Phase 2 enforces).
+   */
+  relation: 'self' | 'child' | 'other';
+
+  /**
+   * What this athlete *does* on their teams. Distinct from
+   * UserProfile.role (the account holder's relation to volleyball overall).
+   */
+  role?: 'athlete' | 'coach' | 'assistant-coach' | 'other';
+
+  // ── Per-athlete MRS (reserved, future) ───────────────────────────────
+  /** Reserved. v1 stores MRS state on UserProfile.mrsMemberId. */
+  mrsMemberId?: string;
+  mrsLinked?: boolean;
+
+  // ── Per-athlete CAC (reserved, future) ───────────────────────────────
+  /** Reserved. UserProfile.coach remains the account holder's in v1. */
+  coach?: CoachCredentials;
+
+  // ── Optional metadata ────────────────────────────────────────────────
+  primaryAgeGroup?: string;
+  /** Avatar emoji or single-character initials override. No image upload v1. */
+  avatar?: string;
+
+  createdAt: number;
+  updatedAt: number;
+}
+
 // ── UserProfile ───────────────────────────────────────────────────────────
 //
-// One per device install. Persisted at `vbplus.userProfile.v1`. Migration
-// from legacy keys is lazy — `loadOrMigrateUserProfile()` builds this on
-// first call from the existing `aes.myTeam` + `season.myTeamAliases.v1`.
+// One per device install. Persisted at `vbplus.userProfile.v1` (storage key
+// is unchanged across schema versions; the `version` field on the value
+// discriminates). Migration from legacy keys is lazy —
+// `loadOrMigrateUserProfile()` builds this on first call.
+//
+// The shape is "parent-as-identity": this record describes the account
+// holder using the device. Linked athletes live in a sibling
+// `AthleteProfile[]` collection. If the account holder also plays or
+// coaches their own team, they add themselves explicitly as
+// `relation: 'self'`.
 export interface UserProfile {
-  /** Schema version — bump on breaking shape changes; migrate forward. */
-  version: 1;
+  /**
+   * Schema version. v1 had a single user (no athletes array); v2 introduces
+   * `athletes` + `activeAthleteId` + `TeamProfile.athleteId`. v1 readers
+   * must run buildV2FromV1().
+   */
+  version: 2;
 
   // ── Optional identity ──────────────────────────────────────────────────
   // Both optional. UI falls back to a generic "My career" header when
@@ -179,6 +248,20 @@ export interface UserProfile {
   // Never block boot or onboarding on these fields.
   displayName?: string;
   role?: ProfileRole;
+
+  // ── Athletes (explicit additions only) ────────────────────────────────
+  /**
+   * Every linked person whose teams we track. May be empty (brand-new
+   * install with no athletes added yet, or post-migration with zero
+   * 'me' teams). The account holder is NOT implicitly here.
+   */
+  athletes: AthleteProfile[];
+  /**
+   * Which athlete is the current navigation context. Null when athletes
+   * is empty. Phase 2 UI defaults to athletes[0]?.id if the persisted
+   * id is missing or dangling.
+   */
+  activeAthleteId: string | null;
 
   /** All teams the user has added — current and past, 'me' and 'watching'. */
   teams: TeamProfile[];
@@ -225,5 +308,30 @@ export interface UserProfile {
    * Epoch ms when this profile was created from legacy keys. Diagnostic-only
    * — lets us detect users who were already using VBPlus pre-restructure.
    */
+  migratedFromLegacyAt?: number;
+  /**
+   * Epoch ms when the v1 → v2 multi-athlete migration ran. Diagnostic-only.
+   */
+  migratedFromV1At?: number;
+}
+
+// ── UserProfileV1 (legacy shape, migration input only) ────────────────────
+//
+// Pre-multi-athlete shape. Persisted under the same storage key as
+// UserProfile (the `version` field discriminates). NOT exported as part of
+// the public profile API — readers should always work with `UserProfile`
+// (v2). `buildV2FromV1` consumes this and produces a `UserProfile`.
+export interface UserProfileV1 {
+  version: 1;
+  displayName?: string;
+  role?: ProfileRole;
+  teams: TeamProfile[];
+  activeTeamId: string | null;
+  mrsLinked: boolean;
+  mrsMemberId?: string;
+  cacLinked: boolean;
+  coach?: CoachCredentials;
+  createdAt: number;
+  updatedAt: number;
   migratedFromLegacyAt?: number;
 }
