@@ -40,8 +40,18 @@ import { TimuOpponentScoutScreen } from './src/screens/TimuOpponentScoutScreen';
 import { TimuManageSeasonScreen } from './src/screens/TimuManageSeasonScreen';
 import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
 import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
+import { ToolsScreen } from './src/screens/ToolsScreen';
+import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
+import type { GlobalSearchResult } from './src/screens/GlobalSearchScreen';
 import { HamburgerMenu } from './src/components/HamburgerMenu';
 import type { MenuDestination } from './src/components/HamburgerMenu';
+import { TopBar } from './src/components/TopBar';
+import { BottomTabBar, BOTTOM_TAB_BAR_HEIGHT } from './src/components/BottomTabBar';
+import type { TabKey } from './src/components/BottomTabBar';
+import {
+  pushRecentlyViewedAndNotify,
+  type RecentItem,
+} from './src/utils/recentlyViewed';
 import { getEvent, getTeamAssignments } from './src/api/aesClient';
 import {
   loadSavedEvents,
@@ -111,7 +121,39 @@ type Screen =
   | 'TimuOpponentScout'
   | 'TimuManageSeason'
   | 'SeasonHistory'
-  | 'OvaRankings';
+  | 'OvaRankings'
+  | 'Tools'
+  | 'GlobalSearch';
+
+// ── Bottom tab routing ─────────────────────────────────────────────────────
+//
+// Three "home destinations" map onto the bottom tab bar. A tab tap is a
+// destination switch — caller clears screenHistory and sets `screen` to the
+// destination. When the user is "deep" inside a flow (TeamDashboard etc.)
+// no tab is highlighted but all three remain reachable.
+function tabForScreen(screen: Screen): TabKey | null {
+  if (screen === 'MyHome') return 'home';
+  if (screen === 'TournamentSelect') return 'browse';
+  if (screen === 'Tools') return 'tools';
+  return null;
+}
+
+// Screens that DON'T show the active-team pill in the TopBar. Everything
+// else shows the pill when an activeTeamId is set.
+const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
+  'MyHome',
+  'AddTeamChooser',
+  'MrsConnection',
+  'CacConnection',
+  'TournamentSelect',
+  'Tools',
+  'GlobalSearch',
+]);
+
+// Screens where the bottom tab bar is hidden (focused full-screen flows).
+const TAB_BAR_HIDDEN_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
+  'GlobalSearch',
+]);
 
 /**
  * Phase 4: which hamburger context to render. Home covers MyHome /
@@ -129,6 +171,8 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'TournamentSelect':
     case 'EventEntry':
     case 'OvaRankings':
+    case 'Tools':
+    case 'GlobalSearch':
       return 'home';
     default:
       return 'team';
@@ -296,6 +340,12 @@ export default function App() {
     setCurrentTeam(null);
     setScreenHistory((prev) => [...prev, 'TournamentSelect']);
     setScreen('TimuTournament');
+    pushRecentlyViewedAndNotify({
+      kind: 'tournament-timu',
+      tid,
+      label: `Tournament ${tid}`,
+      touchedAt: Date.now(),
+    });
   }, []);
 
   const onTimuInfoLoaded = useCallback((info: TimuTournamentInfo) => {
@@ -311,6 +361,15 @@ export default function App() {
       });
       return next.slice(0, 10);
     });
+    // Refresh the matching recently-viewed entry with the real tournament
+    // name (the initial push from onTimuLoaded only had the bare tid).
+    pushRecentlyViewedAndNotify({
+      kind: 'tournament-timu',
+      tid: info.tid,
+      label: info.name || `Tournament ${info.tid}`,
+      subtitle: info.venueName || info.dateText,
+      touchedAt: Date.now(),
+    });
   }, []);
 
   const handleTimuTeamPress = useCallback(
@@ -319,8 +378,19 @@ export default function App() {
       setCurrentTimuTeamName(teamName);
       setScreenHistory((prev) => [...prev, screen]);
       setScreen('TimuTeamDashboard');
+      const tournament = savedTimuTournaments.find(
+        (t) => t.tid === currentTimuTid
+      );
+      pushRecentlyViewedAndNotify({
+        kind: 'team-timu',
+        tid: currentTimuTid,
+        teamName,
+        label: teamName,
+        subtitle: tournament?.name,
+        touchedAt: Date.now(),
+      });
     },
-    [currentTimuTid, screen]
+    [currentTimuTid, screen, savedTimuTournaments]
   );
 
   const isTimuFavorite = useCallback(
@@ -513,6 +583,13 @@ export default function App() {
         ];
       });
       navigate('DivisionSelect');
+      pushRecentlyViewedAndNotify({
+        kind: 'tournament-aes',
+        eventKey: event.Key,
+        label: event.Name,
+        subtitle: event.Location,
+        touchedAt: Date.now(),
+      });
     },
     [navigate]
   );
@@ -530,8 +607,20 @@ export default function App() {
     (team: AESTeamAssignment) => {
       setCurrentTeam(team);
       navigate('TeamDashboard');
+      if (currentEvent && currentDivision) {
+        pushRecentlyViewedAndNotify({
+          kind: 'team-aes',
+          eventKey: currentEvent.Key,
+          divisionId: currentDivision.DivisionId,
+          teamId: team.TeamId,
+          label: team.TeamText || team.TeamName,
+          subtitle: `${currentDivision.Name} — ${currentEvent.Name}`,
+          divisionColorHex: currentDivision.ColorHex,
+          touchedAt: Date.now(),
+        });
+      }
     },
-    [navigate]
+    [navigate, currentEvent, currentDivision]
   );
 
   const onScoutOpponent = useCallback(
@@ -635,6 +724,14 @@ export default function App() {
         setCurrentTeam(null);
         setScreenHistory((prev) => [...prev, screen]);
         setScreen('TimuTeamDashboard');
+        pushRecentlyViewedAndNotify({
+          kind: 'team-timu',
+          tid,
+          teamName: fav.teamName,
+          label: fav.teamName,
+          subtitle: fav.eventName,
+          touchedAt: Date.now(),
+        });
         return;
       }
 
@@ -703,6 +800,16 @@ export default function App() {
               location: event!.Location,
             },
           ];
+        });
+        pushRecentlyViewedAndNotify({
+          kind: 'team-aes',
+          eventKey: fav.eventKey,
+          divisionId: fav.divisionId,
+          teamId: fav.teamId,
+          label: fav.teamText || fav.teamName,
+          subtitle: `${fav.divisionName} — ${fav.eventName}`,
+          divisionColorHex: fav.divisionColorHex,
+          touchedAt: Date.now(),
         });
       } catch (err: any) {
         Alert.alert('Error', err.message || 'Failed to load team data');
@@ -870,6 +977,116 @@ export default function App() {
     [screen, currentEvent, currentDivision, currentTeam, currentTimuTid, currentTimuTeamName, myTeam, userProfile]
   );
 
+  // ── Bottom tab handler ─────────────────────────────────────────────────
+  // A tab tap is a destination switch: clear screenHistory + context, set
+  // the screen to the matching home destination.
+  const handleTabSelect = useCallback((tab: TabKey) => {
+    setScreenHistory([]);
+    setCurrentEvent(null);
+    setCurrentDivision(null);
+    setCurrentTeam(null);
+    setSelectedCountry(null);
+    setSelectedTournament(null);
+    setSelectedTournamentYear(null);
+    if (tab === 'home') setScreen('MyHome');
+    else if (tab === 'browse') setScreen('TournamentSelect');
+    else if (tab === 'tools') setScreen('Tools');
+  }, []);
+
+  // ── Recently-viewed open ──────────────────────────────────────────────
+  // Routes by kind. AES team routes through handleNavigateToFavorite (which
+  // re-fetches the event/division). Timu paths set state and jump directly.
+  const handleOpenRecent = useCallback(
+    async (item: RecentItem) => {
+      if (item.kind === 'team-aes') {
+        handleNavigateToFavorite({
+          source: 'aes',
+          eventKey: item.eventKey,
+          eventName: '',
+          teamId: item.teamId,
+          teamName: item.label,
+          teamText: item.label,
+          teamCode: '',
+          clubName: '',
+          divisionId: item.divisionId,
+          divisionName: '',
+          divisionColorHex: item.divisionColorHex || '',
+        });
+      } else if (item.kind === 'team-timu') {
+        setCurrentTimuTid(item.tid);
+        setCurrentTimuTeamName(item.teamName);
+        setCurrentEvent(null);
+        setCurrentDivision(null);
+        setCurrentTeam(null);
+        setScreenHistory((prev) => [...prev, screen]);
+        setScreen('TimuTeamDashboard');
+      } else if (item.kind === 'tournament-aes') {
+        try {
+          const event = await getEvent(item.eventKey);
+          setCurrentEvent(event);
+          setCurrentDivision(null);
+          setCurrentTeam(null);
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('DivisionSelect');
+        } catch (err: any) {
+          Alert.alert('Error', err?.message || 'Failed to load event');
+        }
+      } else if (item.kind === 'tournament-timu') {
+        setCurrentTimuTid(item.tid);
+        setCurrentTimuTeamName(null);
+        setScreenHistory((prev) => [...prev, screen]);
+        setScreen('TimuTournament');
+      }
+    },
+    [screen, handleNavigateToFavorite]
+  );
+
+  // ── Global search result open ─────────────────────────────────────────
+  const handleGlobalSearchSelect = useCallback(
+    (result: GlobalSearchResult) => {
+      if (result.kind === 'aes-team') {
+        handleNavigateToFavorite({
+          source: 'aes',
+          eventKey: result.eventKey,
+          eventName: result.eventName,
+          teamId: result.teamId,
+          teamName: result.teamName,
+          teamText: result.teamText || result.teamName,
+          teamCode: '',
+          clubName: result.clubName || '',
+          divisionId: result.divisionId,
+          divisionName: result.divisionName,
+          divisionColorHex: result.divisionColorHex || '',
+        });
+      } else if (result.kind === 'timu-team') {
+        setCurrentTimuTid(result.tid);
+        setCurrentTimuTeamName(result.teamName);
+        setCurrentEvent(null);
+        setCurrentDivision(null);
+        setCurrentTeam(null);
+        setScreenHistory([]);
+        setScreen('TimuTeamDashboard');
+        pushRecentlyViewedAndNotify({
+          kind: 'team-timu',
+          tid: result.tid,
+          teamName: result.teamName,
+          label: result.teamName,
+          subtitle: result.tournamentName,
+          touchedAt: Date.now(),
+        });
+      } else if (result.kind === 'profile-team') {
+        handleSwitchActiveTeam(result.team.id);
+        if (result.team.primaryRef) {
+          handleNavigateToFavorite(result.team.primaryRef);
+        } else {
+          setScreenHistory([]);
+          setScreen('MyHome');
+        }
+      }
+    },
+    [handleNavigateToFavorite, handleSwitchActiveTeam]
+  );
+
   const darkHeaderScreens: Screen[] = [
     'TeamSearch',
     'TeamDashboard',
@@ -885,6 +1102,7 @@ export default function App() {
     'TimuManageSeason',
     'SeasonHistory',
     'OvaRankings',
+    'GlobalSearch',
   ];
 
   const toggleFavorite = useCallback(
@@ -964,10 +1182,7 @@ export default function App() {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('CacConnection');
             }}
-            onBrowseTournaments={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('TournamentSelect');
-            }}
+            onOpenRecent={handleOpenRecent}
           />
         );
       case 'AddTeamChooser':
@@ -1430,10 +1645,47 @@ export default function App() {
             }}
           />
         );
+      case 'Tools':
+        return (
+          <ToolsScreen
+            profile={userProfile}
+            onOpenMrsConnection={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MrsConnection');
+            }}
+            onOpenCacConnection={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('CacConnection');
+            }}
+            onOpenScoreAMatch={() => {
+              // Score-a-Match screen ships with the parallel Tier 2 work.
+              // The row is gated on userProfile.scorerMode so this handler
+              // only runs once that toggle is on. Until the screen lands,
+              // surface a placeholder so the tap isn't silent.
+              Alert.alert(
+                'Score a Match',
+                'The scoring console ships with the Tier 2 update.'
+              );
+            }}
+          />
+        );
+      case 'GlobalSearch':
+        return (
+          <GlobalSearchScreen
+            profile={userProfile}
+            onBack={goBack}
+            onSelect={handleGlobalSearchSelect}
+          />
+        );
       default:
         return null;
     }
   }
+
+  const handleOpenGlobalSearch = useCallback(() => {
+    setScreenHistory((prev) => [...prev, screen]);
+    setScreen('GlobalSearch');
+  }, [screen]);
 
   return (
     <ThemeContext.Provider value={themeContextValue}>
@@ -1455,6 +1707,8 @@ export default function App() {
         favoriteTeams={favoriteTeams}
         navigatingToFav={navigatingToFav}
         userProfile={userProfile}
+        onTabSelect={handleTabSelect}
+        onOpenGlobalSearch={handleOpenGlobalSearch}
         onSwitchTeam={(teamId: string) => {
           handleSwitchActiveTeam(teamId);
           // Mirror the MyHome behaviour: opening the team's dashboard if
@@ -1494,19 +1748,49 @@ function AppContent({
   navigatingToFav,
   userProfile,
   onSwitchTeam,
+  onTabSelect,
+  onOpenGlobalSearch,
 }: any) {
   const insets = useSafeAreaInsets();
+  const lightHeader = darkHeaderScreens.includes(screen);
+  const showTabBar = !TAB_BAR_HIDDEN_SCREENS.has(screen);
+  const showPill =
+    !PILL_SUPPRESSED_SCREENS.has(screen) && !!userProfile?.activeTeamId;
+  const showSearch = screen === 'MyHome';
+  // Reserve space at the bottom for the tab bar so screens don't render
+  // under it. Tab bar height is fixed; the safe-area bottom is added inside
+  // the bar component itself.
+  const screenPaddingBottom = showTabBar
+    ? BOTTOM_TAB_BAR_HEIGHT + insets.bottom
+    : 0;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar style={darkHeaderScreens.includes(screen) ? "light" : "dark"} />
-      {renderScreen()}
+      <StatusBar style={lightHeader ? 'light' : 'dark'} />
+      <View style={{ flex: 1, paddingBottom: screenPaddingBottom }}>
+        {renderScreen()}
+      </View>
       {navigatingToFav && (
         <View style={styles.favLoadingOverlay}>
           <ActivityIndicator size="large" color="#ffffff" />
           <Text style={styles.favLoadingText}>Loading team...</Text>
         </View>
       )}
+      {/* Top-left: active-team pill + (on MyHome) search icon. Mirror of
+          the right-side hamburger overlay. */}
+      <View
+        style={[styles.topBarOverlay, { top: insets.top + 8 }]}
+        pointerEvents="box-none"
+      >
+        <TopBar
+          userProfile={userProfile}
+          onSwitchTeam={onSwitchTeam}
+          onOpenSearch={onOpenGlobalSearch}
+          showActiveTeamPill={showPill}
+          showSearch={showSearch}
+          light={lightHeader}
+        />
+      </View>
       <View style={[styles.menuOverlay, { top: insets.top + 8 }]} pointerEvents="box-none">
         <HamburgerMenu
           onNavigate={handleMenuNavigate}
@@ -1517,7 +1801,7 @@ function AppContent({
           hasTeam={!!currentTeam || !!currentTimuTeamName}
           onTimu={!!currentTimuTid}
           currentScreen={screen === 'TournamentSelect' || screen === 'EventEntry' ? 'Home' : screen}
-          light={darkHeaderScreens.includes(screen)}
+          light={lightHeader}
           eventName={
             currentEvent?.Name ||
             savedTimuTournaments.find((t: SavedTimuTournament) => t.tid === currentTimuTid)?.name ||
@@ -1543,6 +1827,9 @@ function AppContent({
           menuContext={menuContextForScreen(screen)}
         />
       </View>
+      {showTabBar && (
+        <BottomTabBar activeTab={tabForScreen(screen)} onSelect={onTabSelect} />
+      )}
     </View>
   );
 }
@@ -1575,5 +1862,11 @@ const styles = StyleSheet.create({
     zIndex: 100,
     alignItems: 'flex-end',
     // Do not set left/width — keep it tight to the right side
+  },
+  topBarOverlay: {
+    position: 'absolute',
+    left: 8,
+    zIndex: 100,
+    alignItems: 'flex-start',
   },
 });

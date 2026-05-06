@@ -193,6 +193,17 @@ export interface UserProfile {
    */
   coach?: CoachCredentials;
 
+  // ── Tools tab gating ───────────────────────────────────────────────────
+  /**
+   * When true, the Tools tab surfaces the "Score a Match" entry. Default
+   * false — most users are not scoring matches and don't need the row
+   * cluttering the Tools list. Toggled by the Tier 2 scoring flow when it
+   * provisions the user as a scorer (parallel session, owns the toggle UI).
+   * Also concurrently added by Tier 2 Session B; if both edits land,
+   * preserve a single declaration here.
+   */
+  scorerMode?: boolean;
+
   // ── Bookkeeping ────────────────────────────────────────────────────────
   createdAt: number;
   updatedAt: number;
