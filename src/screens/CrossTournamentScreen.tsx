@@ -1,5 +1,5 @@
 // Cross-Tournament History — season-long view across multiple tournaments
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   loadTournamentHistory,
   saveTournamentHistory,
@@ -26,6 +27,8 @@ interface Props {
 }
 
 export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [history, setHistory] = useState<TournamentHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
@@ -268,7 +271,8 @@ export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: {
     flex: 1,
@@ -483,3 +487,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+}

@@ -1,0 +1,77 @@
+// ── Scored-match persistence ───────────────────────────────────────────────
+//
+// Thin AsyncStorage wrapper for the Tier 2 scoring engine's matches.
+// Stored as a single JSON blob keyed by `scored.matches.v1`, mapping
+// match.id → Match. We could split per-match into separate keys for
+// faster partial reads, but matches are small (~25 KB even for a
+// thrash-y full-event match) so a single blob is fine — typical user
+// has dozens, not thousands, of scored matches stored.
+//
+// NOT covered by unit tests in Session A — AsyncStorage is a thin RN
+// shim that vitest can't drive without mocks. The contract here is
+// straightforward enough that integration testing in-app (Session B+)
+// will catch any real bugs.
+// ────────────────────────────────────────────────────────────────────────────
+
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Match } from '../types/match';
+
+const STORAGE_KEY = 'scored.matches.v1';
+
+type StoredBlob = Record<string, Match>;
+
+async function readBlob(): Promise<StoredBlob> {
+  try {
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+async function writeBlob(blob: StoredBlob): Promise<void> {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(blob));
+  } catch {
+    // Best-effort. Storage failures here surface in the next
+    // saveMatch call too — caller can retry with a UI affordance.
+  }
+}
+
+/** All matches sorted by createdAt desc (newest first). */
+export async function loadMatches(): Promise<Match[]> {
+  const blob = await readBlob();
+  return Object.values(blob).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+/** Single match by id, or null if not found. */
+export async function loadMatchById(id: string): Promise<Match | null> {
+  const blob = await readBlob();
+  return blob[id] ?? null;
+}
+
+/** Persist a match, overwriting any prior version with the same id. */
+export async function saveMatch(match: Match): Promise<void> {
+  const blob = await readBlob();
+  blob[match.id] = match;
+  await writeBlob(blob);
+}
+
+/** Remove a match. No-op if the id isn't present. */
+export async function deleteMatch(id: string): Promise<void> {
+  const blob = await readBlob();
+  if (!(id in blob)) return;
+  delete blob[id];
+  await writeBlob(blob);
+}
+
+/** Erase every stored match. Used by "Reset all data" affordances. */
+export async function clearAllMatches(): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Card } from './Card';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { formatTime, getRelativeTime } from '../utils/dates';
 
 interface MatchCardProps {
@@ -35,6 +36,8 @@ export function MatchCard({
   highlightTeamId,
   onPress,
 }: MatchCardProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const isHomeHighlighted = highlightTeamId === homeTeamId;
   const isAwayHighlighted = highlightTeamId === awayTeamId;
   const homeWon = winnerId === homeTeamId;
@@ -128,7 +131,8 @@ export function MatchCard({
   return content;
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -215,3 +219,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
 });
+}

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   Pressable,
   ScrollView,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius, useTheme } from '../utils/theme';
+import { spacing, fontSize, borderRadius, useTheme } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import type { FavoriteTeam } from '../types/aes';
 import type { UserProfile, TeamProfile } from '../types/profile';
 import { sortedTeamsForDisplay } from '../utils/activeTeamProfile';
@@ -34,7 +35,9 @@ export type MenuDestination =
   | 'OvaRankings'
   | 'AddTeamChooser'
   | 'MrsConnection'
-  | 'CacConnection';
+  | 'CacConnection'
+  | 'Scoreboard'
+  | 'MatchList';
 
 /**
  * The hamburger renders different items depending on whether the user is
@@ -83,6 +86,9 @@ interface Props {
    * to its dashboard.
    */
   onSwitchTeam?: (teamId: string) => void;
+  /** Tier 2: toggles the official-scorer flow on/off. When undefined,
+   *  the toggle row hides entirely. */
+  onToggleScorerMode?: (next: boolean) => void;
   // ── Phase 4: context-aware menu ───────────────────────────────────────
   /**
    * Which mode to render the menu in. Caller computes from screen +
@@ -111,8 +117,11 @@ export function HamburgerMenu({
   currentEventKey,
   userProfile,
   onSwitchTeam,
+  onToggleScorerMode,
   menuContext = 'home',
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [visible, setVisible] = useState(false);
   const theme = useTheme();
 
@@ -206,26 +215,27 @@ export function HamburgerMenu({
                 </View>
               )}
 
-              {/* ── Team context: Home button + active team banner ─── */}
-              {menuContext === 'team' && userProfile && (
+              {/* ── MY TEAMS — always visible when the user has a profile.
+                  Combines the old standalone Home button, the legacy
+                  separate "FAVORITE TEAMS" section, and the cross-context
+                  team switcher into a single grouping of "everything that
+                  belongs to me". */}
+              {userProfile && (
                 <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>MY TEAMS</Text>
+
+                  {/* My Home — first entry in MY so it's always reachable
+                      from any screen, even team-context screens. */}
                   <MenuRow
                     icon={'\u{1F3E0}'}
-                    label="Home"
-                    subtitle="Back to my teams"
+                    label="My Home"
                     available={true}
-                    isCurrent={false}
+                    isCurrent={isCurrentScreen('MyHome')}
                     onPress={() => handleSelect('MyHome')}
                   />
-                </View>
-              )}
 
-              {/* ── Team switcher (both contexts when teams exist) ─── */}
-              {userProfile && userProfile.teams.length > 0 && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>
-                    {menuContext === 'team' ? 'SWITCH TEAM' : 'MY TEAMS'}
-                  </Text>
+                  {/* Tracked teams — tap any to switch active team and
+                      open its Season History. */}
                   {sortedTeamsForDisplay(userProfile).map((team) => (
                     <TeamSwitcherRow
                       key={team.id}
@@ -238,26 +248,8 @@ export function HamburgerMenu({
                       }}
                     />
                   ))}
-                </View>
-              )}
 
-              {/* ── Home context: minimal navigation ─────────────────── */}
-              {menuContext === 'home' && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>NAVIGATE</Text>
-
-                  {/* My Home — explicit when not already there */}
-                  {userProfile && (
-                    <MenuRow
-                      icon={'\u{1F3E0}'}
-                      label="My Home"
-                      available={true}
-                      isCurrent={isCurrentScreen('MyHome')}
-                      onPress={() => handleSelect('MyHome')}
-                    />
-                  )}
-
-                  {/* Add team — clear CTA */}
+                  {/* + Add team CTA — always at the bottom of the list. */}
                   <MenuRow
                     icon={'➕'}
                     label="Add team"
@@ -266,59 +258,17 @@ export function HamburgerMenu({
                     isCurrent={isCurrentScreen('AddTeamChooser')}
                     onPress={() => handleSelect('AddTeamChooser')}
                   />
-
-                  {/* Browse tournaments — explore-mode without pinning */}
-                  <MenuRow
-                    icon={'\u{1F4C5}'}
-                    label="Browse tournaments"
-                    subtitle="Look around without adding a team"
-                    available={true}
-                    isCurrent={isCurrentScreen('Home')}
-                    onPress={() => handleSelect('Home')}
-                  />
-
-                  {/* OVA Rankings */}
-                  <MenuRow
-                    icon={'\u{1F4C8}'}
-                    label="OVA Rankings"
-                    subtitle="Girls + Boys, all divisions"
-                    available={true}
-                    isCurrent={isCurrentScreen('OvaRankings')}
-                    onPress={() => handleSelect('OvaRankings')}
-                  />
-
-                  {/* Connections — real entry points (Phase 4) */}
-                  <MenuRow
-                    icon={'\u{1F517}'}
-                    label="OVA MRS"
-                    subtitle={
-                      userProfile?.mrsLinked
-                        ? 'Connected'
-                        : 'Connect to view affiliations'
-                    }
-                    available={true}
-                    isCurrent={isCurrentScreen('MrsConnection')}
-                    onPress={() => handleSelect('MrsConnection')}
-                  />
-                  <MenuRow
-                    icon={'\u{1F3CB}'}
-                    label="CAC Locker"
-                    subtitle={
-                      userProfile?.cacLinked
-                        ? 'Connected'
-                        : 'Connect to view NCCP'
-                    }
-                    available={true}
-                    isCurrent={isCurrentScreen('CacConnection')}
-                    onPress={() => handleSelect('CacConnection')}
-                  />
                 </View>
               )}
 
-              {/* ── Team context: team-bound navigation ──────────────── */}
-              {menuContext === 'team' && (
+              {/* ── TOURNAMENT — only visible when actually inside an
+                    active tournament context (AES event or Timu tid).
+                    The previous split between "TEAM" and "TOURNAMENT"
+                    sections was confusing; everything tournament-scoped
+                    now lives here. */}
+              {(hasEvent || onTimu) && (
                 <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>TEAM</Text>
+                  <Text style={styles.sectionLabel}>TOURNAMENT</Text>
 
                   {/* Dashboard — works for both AES and Timu via My Team */}
                   <MenuRow
@@ -347,7 +297,7 @@ export function HamburgerMenu({
                     }}
                   />
 
-                  {/* My Season History */}
+                  {/* Season History */}
                   {myTeam && (
                     <MenuRow
                       icon={'\u{1F3C5}'}
@@ -368,14 +318,6 @@ export function HamburgerMenu({
                     isCurrent={isCurrentScreen('TimuManageSeason')}
                     onPress={() => handleSelect('TimuManageSeason')}
                   />
-                </View>
-              )}
-
-              {/* ── Tournament-scoped items (only in team context with
-                    an event currently loaded) ────────────────────────── */}
-              {menuContext === 'team' && (hasEvent || onTimu) && (
-                <View style={styles.section}>
-                  <Text style={styles.sectionLabel}>TOURNAMENT</Text>
 
                   {onTimu && (
                     <MenuRow
@@ -467,8 +409,77 @@ export function HamburgerMenu({
                     isCurrent={isCurrentScreen('VenueMap')}
                     onPress={() => handleSelect('VenueMap')}
                   />
+                  {/* Scoreboard now lives in the cross-context TOOLS
+                      section below so it's also reachable from home. */}
                 </View>
               )}
+
+              {/* ── TOOLS — visible from every screen, every context.
+                  Generic utilities + portal links the user might want
+                  no matter where they currently are. */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>TOOLS</Text>
+                <MenuRow
+                  icon={'\u{1F4CA}'}
+                  label="Simple Scoreboard"
+                  subtitle="Hold-up flipboard — tap to score"
+                  available={true}
+                  isCurrent={isCurrentScreen('Scoreboard')}
+                  onPress={() => handleSelect('Scoreboard')}
+                />
+                {/* Advanced scoring (full scoresheet engine) — gated by
+                    the toggle in SETTINGS below. Hidden until enabled. */}
+                {userProfile?.scorerMode ? (
+                  <MenuRow
+                    icon={'\u{1F4DD}'}
+                    label="Advanced Scoring"
+                    subtitle="Full scoresheet — rotations, subs, sanctions"
+                    available={true}
+                    isCurrent={isCurrentScreen('MatchList')}
+                    onPress={() => handleSelect('MatchList')}
+                  />
+                ) : null}
+                <MenuRow
+                  icon={'\u{1F4C8}'}
+                  label="OVA Rankings"
+                  subtitle="Girls + Boys, all divisions"
+                  available={true}
+                  isCurrent={isCurrentScreen('OvaRankings')}
+                  onPress={() => handleSelect('OvaRankings')}
+                />
+                <MenuRow
+                  icon={'\u{1F4C5}'}
+                  label="Browse tournaments"
+                  subtitle="Look around without adding a team"
+                  available={true}
+                  isCurrent={isCurrentScreen('Home')}
+                  onPress={() => handleSelect('Home')}
+                />
+                <MenuRow
+                  icon={'\u{1F517}'}
+                  label="OVA MRS"
+                  subtitle={
+                    userProfile?.mrsLinked
+                      ? 'Connected'
+                      : 'Connect to view affiliations'
+                  }
+                  available={true}
+                  isCurrent={isCurrentScreen('MrsConnection')}
+                  onPress={() => handleSelect('MrsConnection')}
+                />
+                <MenuRow
+                  icon={'\u{1F3CB}'}
+                  label="CAC Locker"
+                  subtitle={
+                    userProfile?.cacLinked
+                      ? 'Connected'
+                      : 'Connect to view NCCP'
+                  }
+                  available={true}
+                  isCurrent={isCurrentScreen('CacConnection')}
+                  onPress={() => handleSelect('CacConnection')}
+                />
+              </View>
 
               {/* Settings */}
               <View style={styles.section}>
@@ -487,11 +498,48 @@ export function HamburgerMenu({
                     </Text>
                   </View>
                 </TouchableOpacity>
+                {/* Tier 2 scorer-mode toggle — gates the "Score a Match"
+                    Tools entry above. When off (default), Tier 2 is
+                    invisible. When on, the entry appears immediately
+                    on next render. */}
+                {onToggleScorerMode ? (
+                  <TouchableOpacity
+                    style={styles.menuItem}
+                    onPress={() => onToggleScorerMode(!userProfile?.scorerMode)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.menuIcon}>{'\u{1F4DD}'}</Text>
+                    <View style={styles.menuLabelCol}>
+                      <Text style={styles.menuLabel}>
+                        Advanced Scoring
+                      </Text>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          color: userProfile?.scorerMode
+                            ? theme.colors.success
+                            : theme.colors.textSecondary,
+                          marginTop: 1,
+                          fontWeight: '700',
+                        }}
+                      >
+                        {userProfile?.scorerMode
+                          ? 'ON · Full scoresheet enabled'
+                          : 'OFF · Tap to enable in Tools'}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ) : null}
               </View>
 
 
-              {/* Favorite Teams */}
-              {favoriteTeams.length > 0 && (
+              {/* The standalone "FAVORITE TEAMS" section was removed in
+                  the menu restructure — its contents are redundant
+                  with MY TEAMS up top, which already lists every
+                  TeamProfile (favourites become watching profiles via
+                  addWatchingTeamProfile). Per-team removal lives on
+                  MyHome team cards via long-press. */}
+              {false && favoriteTeams.length > 0 && (
                 <View style={styles.section}>
                   <Text style={styles.sectionLabel}>FAVORITE TEAMS</Text>
                   {favoriteTeams.map((fav) => {
@@ -590,6 +638,8 @@ function TeamSwitcherRow({
   isActive: boolean;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const sourceLabel =
     team.source === 'mrs-linked'
       ? 'OVA'
@@ -652,6 +702,8 @@ function MenuRow({
   onPress: () => void;
   lockedHint?: string;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity
       style={[
@@ -688,7 +740,8 @@ function MenuRow({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   timuBadge: {
     marginLeft: spacing.sm,
     backgroundColor: colors.accent,
@@ -917,3 +970,4 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 });
+}

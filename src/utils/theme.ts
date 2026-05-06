@@ -143,10 +143,61 @@ export const darkColors: ThemeColors = {
   screenTextLight: 'rgba(255,255,255,0.3)',
 };
 
-// ─── Default export (light) for backward compatibility ──────────────────────
-// Existing code imports `colors` — this stays as the light palette so nothing breaks.
-// New code should use the ThemeContext for dynamic theming.
-export const colors = lightColors;
+// ─── Default export (light) for backward compatibility ─────────────────────
+// After the dark-mode refactor, every component reads `colors` via
+// `useTheme()` so toggling actually re-renders styles. This static
+// export is retained as a tripwire only — in __DEV__ we wrap it in a
+// Proxy that logs a one-shot warning the first time anything reads
+// from it, so we catch any new code that bypasses `useTheme()`. In
+// production it falls through to the plain lightColors object so we
+// never throw on a holdout.
+let _staticColorsWarned = false;
+// React, Fast Refresh, and the bundler probe every named export for these
+// keys to figure out whether each export is a React component / module
+// metadata. We must NOT treat that probing as a tripwire hit, otherwise
+// the warning fires on every dev launch even when no real consumer exists.
+const _silentTripwireKeys = new Set([
+  '$$typeof',
+  '__esModule',
+  'default',
+  'render',
+  'displayName',
+  'getDefaultProps',
+  'propTypes',
+  'contextTypes',
+  'childContextTypes',
+  'getDerivedStateFromProps',
+  'prototype',
+  'name',
+  'length',
+  'then',
+  'toJSON',
+  'asymmetricMatch',
+]);
+export const colors: ThemeColors = __DEV__
+  ? (new Proxy(lightColors, {
+      get(target, prop, receiver) {
+        // Silent on Symbols (Symbol.toPrimitive, Symbol.toStringTag, etc.)
+        // and on the well-known introspection keys above.
+        if (typeof prop === 'symbol' || _silentTripwireKeys.has(prop as string)) {
+          return Reflect.get(target, prop, receiver);
+        }
+        if (!_staticColorsWarned) {
+          _staticColorsWarned = true;
+          // eslint-disable-next-line no-console
+          console.warn(
+            '[theme] Static `colors` import detected. After the dark-mode ' +
+              'refactor every component should consume `useTheme()` so the ' +
+              'theme toggle actually re-renders styles. Convert the holdout ' +
+              'to `const { colors } = useTheme();` plus ' +
+              '`const styles = useMemo(() => makeStyles(colors), [colors]);`. ' +
+              'First missed key: ' + String(prop)
+          );
+        }
+        return Reflect.get(target, prop, receiver);
+      },
+    }) as ThemeColors)
+  : lightColors;
 
 // ─── Theme context ───────────────────────────────────────────────────────────
 

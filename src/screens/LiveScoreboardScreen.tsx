@@ -1,5 +1,5 @@
 // Live Scoreboard — division-wide match tracking with 60s polling
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
   ActivityIndicator,
   AppState,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   getCourtSchedule,
   flattenCourtSchedule,
@@ -42,6 +43,8 @@ export function LiveScoreboardScreen({
   onBack,
   onTeamPress,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [matches, setMatches] = useState<FlatCourtMatch[]>([]);
   const [results, setResults] = useState<Map<number, MatchResult>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -288,7 +291,8 @@ export function LiveScoreboardScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background },
   loadingText: { marginTop: spacing.md, fontSize: fontSize.md, color: colors.textSecondary },
@@ -387,3 +391,4 @@ const styles = StyleSheet.create({
   },
   noData: { fontSize: fontSize.md, color: colors.textSecondary, textAlign: 'center', padding: spacing.xl },
 });
+}

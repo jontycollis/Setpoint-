@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { loadTeamNotes, saveTeamNote, deleteTeamNote } from '../utils/storage';
 import type { TeamNote } from '../utils/storage';
 
@@ -22,6 +23,8 @@ interface Props {
 }
 
 export function TeamNotesScreen({ eventKey, teamId, teamName, onBack }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [notes, setNotes] = useState<TeamNote[]>([]);
   const [newText, setNewText] = useState('');
   const [author, setAuthor] = useState('');
@@ -156,7 +159,8 @@ export function TeamNotesScreen({ eventKey, teamId, teamName, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -303,3 +307,4 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
 });
+}

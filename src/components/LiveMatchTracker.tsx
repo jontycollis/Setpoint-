@@ -3,7 +3,7 @@
  * AES doesn't expose point-by-point data, so this polls for set score updates
  * at a faster interval (30s) during live matches, showing scores as they come in.
  */
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,8 @@ import {
   Animated,
   AppState,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getTeamCurrentSchedule, extractAllScheduleMatches } from '../api/aesClient';
 import type { EnrichedScheduleMatch } from '../api/aesClient';
 
@@ -32,6 +33,8 @@ export function LiveMatchTracker({
   teamName,
   opponentName,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [match, setMatch] = useState<EnrichedScheduleMatch | null>(null);
   const [lastUpdate, setLastUpdate] = useState<number>(Date.now());
   const pulseAnim = useRef(new Animated.Value(1)).current;
@@ -152,7 +155,8 @@ export function LiveMatchTracker({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     backgroundColor: 'rgba(76, 175, 80, 0.08)',
     borderRadius: borderRadius.md,
@@ -245,3 +249,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
 });
+}

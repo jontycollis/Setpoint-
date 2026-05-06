@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,8 @@ import {
   TouchableOpacity,
   StyleSheet,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { formatDateRange } from '../utils/dates';
 import type { AESEvent, AESDivision } from '../types/aes';
 
@@ -18,6 +19,8 @@ interface Props {
 }
 
 export function DivisionSelectScreen({ event, onDivisionSelected, onBack, onSearchTeams }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   function renderDivision({ item }: { item: AESDivision }) {
     return (
       <TouchableOpacity
@@ -68,7 +71,8 @@ export function DivisionSelectScreen({ event, onDivisionSelected, onBack, onSear
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   eventHeader: {
     backgroundColor: colors.primary,
@@ -168,3 +172,4 @@ const styles = StyleSheet.create({
     paddingRight: spacing.lg,
   },
 });
+}

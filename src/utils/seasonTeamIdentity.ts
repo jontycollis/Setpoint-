@@ -134,8 +134,15 @@ export function suggestTeams<T extends { name: string }>(
 
 /**
  * Return true if `name` matches any of the provided aliases after
- * normalization. Also treats strong similarity (>= 0.9) as a match so
- * slight variations (spacing, age-group markers) don't require an alias.
+ * normalization. Strict: only exact normalized equality counts. The
+ * old similarity fallback (>= 0.9) was producing false positives
+ * (e.g. "Durham Attack" matching "Durham Attack Blast" because the
+ * shorter alias is a token-subset of the longer name). `normalizeName`
+ * strips age-group markers ("U18", "18U", "Girls", etc.), so cases
+ * like "Defensa U18 Rob" ↔ "Defensa Rob" still resolve to the same
+ * key without needing fuzzy matching. For genuinely different
+ * spellings across systems (e.g. "PVC ↔ Pakmen"), the user adds
+ * an explicit alias via the alias editor.
  */
 export function matchesAnyAlias(name: string, aliases: string[]): boolean {
   if (!name) return false;
@@ -145,7 +152,6 @@ export function matchesAnyAlias(name: string, aliases: string[]): boolean {
     const k = normalizeName(a);
     if (!k) continue;
     if (n === k) return true;
-    if (similarity(name, a) >= 0.9) return true;
   }
   return false;
 }

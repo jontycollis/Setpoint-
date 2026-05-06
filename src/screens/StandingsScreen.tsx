@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { colors, spacing, fontSize } from '../utils/theme';
+import { useTheme, spacing, fontSize } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getStandings } from '../api/aesClient';
 import type { AESEvent, AESDivision, AESStanding } from '../types/aes';
 
@@ -20,6 +21,8 @@ interface Props {
 }
 
 export function StandingsScreen({ event, division, myTeamId, onBack }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [standings, setStandings] = useState<AESStanding[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -177,7 +180,8 @@ export function StandingsScreen({ event, division, myTeamId, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   header: { padding: spacing.lg },
@@ -252,3 +256,4 @@ const styles = StyleSheet.create({
   pctCol: { width: 40, textAlign: 'right' },
   highlightText: { fontWeight: '700', color: colors.primary },
 });
+}

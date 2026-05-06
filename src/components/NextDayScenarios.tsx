@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   Modal,
   ScrollView,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getTeamFutureSchedule, getPlayDetail, getPoolByPlayId } from '../api/aesClient';
 import type { TeamFutureScheduleRow, BracketNode, PoolTeam } from '../api/aesClient';
 import { Card } from './Card';
@@ -274,6 +275,8 @@ export function NextDayScenarios({
   onScoutOpponent,
   playoffPlayIds,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<TeamFutureScheduleRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -692,7 +695,8 @@ export function NextDayScenarios({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   loading: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -954,3 +958,4 @@ const styles = StyleSheet.create({
     marginTop: spacing.xs,
   },
 });
+}

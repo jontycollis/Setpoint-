@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import type { PoolTeam } from '../api/aesClient';
 
 interface Props {
@@ -11,6 +12,8 @@ interface Props {
 }
 
 export function PoolStandings({ poolShortName, teams, myTeamId, onTeamPress }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (!teams || teams.length === 0) return null;
 
   // Sort: by FinishRank first (if posted), else by MatchesWon desc, then SetsWon desc
@@ -92,7 +95,8 @@ export function PoolStandings({ poolShortName, teams, myTeamId, onTeamPress }: P
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     backgroundColor: colors.surface,
     borderRadius: borderRadius.md,
@@ -142,3 +146,4 @@ const styles = StyleSheet.create({
   highlightText: { fontWeight: '700', color: colors.primary },
   linkText: { color: colors.primary, textDecorationLine: 'underline' },
 });
+}

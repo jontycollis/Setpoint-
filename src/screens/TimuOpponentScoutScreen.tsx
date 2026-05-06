@@ -19,7 +19,8 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
 import {
   loadSeasonIndex,
@@ -60,6 +61,8 @@ export function TimuOpponentScoutScreen({
   onNavigateToTournament,
   onManageSeason,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [index, setIndex] = useState<SeasonIndex>({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -143,6 +146,8 @@ export function TimuOpponentScoutScreen({
 // ── Hero ──────────────────────────────────────────────────────────────────
 
 function Hero({ opponentName, onBack }: { opponentName: string; onBack: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.hero}>
       <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -157,6 +162,8 @@ function Hero({ opponentName, onBack }: { opponentName: string; onBack: () => vo
 // ── Empty state ───────────────────────────────────────────────────────────
 
 function EmptyIndexState({ onManageSeason }: { onManageSeason: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Card variant="outlined" style={styles.emptyCard}>
       <Text style={styles.emptyTitle}>No season history yet</Text>
@@ -175,6 +182,8 @@ function EmptyIndexState({ onManageSeason }: { onManageSeason: () => void }) {
 // ── Aggregate stats card ──────────────────────────────────────────────────
 
 function AggregateStatsCard({ stats }: { stats: AggregateStats }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (stats.tournamentsPlayed === 0) return null;
   const setPct = stats.setWinPercentage.toFixed(0);
   const matchPct = stats.matchWinPercentage.toFixed(0);
@@ -211,6 +220,8 @@ function AggregateStatsCard({ stats }: { stats: AggregateStats }) {
 }
 
 function Stat({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.statCell}>
       <Text style={[styles.statValue, accent && styles.statValueAccent]}>{value}</Text>
@@ -232,6 +243,8 @@ function HeadToHeadCard({
   h2h: H2HMatch[];
   onOpen: (tid: number) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const wins = h2h.filter((m) => m.iWon).length;
   const losses = h2h.length - wins;
   const setWon = h2h.reduce((n, m) => n + m.mySetsWon, 0);
@@ -313,6 +326,8 @@ function SeasonResultsCard({
   history: TeamSeasonEntry[];
   onOpenTid: (tid: number) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (history.length === 0) {
     return (
       <Card style={styles.card}>
@@ -366,6 +381,8 @@ function CommonOpponentsCard({
   common: CommonOpponent[];
   onPressTeam: (teamName: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (common.length === 0) {
     return (
       <Card style={styles.card}>
@@ -433,6 +450,8 @@ function ManageSeasonFooter({
   tournamentCount: number;
   onManageSeason: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity
       style={styles.footerBtn}
@@ -448,7 +467,8 @@ function ManageSeasonFooter({
 
 // ── Styles ────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   body: { flex: 1 },
   bodyContent: { padding: spacing.lg, paddingBottom: spacing.xxxl },
@@ -576,3 +596,4 @@ const styles = StyleSheet.create({
   },
   footerBtnText: { color: colors.primary, fontWeight: '600', fontSize: fontSize.sm },
 });
+}

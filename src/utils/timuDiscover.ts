@@ -18,7 +18,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { matchesAnyAlias } from './seasonTeamIdentity';
 
-const STORAGE_KEY = 'timu.scanned.v1';
+// v2 of the cache stores ALL extracted team names per tid (not just the
+// matched ones for one alias set). This makes the cache alias-agnostic:
+// re-running discovery with a different team's aliases re-evaluates the
+// stored team list locally instead of skipping the tid. Old v1 entries
+// were poisoning the cache because `matched: false` was sticky regardless
+// of which aliases produced that result.
+const STORAGE_KEY = 'timu.scanned.v2';
+const STORAGE_KEY_V1 = 'timu.scanned.v1';
 const TIMU_BASE = 'https://www.timu.ca/scoreboards';
 const SCAN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
@@ -27,18 +34,24 @@ const SCAN_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 interface ScanCacheEntry {
   tid: number;
   scannedAt: number;
-  matched: boolean;
+  /** Whether the pools page parsed at all. Used to decide whether to retry. */
+  ok: boolean;
   name?: string;
   subtitle?: string;
   dateText?: string;
   dateMs?: number;
-  matchedTeams?: string[];
+  /** Every team name extracted from pools.php — used to re-evaluate match
+   *  decisions when aliases change between discovery runs. */
+  teams?: string[];
 }
 
 type ScanCache = Record<string, ScanCacheEntry>;
 
 async function loadCache(): Promise<ScanCache> {
   try {
+    // Drop legacy v1 cache the first time we see it — its `matched: false`
+    // entries were poisoning re-discovery for new alias sets.
+    AsyncStorage.removeItem(STORAGE_KEY_V1).catch(() => {});
     const raw = await AsyncStorage.getItem(STORAGE_KEY);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
@@ -313,21 +326,32 @@ export async function discoverTeamEvents(
   let skipped = 0;
   const matches = new Map<number, DiscoveredEvent>();
 
-  // Pre-load cached matches so they appear immediately, even before
-  // any new scans complete.
+  // Helper: turn a cached entry's stored team list into a DiscoveredEvent
+  // by re-evaluating against the CURRENT alias set. This is the core of
+  // the v2 cache — the same fetched data answers any team's "do you have
+  // me?" question without going back to Timu.
+  function tryMatchFromCache(c: ScanCacheEntry): DiscoveredEvent | null {
+    if (!c.ok || !c.teams) return null;
+    const matchedTeams = c.teams.filter((n) => matchesAnyAlias(n, aliases));
+    if (matchedTeams.length === 0) return null;
+    return {
+      tid: c.tid,
+      name: c.name || `Tournament ${c.tid}`,
+      subtitle: c.subtitle,
+      dateText: c.dateText,
+      dateMs: c.dateMs,
+      matchedTeams,
+    };
+  }
+
+  // Pre-load any cached tids that match the current aliases so they
+  // appear in results immediately, even before any new scans complete.
   if (useCache) {
     for (const tid of queue) {
       const c = cache[String(tid)];
-      if (c && c.matched && c.scannedAt > Date.now() - ttl) {
-        matches.set(tid, {
-          tid,
-          name: c.name || `Tournament ${tid}`,
-          subtitle: c.subtitle,
-          dateText: c.dateText,
-          dateMs: c.dateMs,
-          matchedTeams: c.matchedTeams || [],
-        });
-      }
+      if (!c || c.scannedAt < Date.now() - ttl) continue;
+      const m = tryMatchFromCache(c);
+      if (m) matches.set(tid, m);
     }
   }
 
@@ -335,23 +359,37 @@ export async function discoverTeamEvents(
     while (queue.length) {
       const tid = queue.shift()!;
       const c = cache[String(tid)];
-      if (useCache && c && c.scannedAt > Date.now() - ttl) {
+      // Cache hit + fresh + has team list → re-evaluate locally without
+      // a network fetch. This is what fixes the cross-team poisoning.
+      if (
+        useCache &&
+        c &&
+        c.scannedAt > Date.now() - ttl &&
+        c.ok &&
+        c.teams !== undefined
+      ) {
+        const m = tryMatchFromCache(c);
+        if (m) {
+          matches.set(tid, m);
+          found = matches.size; // recompute since pre-load may already have set it
+        }
         skipped++;
         done++;
         onProgress?.({ done, total, found: matches.size, skipped, current: tid });
         continue;
       }
+      // Cache miss / stale / unparseable → fetch fresh.
       const r = await scanTid(tid, aliases);
       done++;
       cache[String(tid)] = {
         tid,
         scannedAt: Date.now(),
-        matched: r.ok && r.matchedTeams.length > 0,
+        ok: r.ok,
         name: r.name,
         subtitle: r.subtitle,
         dateText: r.dateText,
         dateMs: r.dateMs,
-        matchedTeams: r.matchedTeams,
+        teams: r.teams, // store ALL teams, not just matched
       };
       if (r.ok && r.matchedTeams.length > 0) {
         found++;

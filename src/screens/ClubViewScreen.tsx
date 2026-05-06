@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,8 @@ import {
   ActivityIndicator,
   TextInput,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getTeamAssignments } from '../api/aesClient';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 // Club View — groups all teams in the event by their club
@@ -31,6 +32,8 @@ interface ClubEntry {
 }
 
 export function ClubViewScreen({ event, clubName, onBack, onTeamPress }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [clubs, setClubs] = useState<ClubEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -297,7 +300,8 @@ export function ClubViewScreen({ event, clubName, onBack, onTeamPress }: Props) 
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: {
     flex: 1,
@@ -477,3 +481,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+}

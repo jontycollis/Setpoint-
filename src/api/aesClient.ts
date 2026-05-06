@@ -942,7 +942,9 @@ function normalizeListingEvent(raw: any): AESListingEvent {
   };
 }
 
-export async function fetchCanadianEvents(): Promise<AESListingEvent[]> {
+export async function fetchCanadianEvents(
+  options: { includePast?: boolean } = {}
+): Promise<AESListingEvent[]> {
   // Server-side filter is required — the AES landing endpoint has 23k+ events
   // globally, so an unfiltered $top=200 page never reaches Canadian content.
   // Match by name keyword since address.state is null on Canadian events.
@@ -951,12 +953,22 @@ export async function fetchCanadianEvents(): Promise<AESListingEvent[]> {
     "contains(tolower(name),'ontario')",
     "contains(tolower(name),'ova')",
   ].join(' or ');
+  // Default callers (TournamentSelect dynamic discovery) only want events
+  // that haven't ended yet — they're picking a tournament to register for.
+  // Auto-discovery for season history needs the opposite: every Canadian
+  // event ever, so we can index a team's full multi-year history.
+  const filter = options.includePast
+    ? `(${caNameFilter})`
+    : `isPastEvent eq false and (${caNameFilter})`;
   const params = new URLSearchParams({
     $count: 'true',
     $format: 'json',
-    $orderby: 'startDate,name',
-    $top: '200',
-    $filter: `isPastEvent eq false and (${caNameFilter})`,
+    $orderby: 'startDate desc,name',
+    // 500 is well above the typical Canadian-event count across all years
+    // (the earlier probe showed ~16 with "canada" + ~31 with "ontario"),
+    // so we should never paginate.
+    $top: options.includePast ? '500' : '200',
+    $filter: filter,
   });
   const url = `${AES_EVENTS_API}?${params.toString()}`;
   const response = await fetch(url, {

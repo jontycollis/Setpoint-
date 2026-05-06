@@ -24,7 +24,8 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
 import { extractTidFromInput } from '../api/timuClient';
 import {
@@ -70,6 +71,8 @@ interface Props {
 }
 
 export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [index, setIndex] = useState<SeasonIndex>({});
   const [aesIndex, setAesIndex] = useState<AesSeasonIndex>({});
   const [input, setInput] = useState('');
@@ -1064,6 +1067,8 @@ export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
 }
 
 function Header({ onBack }: { onBack: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.hero}>
       <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -1086,6 +1091,8 @@ function SnapshotRow({
   onRefresh: () => void;
   onRemove: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const indexed = new Date(snapshot.indexedAt);
   const relIndexed = humanRelativeTime(indexed);
   const numResults = snapshot.results.length;
@@ -1129,6 +1136,8 @@ function AesSnapshotRow({
   onRefresh: () => Promise<void>;
   onRemove: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const indexed = new Date(snapshot.indexedAt);
   const relIndexed = humanRelativeTime(indexed);
   const numMatches = snapshot.matches.length;
@@ -1187,7 +1196,8 @@ function humanRelativeTime(date: Date): string {
   return date.toLocaleDateString();
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   hero: {
     backgroundColor: colors.primary,
@@ -1480,3 +1490,4 @@ const styles = StyleSheet.create({
   },
   rowActionTextDisabled: { opacity: 0.5 },
 });
+}

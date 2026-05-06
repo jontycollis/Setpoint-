@@ -25,7 +25,8 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
 import {
   VenueInfoCard,
@@ -97,6 +98,8 @@ export function TimuTeamDashboardScreen({
   onClearMyTeam,
   onInfoLoaded,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [info, setInfo] = useState<TimuTournamentInfo | null>(null);
   const [pools, setPools] = useState<TimuPool[] | null>(null);
   const [schedule, setSchedule] = useState<TimuScheduleMatch[] | null>(null);
@@ -231,6 +234,11 @@ export function TimuTeamDashboardScreen({
           `${normalize(r.home.name)}|${normalize(r.away.name)}|${(r.time || '').toLowerCase()}|${r.court}`
       )
     );
+    // 30-min grace so a match still shows as "next" while it's in progress
+    // and Timu hasn't posted a result yet. Anything older than that without
+    // a captured result is almost certainly past — drop it.
+    const nowMs = Date.now();
+    const graceMs = 30 * 60 * 1000;
     return schedule.filter((m) => {
       const homeName = m.home.name || '';
       const awayName = m.away.name || '';
@@ -247,9 +255,13 @@ export function TimuTeamDashboardScreen({
       ) {
         return false;
       }
+      // Drop matches whose scheduled time is well past now. `null` means
+      // we couldn't compute a timestamp — keep those rather than guess.
+      const ms = matchScheduledMs(m, info);
+      if (ms !== null && ms < nowMs - graceMs) return false;
       return true;
     });
-  }, [schedule, results, matchAliases, tournamentCompleted]);
+  }, [schedule, results, matchAliases, tournamentCompleted, info]);
 
   const pastResults = useMemo(() => {
     if (!results) return [];
@@ -520,6 +532,8 @@ function Hero({
   onSetAsMyTeam: () => void;
   onClearMyTeam: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.hero}>
       <View style={styles.heroTop}>
@@ -570,6 +584,8 @@ function QuickStats({
   poolRank: number | null;
   finalRank?: string;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const stats: Array<{ label: string; value: string; accent?: boolean }> = [
     { label: 'Record', value: `${wins}-${losses}` },
     { label: 'Sets', value: `${setsWon}-${setsLost}` },
@@ -604,6 +620,8 @@ function NextMatchCard({
   onPressOpponent: (name: string) => void;
   onScout: (name: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const iAmHome =
     !!match.home.name && matchesAnyAlias(match.home.name, meAliases);
   const oppName = iAmHome ? match.away.name : match.home.name;
@@ -657,6 +675,8 @@ function UpcomingRow({
   onPressOpponent: (name: string) => void;
   onScout: (name: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const iAmHome =
     !!match.home.name && matchesAnyAlias(match.home.name, meAliases);
   const oppName = iAmHome ? match.away.name : match.home.name;
@@ -703,6 +723,8 @@ function ResultRow({
   onPressOpponent: (name: string) => void;
   onScout: (name: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const iAmHome = matchesAnyAlias(match.home.name, meAliases);
   const myBox = iAmHome ? match.home : match.away;
   const oppBox = iAmHome ? match.away : match.home;
@@ -765,6 +787,8 @@ function ResultRow({
 // ── Action tile ───────────────────────────────────────────────────────────
 
 function ActionTile({ label, onPress }: { label: string; onPress: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity style={styles.actionTile} onPress={onPress} activeOpacity={0.7}>
       <Text style={styles.actionTileText}>{label}</Text>
@@ -788,9 +812,38 @@ function isWinnerFor(r: TimuMatchResult, me: string): boolean {
   return box.setsWon > other.setsWon;
 }
 
+/**
+ * Best-effort timestamp for a Timu schedule entry. Tournaments don't carry
+ * per-match dates — only a tournament start (`info.dateMs`), a 1-indexed
+ * `day`, and a free-text `time` like "8:30 AM" / "13:45". Returns null when
+ * the inputs aren't enough to compute a real time, so callers can decide
+ * whether to keep the match in view (we prefer "show, don't drop" when
+ * the data is ambiguous).
+ */
+function matchScheduledMs(
+  m: { day?: number; time?: string },
+  info: { dateMs?: number } | null | undefined
+): number | null {
+  if (!info?.dateMs || !isFinite(info.dateMs)) return null;
+  const day = m.day && m.day > 0 ? m.day : 1;
+  const dayStartMs = info.dateMs + (day - 1) * 24 * 60 * 60 * 1000;
+  const t = (m.time || '').trim();
+  if (!t) return dayStartMs;
+  const match = t.match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/);
+  if (!match) return dayStartMs;
+  let hour = parseInt(match[1], 10);
+  const min = parseInt(match[2], 10);
+  if (!isFinite(hour) || !isFinite(min)) return dayStartMs;
+  const meridiem = (match[3] || '').toUpperCase();
+  if (meridiem === 'PM' && hour < 12) hour += 12;
+  if (meridiem === 'AM' && hour === 12) hour = 0;
+  return dayStartMs + hour * 60 * 60 * 1000 + min * 60 * 1000;
+}
+
 // ── styles ────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: spacing.md, color: colors.textSecondary },
@@ -1022,3 +1075,4 @@ const styles = StyleSheet.create({
   docsLabel: { flex: 1, fontSize: fontSize.md, fontWeight: '600', color: colors.text },
   docsChev: { fontSize: 20, color: colors.textLight },
 });
+}

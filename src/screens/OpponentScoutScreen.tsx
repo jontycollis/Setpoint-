@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   getTeamCurrentSchedule,
   getTeamPastSchedule,
@@ -141,6 +142,8 @@ export function OpponentScoutScreen({
   opponentName,
   onBack,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [allMatches, setAllMatches] = useState<TeamScheduleMatch[]>([]);
   const [stats, setStats] = useState<OpponentStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -470,7 +473,8 @@ export function OpponentScoutScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xxl },
   loadingText: { marginTop: spacing.md, fontSize: fontSize.md, color: colors.textSecondary },
@@ -597,3 +601,4 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
 });
+}

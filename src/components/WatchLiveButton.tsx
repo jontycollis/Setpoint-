@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { TouchableOpacity, Text, StyleSheet, Linking, Alert } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 
 interface Props {
   videoLink: string;
@@ -37,6 +38,8 @@ function isTrustedStreamUrl(rawUrl: string): boolean {
  * Only renders if videoLink is a non-empty, trusted URL.
  */
 export function WatchLiveButton({ videoLink, compact = false }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (!videoLink || videoLink.trim().length === 0) return null;
   if (!isTrustedStreamUrl(videoLink)) return null;
 
@@ -72,7 +75,8 @@ export function WatchLiveButton({ videoLink, compact = false }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   button: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -110,3 +114,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+}

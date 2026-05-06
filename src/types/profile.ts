@@ -80,6 +80,23 @@ export interface TeamProfile {
   // ── Bookkeeping ────────────────────────────────────────────────────────
   createdAt: number;
   updatedAt: number;
+  /**
+   * Epoch ms of the last successful auto-discovery for this team (the
+   * AES + Timu scan that populates SeasonHistory). Surfaced as a
+   * "Last synced X ago" badge so users know whether their season
+   * history is fresh or whether they should hit "Find more tournaments".
+   */
+  lastDiscoveryAt?: number;
+
+  // ── Tier 2 scoring (reserved fields, no editor UI yet) ─────────────────
+  /**
+   * Player roster for this team. Used by the official-scorer flow to
+   * pre-fill lineup and substitution pickers. Editor screen lands in
+   * Session D of the Tier 2 build; the field is reserved here so any
+   * data captured during early manual entry persists across the rollout.
+   */
+  roster?: import('./match').RosterPlayer[];
+  rosterUpdatedAt?: number;
 
   // ── Reserved for OVA MRS (future) ──────────────────────────────────────
   // Today these are never set. The MRS populator will fill them when shipped;
@@ -192,6 +209,14 @@ export interface UserProfile {
    * their NCCP number to enable public-transcript lookups for themselves).
    */
   coach?: CoachCredentials;
+
+  /**
+   * Tier 2 scorer mode. When true, the hamburger Tools section
+   * surfaces "Score a Match" and the official-scorer flow becomes
+   * reachable. Defaults to undefined / false. Per-user setting; per-
+   * team gating not in v1.
+   */
+  scorerMode?: boolean;
 
   // ── Bookkeeping ────────────────────────────────────────────────────────
   createdAt: number;

@@ -9,7 +9,7 @@
 // contacts, OVA reference documents, and native share.
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -20,7 +20,8 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
 import {
   VenueInfoCard,
@@ -62,6 +63,8 @@ export function TimuTournamentScreen({
   onTeamPress,
   isFavorite,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [tab, setTab] = useState<Tab>('pools');
   const [info, setInfo] = useState<TimuTournamentInfo | null>(null);
   const [pools, setPools] = useState<TimuPool[] | null>(null);
@@ -207,6 +210,8 @@ function Header({
   tid: number;
   onBack: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.hero}>
       <View style={styles.heroTop}>
@@ -248,6 +253,8 @@ function Header({
 // ── Tabs ──────────────────────────────────────────────────────────────────
 
 function Tabs({ current, onChange }: { current: Tab; onChange: (t: Tab) => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const items: Array<{ key: Tab; label: string }> = [
     { key: 'pools', label: 'Pools' },
     { key: 'schedule', label: 'Schedule' },
@@ -286,6 +293,8 @@ function PoolsTab({
   onTeamPress: (teamName: string) => void;
   isFavorite: (teamName: string) => boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (loading && !pools) return <Spinner label="Loading pools..." />;
   if (!pools || pools.length === 0) {
     return <EmptyState label="No pool data available yet." />;
@@ -313,6 +322,8 @@ function PoolStandingsCard({
   onTeamPress: (teamName: string) => void;
   isFavorite: (teamName: string) => boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const sorted = [...pool.teams].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
   return (
     <View style={styles.poolContainer}>
@@ -354,6 +365,8 @@ function TeamRow({
   onPress: () => void;
   fav: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -388,6 +401,8 @@ function ScheduleTab({
   loading: boolean;
   onTeamPress: (teamName: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (loading && !matches) return <Spinner label="Loading schedule..." />;
   if (!matches || matches.length === 0) {
     return <EmptyState label="No schedule available yet." />;
@@ -447,6 +462,8 @@ function TeamInline({
   ref_: string;
   onPress: (teamName: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (name) {
     return (
       <TouchableOpacity onPress={() => onPress(name)} activeOpacity={0.6}>
@@ -469,6 +486,8 @@ function RankingsTab({
   loading: boolean;
   onTeamPress: (teamName: string) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   if (loading && !rankings) return <Spinner label="Loading rankings..." />;
   if (!rankings || rankings.length === 0) {
     return (
@@ -498,6 +517,8 @@ function RankingsTab({
 // ── helpers ───────────────────────────────────────────────────────────────
 
 function Spinner({ label }: { label: string }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.spinner}>
       <ActivityIndicator size="large" color={colors.primary} />
@@ -507,6 +528,8 @@ function Spinner({ label }: { label: string }) {
 }
 
 function EmptyState({ label }: { label: string }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Card variant="outlined" style={styles.empty}>
       <Text style={styles.emptyText}>{label}</Text>
@@ -516,7 +539,8 @@ function EmptyState({ label }: { label: string }) {
 
 // ── styles ────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
 
   hero: {
@@ -677,3 +701,4 @@ const styles = StyleSheet.create({
   empty: { alignItems: 'center', padding: spacing.xxl },
   emptyText: { color: colors.textSecondary, textAlign: 'center', fontSize: fontSize.md },
 });
+}

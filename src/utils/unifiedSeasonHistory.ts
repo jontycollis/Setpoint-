@@ -146,6 +146,26 @@ function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEnt
   const finalRank = myStanding?.rank ?? null;
   const finalRankLabel = finalRank != null ? ordinal(finalRank) : null;
 
+  // Derive matches/sets totals from the per-match results, NOT from
+  // myStanding. AES "standings" rows are pool-only — they exclude playoff
+  // matches, which made career/YoY rollups dramatically under-count both
+  // matches conceded AND sets conceded. The matches array below covers
+  // pool play + every playoff round, which is what the user expects.
+  const completed = snap.matches.filter((m) => m.hasScores);
+  let matchesFor = 0;
+  let matchesAgainst = 0;
+  let setsFor = 0;
+  let setsAgainst = 0;
+  for (const m of completed) {
+    // Skip undecided matches (equal sets won) — usually means the match
+    // is in progress and the API hasn't promoted it to a final result.
+    if (m.mySetsWon === m.oppSetsWon) continue;
+    if (m.iWon) matchesFor++;
+    else matchesAgainst++;
+    setsFor += m.mySetsWon;
+    setsAgainst += m.oppSetsWon;
+  }
+
   return {
     source: 'aes',
     sourceKey: `aes:${snap.eventKey}:${snap.divisionId}`,
@@ -161,27 +181,25 @@ function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEnt
     poolRank: finalRank, // AES conflates pool + finish — use finish rank
     finalRank,
     finalRankLabel,
-    matchesFor: myStanding?.matchesFor ?? 0,
-    matchesAgainst: myStanding?.matchesAgainst ?? 0,
-    setsFor: myStanding?.setsFor ?? 0,
-    setsAgainst: myStanding?.setsAgainst ?? 0,
+    matchesFor,
+    matchesAgainst,
+    setsFor,
+    setsAgainst,
     totalMatchesInSnapshot: snap.matches.length,
     indexedAt: snap.indexedAt,
-    matches: snap.matches
-      .filter((m) => m.hasScores) // only show completed
-      .map((m) => ({
-        dateText: m.dateText,
-        time: m.time,
-        court: m.court,
-        roundLabel: m.roundLabel,
-        isPool: m.isPool,
-        opponentName: m.opponentText,
-        mySetsWon: m.mySetsWon,
-        oppSetsWon: m.oppSetsWon,
-        myScores: m.myScores,
-        oppScores: m.oppScores,
-        iWon: m.iWon,
-      })),
+    matches: completed.map((m) => ({
+      dateText: m.dateText,
+      time: m.time,
+      court: m.court,
+      roundLabel: m.roundLabel,
+      isPool: m.isPool,
+      opponentName: m.opponentText,
+      mySetsWon: m.mySetsWon,
+      oppSetsWon: m.oppSetsWon,
+      myScores: m.myScores,
+      oppScores: m.oppScores,
+      iWon: m.iWon,
+    })),
   };
 }
 
@@ -235,6 +253,22 @@ function timuSnapshotToUnified(
     });
   }
 
+  // Same fix as AES: pool standings (myRow.matchesFor / matchesAgainst /
+  // setsFor / setsAgainst) only reflect pool play. Derive cumulative
+  // totals from the per-match `matches` array we just built — that
+  // includes playoffs, so career/YoY rollups stop under-counting.
+  let matchesFor = 0;
+  let matchesAgainst = 0;
+  let setsFor = 0;
+  let setsAgainst = 0;
+  for (const m of matches) {
+    if (m.mySetsWon === m.oppSetsWon) continue; // undecided
+    if (m.iWon) matchesFor++;
+    else matchesAgainst++;
+    setsFor += m.mySetsWon;
+    setsAgainst += m.oppSetsWon;
+  }
+
   return {
     source: 'timu',
     sourceKey: `timu:${snap.tid}`,
@@ -249,10 +283,10 @@ function timuSnapshotToUnified(
     poolRank: myRow?.rank ?? null,
     finalRank: finalR?.rank ?? null,
     finalRankLabel: finalR?.rankLabel ?? null,
-    matchesFor: myRow?.matchesFor ?? 0,
-    matchesAgainst: myRow?.matchesAgainst ?? 0,
-    setsFor: myRow?.setsFor ?? 0,
-    setsAgainst: myRow?.setsAgainst ?? 0,
+    matchesFor,
+    matchesAgainst,
+    setsFor,
+    setsAgainst,
     matches,
     totalMatchesInSnapshot: snap.results.length,
     indexedAt: snap.indexedAt,

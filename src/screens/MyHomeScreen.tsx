@@ -22,16 +22,18 @@
 // the user is inside a team context (Phase 4 hamburger split).
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { Card } from '../components/Card';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import type { UserProfile, TeamProfile } from '../types/profile';
 import {
   buildMySeasonHistory,
@@ -39,6 +41,11 @@ import {
   aggregateUnifiedStats,
   type UnifiedAggregateStats,
 } from '../utils/unifiedSeasonHistory';
+import type { AutoDiscoverProgress } from '../utils/teamAutoDiscover';
+import {
+  DiscoveryProgressBanner,
+  DiscoveryResultBanner,
+} from '../components/DiscoveryBanners';
 
 interface Props {
   profile: UserProfile;
@@ -52,6 +59,27 @@ interface Props {
   onOpenCacConnection: () => void;
   /** Low-emphasis "Browse tournaments" entry (explore mode, no pin). */
   onBrowseTournaments: () => void;
+  /** True while the boot refresh or a manual sync is running. */
+  syncing?: boolean;
+  /** {done, total} counts for the in-flight sync, or null when idle. */
+  syncProgress?: { done: number; total: number } | null;
+  /** Manual "Sync now" button. */
+  onSyncSeason?: () => void;
+  /** Display label of the team currently being auto-discovered, or null. */
+  discoveringTeamLabel?: string | null;
+  /** Progress of the in-flight auto-discovery, or null when idle. */
+  discoveryProgress?: AutoDiscoverProgress | null;
+  /** Result of the most recent discovery (lingers ~30s after completion). */
+  discoveryResult?: {
+    teamId: string;
+    teamLabel: string;
+    aesIndexed: number;
+    timuIndexed: number;
+  } | null;
+  onDismissDiscoveryResult?: () => void;
+  onViewDiscoveryResult?: () => void;
+  /** Long-press a team card → confirm removal. */
+  onRemoveTeam?: (team: TeamProfile) => void;
 }
 
 export function MyHomeScreen({
@@ -61,7 +89,18 @@ export function MyHomeScreen({
   onOpenMrsConnection,
   onOpenCacConnection,
   onBrowseTournaments,
+  syncing = false,
+  syncProgress = null,
+  onSyncSeason,
+  discoveringTeamLabel = null,
+  discoveryProgress = null,
+  discoveryResult = null,
+  onDismissDiscoveryResult,
+  onViewDiscoveryResult,
+  onRemoveTeam,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const meTeams = profile.teams.filter((t) => t.kind === 'me');
   const watchingTeams = profile.teams.filter((t) => t.kind === 'watching');
   const heroLabel = profile.displayName
@@ -87,16 +126,36 @@ export function MyHomeScreen({
         </Text>
       </View>
       <ScrollView contentContainerStyle={styles.body}>
+        {discoveringTeamLabel ? (
+          <DiscoveryProgressBanner
+            teamLabel={discoveringTeamLabel}
+            progress={discoveryProgress}
+          />
+        ) : discoveryResult ? (
+          <DiscoveryResultBanner
+            result={discoveryResult}
+            onView={onViewDiscoveryResult}
+            onDismiss={onDismissDiscoveryResult}
+          />
+        ) : (
+          <SyncStatusRow
+            syncing={syncing}
+            progress={syncProgress}
+            onSync={onSyncSeason}
+          />
+        )}
         <MyTeamsSection
           teams={meTeams}
           onOpenTeam={onOpenTeam}
           onAddTeam={onAddTeam}
+          onRemoveTeam={onRemoveTeam}
         />
 
         {watchingTeams.length > 0 ? (
           <WatchingSection
             teams={watchingTeams}
             onOpenTeam={onOpenTeam}
+            onRemoveTeam={onRemoveTeam}
           />
         ) : null}
 
@@ -127,11 +186,15 @@ function MyTeamsSection({
   teams,
   onOpenTeam,
   onAddTeam,
+  onRemoveTeam,
 }: {
   teams: TeamProfile[];
   onOpenTeam: (team: TeamProfile) => void;
   onAddTeam: () => void;
+  onRemoveTeam?: (team: TeamProfile) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>MY TEAMS</Text>
@@ -145,7 +208,12 @@ function MyTeamsSection({
         </Card>
       ) : (
         teams.map((team) => (
-          <TeamCard key={team.id} team={team} onOpen={() => onOpenTeam(team)} />
+          <TeamCard
+            key={team.id}
+            team={team}
+            onOpen={() => onOpenTeam(team)}
+            onLongPress={onRemoveTeam ? () => onRemoveTeam(team) : undefined}
+          />
         ))
       )}
       <TouchableOpacity
@@ -164,10 +232,14 @@ function MyTeamsSection({
 function WatchingSection({
   teams,
   onOpenTeam,
+  onRemoveTeam,
 }: {
   teams: TeamProfile[];
   onOpenTeam: (team: TeamProfile) => void;
+  onRemoveTeam?: (team: TeamProfile) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>WATCHING</Text>
@@ -180,6 +252,7 @@ function WatchingSection({
           key={team.id}
           team={team}
           onOpen={() => onOpenTeam(team)}
+          onLongPress={onRemoveTeam ? () => onRemoveTeam(team) : undefined}
           compact
         />
       ))}
@@ -192,12 +265,16 @@ function WatchingSection({
 function TeamCard({
   team,
   onOpen,
+  onLongPress,
   compact,
 }: {
   team: TeamProfile;
   onOpen: () => void;
+  onLongPress?: () => void;
   compact?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const sourceLabel =
     team.source === 'mrs-linked'
       ? 'OVA'
@@ -214,6 +291,8 @@ function TeamCard({
   return (
     <TouchableOpacity
       onPress={onOpen}
+      onLongPress={onLongPress}
+      delayLongPress={400}
       activeOpacity={0.7}
       style={[styles.teamCard, compact && styles.teamCardCompact]}
     >
@@ -256,6 +335,8 @@ function ConnectionsSection({
   onOpenMrsConnection: () => void;
   onOpenCacConnection: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>CONNECTIONS</Text>
@@ -302,6 +383,8 @@ function ConnectionRow({
   onPress: () => void;
   icon: string;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -341,6 +424,8 @@ function ConnectionRow({
 // ── Career card ───────────────────────────────────────────────────────────
 
 function CareerCard({ profile }: { profile: UserProfile }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [stats, setStats] = useState<UnifiedAggregateStats | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -430,6 +515,8 @@ function CareerCell({
   value: string;
   accent?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.careerCell}>
       <Text style={[styles.careerValue, accent && styles.careerValueAccent]}>
@@ -447,9 +534,50 @@ function medalEmoji(rank: number | null): string {
   return '';
 }
 
+// ── Sync status row ───────────────────────────────────────────────────────
+
+function SyncStatusRow({
+  syncing,
+  progress,
+  onSync,
+}: {
+  syncing: boolean;
+  progress: { done: number; total: number } | null;
+  onSync?: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  if (syncing) {
+    const total = progress?.total ?? 0;
+    const done = progress?.done ?? 0;
+    const label = total > 0
+      ? `Syncing tournaments… ${done} of ${total}`
+      : 'Syncing tournaments…';
+    return (
+      <View style={styles.syncRow}>
+        <ActivityIndicator size="small" color={colors.primary} />
+        <Text style={styles.syncRowText}>{label}</Text>
+      </View>
+    );
+  }
+  // Idle: render the explicit "Sync now" button only when a handler is wired.
+  if (!onSync) return null;
+  return (
+    <TouchableOpacity
+      style={styles.syncRow}
+      onPress={onSync}
+      activeOpacity={0.6}
+    >
+      <Text style={styles.syncRowIcon}>↻</Text>
+      <Text style={styles.syncRowText}>Sync season data</Text>
+    </TouchableOpacity>
+  );
+}
+
 // ── Styles ────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   hero: {
     backgroundColor: colors.primary,
@@ -469,6 +597,85 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   body: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+
+  syncRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.md,
+    alignSelf: 'flex-start',
+  },
+  syncRowIcon: {
+    color: colors.primary,
+    fontSize: fontSize.md,
+    fontWeight: '800',
+    marginRight: spacing.sm,
+  },
+  syncRowText: {
+    color: colors.primary,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+    marginLeft: spacing.sm,
+  },
+
+  discoveryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.accent,
+  },
+  discoveryRowTitle: {
+    color: colors.primary,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+  discoveryRowSub: {
+    color: colors.textSecondary,
+    fontSize: fontSize.xs,
+    marginTop: 2,
+  },
+
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.md,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.success,
+  },
+  resultIcon: {
+    color: colors.success,
+    fontSize: fontSize.lg,
+    fontWeight: '800',
+    marginRight: spacing.sm,
+  },
+  resultMain: { flex: 1 },
+  resultText: {
+    color: colors.text,
+    fontSize: fontSize.sm,
+    lineHeight: 18,
+  },
+  resultDismiss: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    marginLeft: spacing.sm,
+  },
+  resultDismissText: {
+    color: colors.textLight,
+    fontSize: fontSize.md,
+    fontWeight: '700',
+  },
 
   section: { marginBottom: spacing.lg },
   sectionLabel: {
@@ -624,3 +831,4 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
   },
 });
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   Pressable,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getMatchResult } from '../api/aesClient';
 import type { MatchResult, FlatCourtMatch } from '../api/aesClient';
 import { formatTime, formatDate } from '../utils/dates';
@@ -28,6 +29,8 @@ export function MatchScoresModal({
   eventKey,
   preloadedResult,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<MatchResult | null>(null);
 
@@ -200,7 +203,8 @@ export function MatchScoresModal({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -320,3 +324,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+}

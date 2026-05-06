@@ -7,7 +7,7 @@
 //   • TimuShareButton      — native Share sheet with tournament link
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -21,7 +21,8 @@ import {
   Platform,
   Alert,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { Card } from './Card';
 import type { TimuTournamentInfo } from '../types/timu';
 import { TIMU_DOC_URLS, OVA_CONTACTS } from '../api/timuClient';
@@ -33,6 +34,8 @@ interface VenueInfoProps {
 }
 
 export function VenueInfoCard({ info }: VenueInfoProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [expanded, setExpanded] = useState(false);
   if (!info.venueName && !info.notes) return null;
 
@@ -93,6 +96,8 @@ interface ContactButtonsProps {
 }
 
 export function ContactButtonsRow({ info }: ContactButtonsProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const contacts: Array<{ label: string; action: () => void }> = [];
   if (info.hostContact) {
     contacts.push({
@@ -160,6 +165,8 @@ interface DocsSheetProps {
 }
 
 export function OvaDocsSheet({ visible, onClose }: DocsSheetProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.modalBackdrop} onPress={onClose}>
@@ -206,6 +213,8 @@ interface ShareProps {
 }
 
 export function TimuShareButton({ tid, tournamentName, style, tint = 'dark' }: ShareProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   async function onShare() {
     try {
       await Share.share({
@@ -226,7 +235,8 @@ export function TimuShareButton({ tid, tournamentName, style, tint = 'dark' }: S
 
 // ── styles ────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   venueCard: {},
   venueHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   venueHeaderLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
@@ -297,3 +307,4 @@ const styles = StyleSheet.create({
   shareBtnText: { color: '#fff', fontSize: fontSize.sm, fontWeight: '600' },
   shareBtnTextLight: { color: colors.primary },
 });
+}

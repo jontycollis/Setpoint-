@@ -8,7 +8,8 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getTeamAssignments } from '../api/aesClient';
 import type {
   AESEvent,
@@ -28,6 +29,8 @@ interface IndexEntry {
 }
 
 export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
@@ -204,7 +207,8 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     padding: spacing.lg,
@@ -310,3 +314,4 @@ const styles = StyleSheet.create({
     padding: spacing.xxl,
   },
 });
+}

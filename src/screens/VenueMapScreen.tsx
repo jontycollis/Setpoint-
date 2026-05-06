@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getBestVenueMapUrl } from '../api/venueMapDiscovery';
 
 /**
@@ -148,6 +149,8 @@ export function VenueMapScreen({
   highlightCourt,
   matchInfo,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [discoveredMapUrl, setDiscoveredMapUrl] = useState<string | null>(null);
@@ -363,7 +366,8 @@ export function VenueMapScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     padding: spacing.lg,
@@ -532,3 +536,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 });
+}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   getCourtSchedule,
   getUtilizedDates,
@@ -45,6 +46,8 @@ export function CourtScheduleScreen({
   onBack,
   onTeamPress,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [dates, setDates] = useState<UtilizedDate[]>([]);
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [allMatches, setAllMatches] = useState<FlatCourtMatch[]>([]);
@@ -418,7 +421,8 @@ export function CourtScheduleScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: { padding: spacing.lg },
   backText: {
@@ -596,3 +600,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+}

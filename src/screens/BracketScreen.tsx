@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   getPlayDays,
   getPlays,
@@ -34,6 +35,8 @@ interface BracketInfo {
 }
 
 export function BracketScreen({ event, division, myTeamId, onBack, initialPlayId, onTeamPress }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [brackets, setBrackets] = useState<BracketInfo[]>([]);
@@ -440,7 +443,8 @@ export function BracketScreen({ event, division, myTeamId, onBack, initialPlayId
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: {
     flex: 1,
@@ -642,3 +646,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
 });
+}

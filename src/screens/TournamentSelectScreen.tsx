@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   ActivityIndicator,
   Image,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   TOURNAMENT_REGISTRY,
   getAvailableYears,
@@ -103,6 +104,8 @@ function mergeDiscoveredEvents(
 }
 
 export function TournamentSelectScreen({ onTournamentSelected }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [step, setStep] = useState<Step>('country');
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [selectedTournament, setSelectedTournament] =
@@ -328,7 +331,8 @@ export function TournamentSelectScreen({ onTournamentSelected }: Props) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -517,3 +521,4 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 });
+}

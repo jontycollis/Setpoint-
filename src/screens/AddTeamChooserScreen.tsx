@@ -18,7 +18,7 @@
 // downstream flows. Two buttons + a back affordance is enough.
 // ────────────────────────────────────────────────────────────────────────────
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -27,7 +27,8 @@ import {
   ScrollView,
 } from 'react-native';
 import { Card } from '../components/Card';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 
 interface Props {
   onBack: () => void;
@@ -40,6 +41,8 @@ export function AddTeamChooserScreen({
   onChooseAes,
   onChooseTimu,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.container}>
       <View style={styles.hero}>
@@ -99,6 +102,8 @@ function ChoiceCard({
   accentLabel: string;
   onPress: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
       <Card style={styles.choiceCard}>
@@ -118,7 +123,8 @@ function ChoiceCard({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   hero: {
     backgroundColor: colors.primary,
@@ -179,3 +185,4 @@ const styles = StyleSheet.create({
   helpText: { fontSize: fontSize.xs, color: colors.textSecondary, lineHeight: 18 },
   helpEm: { fontWeight: '700', color: colors.text },
 });
+}

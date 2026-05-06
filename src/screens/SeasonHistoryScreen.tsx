@@ -25,7 +25,8 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
 import {
   loadAllSeasonIndices,
@@ -43,10 +44,23 @@ import {
   getBuildDiagnostics,
 } from '../utils/timuSeasonIndex';
 import { seasonForDateOrSynth, distinctSeasons, type Season } from '../utils/season';
+import {
+  DiscoveryProgressBanner,
+  DiscoveryResultBanner,
+} from '../components/DiscoveryBanners';
+import type { AutoDiscoverProgress } from '../utils/teamAutoDiscover';
 
 interface Props {
   /** Display name shown in the hero. Typically myTeam.teamText or teamName. */
   primaryName: string;
+  /**
+   * Per-team aliases to filter the unified history. When supplied, ONLY
+   * tournaments matching one of these aliases (plus `primaryName`) appear
+   * — fixes the cross-pollution where Team A's history showed Team B's
+   * tournaments because we were loading a global alias list. When null,
+   * we fall back to the legacy global alias store for backwards compat.
+   */
+  aliases?: string[] | null;
   onBack: () => void;
   /**
    * When the user taps an AES tournament card, the second arg is the
@@ -66,30 +80,72 @@ interface Props {
   onOpenTimuTournament?: (tid: number, myTeamAsSeen?: string) => void;
   onScoutOpponent: (teamName: string) => void;
   onManageSeason: () => void;
+  /**
+   * Optional manual trigger for the auto-discovery flow. When supplied,
+   * a "Find more tournaments" button surfaces above the season list so
+   * the user can re-run the AES + Timu scan after the 6h auto-throttle
+   * — useful after a tournament weekend.
+   */
+  onFindMoreTournaments?: () => void;
+  /**
+   * Epoch ms of the last successful auto-discovery for this team. When
+   * present, the hero shows a "Last synced X ago" subtitle so the user
+   * knows whether their season history is current.
+   */
+  lastDiscoveryAt?: number;
+  /** Mirror of App-level discovery state so the in-flight progress
+   *  banner shows on Season History (where the user often triggers it
+   *  via "Find more tournaments") not just MyHome. */
+  discoveringTeamLabel?: string | null;
+  discoveryProgress?: AutoDiscoverProgress | null;
+  discoveryResult?: {
+    teamId: string;
+    teamLabel: string;
+    aesIndexed: number;
+    timuIndexed: number;
+  } | null;
+  onDismissDiscoveryResult?: () => void;
+  onViewDiscoveryResult?: () => void;
 }
 
 export function SeasonHistoryScreen({
   primaryName,
+  aliases: aliasesProp,
   onBack,
   onOpenAesTournament,
   onOpenTimuTournament,
   onScoutOpponent,
   onManageSeason,
+  onFindMoreTournaments,
+  lastDiscoveryAt,
+  discoveringTeamLabel = null,
+  discoveryProgress = null,
+  discoveryResult = null,
+  onDismissDiscoveryResult,
+  onViewDiscoveryResult,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [history, setHistory] = useState<UnifiedTournamentEntry[]>([]);
   const [stats, setStats] = useState<UnifiedAggregateStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const [autoHealing, setAutoHealing] = useState(false);
+  // When set, the per-season tournament list filters down to just this
+  // season — driven by tapping a row on the YoY card. null = show all.
+  const [focusedSeasonId, setFocusedSeasonId] = useState<string | null>(null);
 
   const refresh = async () => {
-    const [indices, storedAliases] = await Promise.all([
-      loadAllSeasonIndices(),
-      loadMyTeamAliases(),
-    ]);
+    // Prefer per-team aliases (from the active TeamProfile) over the legacy
+    // global list. The global list mixed every followed team's aliases
+    // together, which leaked Team B's tournaments into Team A's history.
+    const sourceAliases = aliasesProp && aliasesProp.length > 0
+      ? aliasesProp
+      : await loadMyTeamAliases();
+    const indices = await loadAllSeasonIndices();
     // Always include the primary name as an implicit alias.
-    const aliases = Array.from(new Set([primaryName, ...storedAliases])).filter(
+    const aliases = Array.from(new Set([primaryName, ...sourceAliases])).filter(
       (s) => s && s.trim().length > 0
     );
     const h = buildMySeasonHistory(indices, aliases);
@@ -120,7 +176,13 @@ export function SeasonHistoryScreen({
       await refresh();
       setLoading(false);
     })();
-  }, [primaryName]);
+    // Re-run when:
+    //   - aliases change (switching to a different tracked team)
+    //   - lastDiscoveryAt changes — fires when the auto-discovery for
+    //     this team finishes while we're still on the screen, so the
+    //     newly-indexed tournaments appear immediately instead of
+    //     requiring a manual pull-to-refresh.
+  }, [primaryName, JSON.stringify(aliasesProp || []), lastDiscoveryAt]);
 
   const onPull = async () => {
     setRefreshing(true);
@@ -172,13 +234,29 @@ export function SeasonHistoryScreen({
 
   return (
     <View style={styles.container}>
-      <Hero teamName={primaryName} onBack={onBack} />
+      <Hero
+        teamName={primaryName}
+        onBack={onBack}
+        lastDiscoveryAt={lastDiscoveryAt}
+      />
 
       <ScrollView
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPull} tintColor={colors.primary} />}
       >
+        {discoveringTeamLabel ? (
+          <DiscoveryProgressBanner
+            teamLabel={discoveringTeamLabel}
+            progress={discoveryProgress}
+          />
+        ) : discoveryResult ? (
+          <DiscoveryResultBanner
+            result={discoveryResult}
+            onView={onViewDiscoveryResult}
+            onDismiss={onDismissDiscoveryResult}
+          />
+        ) : null}
         {loading ? (
           <View style={styles.loading}>
             <ActivityIndicator size="large" color={colors.primary} />
@@ -196,13 +274,42 @@ export function SeasonHistoryScreen({
                 </Text>
               </View>
             )}
+            <YearComparisonCard
+              history={history}
+              focusedSeasonId={focusedSeasonId}
+              onSelectSeason={(id) =>
+                setFocusedSeasonId((cur) => (cur === id ? null : id))
+              }
+            />
+            {focusedSeasonId && (
+              <TouchableOpacity
+                style={styles.clearFilterRow}
+                onPress={() => setFocusedSeasonId(null)}
+                activeOpacity={0.6}
+              >
+                <Text style={styles.clearFilterText}>
+                  Showing one season · Show all seasons
+                </Text>
+              </TouchableOpacity>
+            )}
+            {onFindMoreTournaments && (
+              <TouchableOpacity
+                style={styles.findMoreBtn}
+                onPress={onFindMoreTournaments}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.findMoreBtnText}>
+                  ↻ Find more tournaments for {primaryName}
+                </Text>
+                <Text style={styles.findMoreBtnHint}>
+                  Re-runs the AES + Timu search. Up to ~50 MB on Wi-Fi.
+                </Text>
+              </TouchableOpacity>
+            )}
             {stats && (
               <SummaryCard stats={stats} label={
                 distinctSeasons(history).length > 1 ? 'Career Totals' : 'Season Totals'
               } />
-            )}
-            {distinctSeasons(history).length > 1 && (
-              <YearComparisonCard history={history} />
             )}
             {(() => {
               // Group history by season (newest first), preserving order within each.
@@ -229,7 +336,10 @@ export function SeasonHistoryScreen({
               const ordered = Array.from(groups.values()).sort(
                 (a, b) => b.season.startYear - a.season.startYear
               );
-              return ordered.map((group) => (
+              const visible = focusedSeasonId
+                ? ordered.filter((g) => g.season.id === focusedSeasonId)
+                : ordered;
+              return visible.map((group) => (
                 <SeasonSection
                   key={group.season.id}
                   season={group.season}
@@ -263,7 +373,17 @@ export function SeasonHistoryScreen({
 
 // ── Hero ──────────────────────────────────────────────────────────────────
 
-function Hero({ teamName, onBack }: { teamName: string; onBack: () => void }) {
+function Hero({
+  teamName,
+  onBack,
+  lastDiscoveryAt,
+}: {
+  teamName: string;
+  onBack: () => void;
+  lastDiscoveryAt?: number;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.hero}>
       <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -271,8 +391,31 @@ function Hero({ teamName, onBack }: { teamName: string; onBack: () => void }) {
       </TouchableOpacity>
       <Text style={styles.heroKicker}>SEASON HISTORY</Text>
       <Text style={styles.heroTitle} numberOfLines={2}>{teamName}</Text>
+      {lastDiscoveryAt ? (
+        <Text style={styles.heroSyncedAt}>
+          Last synced {formatRelative(lastDiscoveryAt)}
+        </Text>
+      ) : (
+        <Text style={styles.heroSyncedAt}>Never synced — tap "Find more tournaments" below</Text>
+      )}
     </View>
   );
+}
+
+function formatRelative(ms: number): string {
+  const diff = Date.now() - ms;
+  if (diff < 0) return 'just now';
+  const min = Math.floor(diff / 60000);
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const days = Math.floor(hr / 24);
+  if (days < 7) return `${days}d ago`;
+  const weeks = Math.floor(days / 7);
+  if (weeks < 4) return `${weeks}w ago`;
+  const months = Math.floor(days / 30);
+  return `${months}mo ago`;
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────
@@ -284,6 +427,8 @@ function EmptyState({
   teamName: string;
   onManageSeason: () => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Card variant="outlined" style={styles.emptyCard}>
       <Text style={styles.emptyTitle}>No history yet</Text>
@@ -308,6 +453,8 @@ function SummaryCard({
   stats: UnifiedAggregateStats;
   label?: string;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <Card style={styles.summaryCard}>
       <Text style={styles.summaryTitle}>{label}</Text>
@@ -354,6 +501,8 @@ function SummaryCell({
   value: string;
   accent?: boolean;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.summaryCell}>
       <Text style={[styles.summaryValue, accent && styles.summaryValueAccent]}>{value}</Text>
@@ -410,9 +559,80 @@ function buildSeasonRows(history: UnifiedTournamentEntry[]): SeasonRow[] {
   return rows.sort((a, b) => b.seasonId.localeCompare(a.seasonId));
 }
 
-function YearComparisonCard({ history }: { history: UnifiedTournamentEntry[] }) {
+function YearComparisonCard({
+  history,
+  focusedSeasonId,
+  onSelectSeason,
+}: {
+  history: UnifiedTournamentEntry[];
+  focusedSeasonId?: string | null;
+  onSelectSeason?: (seasonId: string) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const rows = buildSeasonRows(history);
-  if (rows.length < 2) return null;
+  if (rows.length === 0) return null;
+  // Single-season case: still render the card so the user can find this
+  // section without having to wait for a second season's data. We just
+  // skip the "best column" highlights and show a one-line hint at the
+  // bottom explaining the comparison will populate as more data lands.
+  if (rows.length === 1) {
+    const r = rows[0];
+    const t = r.matchesWon + r.matchesLost;
+    const matchPct = t ? r.matchesWon / t : 0;
+    const sT = r.setsWon + r.setsLost;
+    const setPct = sT ? r.setsWon / sT : 0;
+    const isFocused = focusedSeasonId === r.seasonId;
+    return (
+      <Card style={styles.yoyCard}>
+        <Text style={styles.yoyTitle}>Year on Year</Text>
+        <View style={styles.yoyHeader}>
+          <Text style={[styles.yoyCell, styles.yoySeasonCol]}>Season</Text>
+          <Text style={[styles.yoyCell, styles.yoyNumCol]}>Events</Text>
+          <Text style={[styles.yoyCell, styles.yoyRecordCol]}>Record</Text>
+          <Text style={[styles.yoyCell, styles.yoyRecordCol]}>Sets</Text>
+          <Text style={[styles.yoyCell, styles.yoyNumCol]}>Best</Text>
+        </View>
+        <TouchableOpacity
+          style={[styles.yoyRow, isFocused && styles.yoyRowFocused]}
+          onPress={() => onSelectSeason?.(r.seasonId)}
+          activeOpacity={0.6}
+          disabled={!onSelectSeason}
+        >
+          <Text style={[styles.yoyCell, styles.yoySeasonCol, styles.yoySeasonText]}>
+            {r.seasonLabel}
+          </Text>
+          <Text style={[styles.yoyCell, styles.yoyNumCol]}>{r.events}</Text>
+          <View style={styles.yoyRecordCol}>
+            <Text style={[styles.yoyCell, styles.yoyRecordPrimary]}>
+              {r.matchesWon}-{r.matchesLost}
+            </Text>
+            {t > 0 && (
+              <Text style={styles.yoyRecordSecondary}>
+                {Math.round(matchPct * 100)}%
+              </Text>
+            )}
+          </View>
+          <View style={styles.yoyRecordCol}>
+            <Text style={[styles.yoyCell, styles.yoyRecordPrimary]}>
+              {r.setsWon}-{r.setsLost}
+            </Text>
+            {sT > 0 && (
+              <Text style={styles.yoyRecordSecondary}>
+                {Math.round(setPct * 100)}%
+              </Text>
+            )}
+          </View>
+          <Text style={[styles.yoyCell, styles.yoyNumCol]}>
+            {r.bestFinish != null ? `#${r.bestFinish}` : '—'}
+          </Text>
+        </TouchableOpacity>
+        <Text style={styles.yoyHint}>
+          Add tournaments from a previous season to compare year on year.
+        </Text>
+      </Card>
+    );
+  }
 
   // Compute per-column "best" so we can highlight improvements.
   const matchPcts = rows.map((r) => {
@@ -448,8 +668,15 @@ function YearComparisonCard({ history }: { history: UnifiedTournamentEntry[] }) 
         const setPct = sT ? r.setsWon / sT : 0;
         const setPctIsBest = setPct === bestSetPct && setPct > 0;
         const finishIsBest = r.bestFinish != null && r.bestFinish === bestFinish;
+        const isFocused = focusedSeasonId === r.seasonId;
         return (
-          <View key={r.seasonId} style={styles.yoyRow}>
+          <TouchableOpacity
+            key={r.seasonId}
+            style={[styles.yoyRow, isFocused && styles.yoyRowFocused]}
+            onPress={() => onSelectSeason?.(r.seasonId)}
+            activeOpacity={0.6}
+            disabled={!onSelectSeason}
+          >
             <Text style={[styles.yoyCell, styles.yoySeasonCol, styles.yoySeasonText]}>
               {r.seasonLabel}
             </Text>
@@ -495,16 +722,19 @@ function YearComparisonCard({ history }: { history: UnifiedTournamentEntry[] }) 
             >
               {r.bestFinish != null ? `#${r.bestFinish}` : '—'}
             </Text>
-          </View>
+          </TouchableOpacity>
         );
       })}
       {rows.length >= 2 && <YearTrendStrip rows={rows} />}
+      <Text style={styles.yoyHint}>Tap a season to filter the list below.</Text>
     </Card>
   );
 }
 
 /** Tiny inline arrow showing year-over-year direction on key metrics. */
 function YearTrendStrip({ rows }: { rows: SeasonRow[] }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Compare the most recent two seasons (rows are newest first).
   const cur = rows[0];
   const prev = rows[1];
@@ -566,6 +796,8 @@ function SeasonSection({
   onScoutOpponent: (teamName: string) => void;
   onRefreshEntry?: (entry: UnifiedTournamentEntry) => Promise<void>;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Per-season totals (separate from the career totals at top).
   const matchesWon = items.reduce((n, t) => n + t.matchesFor, 0);
   const matchesLost = items.reduce((n, t) => n + t.matchesAgainst, 0);
@@ -626,13 +858,18 @@ function TournamentCard({
   onScoutOpponent: (name: string) => void;
   onRefresh?: (entry: UnifiedTournamentEntry) => void;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const poolMatches = entry.matches.filter((m) => m.isPool);
   const playoffMatches = entry.matches.filter((m) => !m.isPool);
-  const finalColor = medalColor(entry.finalRank);
+  const finalColor = medalColor(entry.finalRank, colors.primary);
   const sourceBadgeColor = entry.source === 'aes' ? colors.primary : colors.accent;
   const noMatches = entry.matches.length === 0;
   const totalInSnapshot = entry.totalMatchesInSnapshot ?? 0;
   const [refreshing, setRefreshing] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const hasResults = poolMatches.length > 0 || playoffMatches.length > 0;
+  const showDiagnostic = noMatches && entry.source === 'timu' && !!onRefresh;
 
   const handleRefresh = async () => {
     if (!onRefresh) return;
@@ -696,7 +933,27 @@ function TournamentCard({
         </View>
       </TouchableOpacity>
 
-      {poolMatches.length > 0 && (
+      {(hasResults || showDiagnostic) && (
+        <TouchableOpacity
+          style={styles.expandToggle}
+          onPress={() => setExpanded((e) => !e)}
+          activeOpacity={0.6}
+        >
+          <Text style={styles.expandToggleText}>
+            {expanded ? 'Hide results' : 'Show results'}
+            {hasResults
+              ? ` · ${poolMatches.length} pool${poolMatches.length === 1 ? '' : 's'}${
+                  playoffMatches.length > 0
+                    ? ` · ${playoffMatches.length} playoff${playoffMatches.length === 1 ? '' : 's'}`
+                    : ''
+                }`
+              : ''}
+          </Text>
+          <Text style={styles.expandChevron}>{expanded ? '▲' : '▼'}</Text>
+        </TouchableOpacity>
+      )}
+
+      {expanded && poolMatches.length > 0 && (
         <View style={styles.matchesSection}>
           <Text style={styles.matchesSectionTitle}>Pool Play</Text>
           {poolMatches.map((m, i) => (
@@ -704,7 +961,7 @@ function TournamentCard({
           ))}
         </View>
       )}
-      {playoffMatches.length > 0 && (
+      {expanded && playoffMatches.length > 0 && (
         <View style={styles.matchesSection}>
           <Text style={styles.matchesSectionTitle}>Playoffs</Text>
           {playoffMatches.map((m, i) => (
@@ -717,7 +974,7 @@ function TournamentCard({
           entries for the user. Helps the user distinguish "snapshot is
           empty (refresh me)" from "snapshot has data but my team's name
           didn't match (alias issue)". */}
-      {noMatches && entry.source === 'timu' && onRefresh && (
+      {expanded && showDiagnostic && (
         <View style={styles.diagnosticBox}>
           {totalInSnapshot === 0 ? (
             <Text style={styles.diagnosticText}>
@@ -750,6 +1007,8 @@ function TournamentCard({
 }
 
 function MatchRow({ match, onScout }: { match: UnifiedMatchEntry; onScout: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // A match is "decided" only when one team has more sets won than the other.
   // Equal sets (incl. 0-0) means in-progress / no result, never a loss.
   const decided = match.mySetsWon !== match.oppSetsWon;
@@ -794,11 +1053,11 @@ function MatchRow({ match, onScout }: { match: UnifiedMatchEntry; onScout: () =>
   );
 }
 
-function medalColor(rank: number | null): string {
+function medalColor(rank: number | null, fallback: string): string {
   if (rank === 1) return '#d4af37';
   if (rank === 2) return '#b0b0b0';
   if (rank === 3) return '#cd7f32';
-  return colors.primary;
+  return fallback;
 }
 
 /**
@@ -812,7 +1071,8 @@ function medalEmoji(rank: number | null): string {
   return '';
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   body: { flex: 1 },
   bodyContent: { padding: spacing.lg, paddingBottom: spacing.xxxl },
@@ -821,6 +1081,12 @@ const styles = StyleSheet.create({
   heroBack: { color: 'rgba(255,255,255,0.9)', fontSize: fontSize.md, fontWeight: '600', marginBottom: spacing.sm },
   heroKicker: { color: 'rgba(255,255,255,0.7)', fontSize: fontSize.xs, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
   heroTitle: { color: colors.textOnPrimary, fontSize: fontSize.xxl, fontWeight: '800' },
+  heroSyncedAt: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: fontSize.xs,
+    marginTop: 4,
+    fontStyle: 'italic',
+  },
 
   loading: { alignItems: 'center', paddingVertical: spacing.xxxl },
   loadingText: { color: colors.textSecondary, marginTop: spacing.md },
@@ -840,6 +1106,27 @@ const styles = StyleSheet.create({
   summaryLabel: { fontSize: 10, color: colors.textSecondary, marginTop: 2, textTransform: 'uppercase', textAlign: 'center' },
   summaryBestNote: { fontSize: fontSize.xs, color: colors.accent, marginTop: spacing.xs, textAlign: 'center' },
 
+  expandToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    marginTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
+  },
+  expandToggleText: {
+    color: colors.primary,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+  },
+  expandChevron: {
+    color: colors.primary,
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+    marginLeft: spacing.xs,
+  },
   diagnosticBox: {
     marginTop: spacing.sm,
     padding: spacing.sm,
@@ -891,6 +1178,51 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: colors.primary,
     marginBottom: spacing.sm,
+  },
+  yoyHint: {
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
+    marginTop: spacing.sm,
+  },
+  yoyRowFocused: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.sm,
+  },
+
+  clearFilterRow: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.sm,
+    alignSelf: 'flex-start',
+    marginBottom: spacing.md,
+  },
+  clearFilterText: {
+    color: colors.primary,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+  },
+
+  findMoreBtn: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    marginBottom: spacing.md,
+    alignItems: 'center',
+  },
+  findMoreBtnText: {
+    color: colors.primary,
+    fontSize: fontSize.md,
+    fontWeight: '700',
+  },
+  findMoreBtnHint: {
+    color: colors.textSecondary,
+    fontSize: fontSize.xs,
+    marginTop: 2,
   },
   yoyHeader: {
     flexDirection: 'row',
@@ -1007,3 +1339,4 @@ const styles = StyleSheet.create({
   footerBtn: { marginTop: spacing.md, paddingVertical: spacing.md, alignItems: 'center', backgroundColor: colors.surface, borderRadius: borderRadius.md, borderWidth: 1, borderColor: colors.border },
   footerBtnText: { color: colors.primary, fontWeight: '600', fontSize: fontSize.sm },
 });
+}

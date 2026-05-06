@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Share } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 
 interface SetScore {
   FirstTeamScore: number | null;
@@ -36,6 +37,8 @@ export function ShareCard({
   medalLabel,
   onClose,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Build set scores
   const setScores = sets
     .filter((s) => s.FirstTeamScore != null)
@@ -120,7 +123,8 @@ export function ShareCard({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   overlay: {
     position: 'absolute',
     top: 0,
@@ -287,3 +291,4 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 });
+}

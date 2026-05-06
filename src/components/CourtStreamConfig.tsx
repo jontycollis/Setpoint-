@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,7 +10,8 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   loadCourtStreams,
   saveCourtStreams,
@@ -30,6 +31,8 @@ export function CourtStreamConfig({
   eventKey,
   courtNames,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [streams, setStreams] = useState<CourtStreamMap>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -175,7 +178,8 @@ export function CourtStreamConfig({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
@@ -268,3 +272,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+}

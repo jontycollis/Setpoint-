@@ -1,12 +1,15 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
-import { colors, fontSize, spacing } from '../utils/theme';
+import { useTheme, fontSize, spacing } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 
 interface LoadingScreenProps {
   message?: string;
 }
 
 export function LoadingScreen({ message = 'Loading...' }: LoadingScreenProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.container}>
       <ActivityIndicator size="large" color={colors.primary} />
@@ -21,6 +24,8 @@ interface ErrorScreenProps {
 }
 
 export function ErrorScreen({ message, onRetry }: ErrorScreenProps) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.container}>
       <Text style={styles.errorIcon}>!</Text>
@@ -34,7 +39,8 @@ export function ErrorScreen({ message, onRetry }: ErrorScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     flex: 1,
     justifyContent: 'center',
@@ -72,3 +78,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+}

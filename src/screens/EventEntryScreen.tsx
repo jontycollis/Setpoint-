@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,8 @@ import {
   ScrollView,
   Image,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getEvent, extractEventKey } from '../api/aesClient';
 import type { AESEvent, SavedEvent } from '../types/aes';
 import type {
@@ -50,6 +51,8 @@ export function EventEntryScreen({
   tournament,
   tournamentYear,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [loadingEvent, setLoadingEvent] = useState<string | null>(null);
@@ -246,7 +249,8 @@ export function EventEntryScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   scroll: { paddingBottom: spacing.xxxl },
   backRow: {
@@ -462,3 +466,4 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
 });
+}

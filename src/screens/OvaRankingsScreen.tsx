@@ -17,7 +17,8 @@ import {
   RefreshControl,
   Alert,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
 import {
   getRankings,
@@ -42,6 +43,8 @@ export function OvaRankingsScreen({
   initialDivisionKey,
   initialGender,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [snap, setSnap] = useState<OvaRankingsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -394,6 +397,8 @@ function Hero({
   onBack: () => void;
   fetchedAt?: number;
 }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   return (
     <View style={styles.hero}>
       <TouchableOpacity onPress={onBack} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -438,7 +443,8 @@ function abbreviateColumn(name: string): string {
 
 // ── Styles ────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   hero: { backgroundColor: colors.primary, padding: spacing.xxl, paddingBottom: spacing.lg },
   heroBack: { color: 'rgba(255,255,255,0.9)', fontSize: fontSize.md, fontWeight: '600', marginBottom: spacing.sm },
@@ -602,3 +608,4 @@ const styles = StyleSheet.create({
   fullStatsLabel: { color: colors.textSecondary, fontSize: fontSize.sm },
   fullStatsValue: { color: colors.text, fontSize: fontSize.sm, fontWeight: '600' },
 });
+}

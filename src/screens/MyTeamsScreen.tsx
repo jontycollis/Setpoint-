@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import {
   getCachedTeamAssignments,
   getCachedEvent,
@@ -54,6 +55,8 @@ export function MyTeamsScreen({
   onNavigateToTeam,
   onBack,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [teamInfos, setTeamInfos] = useState<TeamMatchInfo[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -350,7 +353,8 @@ export function MyTeamsScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: {
     flex: 1,
@@ -575,3 +579,4 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
 });
+}

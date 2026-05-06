@@ -9,7 +9,10 @@ import {
   Alert,
   BackHandler,
   ActivityIndicator,
+  Modal,
+  TouchableOpacity,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TournamentSelectScreen } from './src/screens/TournamentSelectScreen';
 import { MyHomeScreen } from './src/screens/MyHomeScreen';
@@ -34,6 +37,12 @@ import { LiveScoreboardScreen } from './src/screens/LiveScoreboardScreen';
 import { ClubViewScreen } from './src/screens/ClubViewScreen';
 import { CrossTournamentScreen } from './src/screens/CrossTournamentScreen';
 import { TeamNotesScreen } from './src/screens/TeamNotesScreen';
+import { ScoreboardScreen } from './src/screens/ScoreboardScreen';
+import { MatchListScreen } from './src/screens/MatchListScreen';
+import { MatchSetupScreen } from './src/screens/MatchSetupScreen';
+import { MatchScoringScreen } from './src/screens/MatchScoringScreen';
+import type { Match as ScoredMatch } from './src/types/match';
+import { saveMatch as saveScoredMatch } from './src/utils/scoredMatchStore';
 import { TimuTournamentScreen } from './src/screens/TimuTournamentScreen';
 import { TimuTeamDashboardScreen } from './src/screens/TimuTeamDashboardScreen';
 import { TimuOpponentScoutScreen } from './src/screens/TimuOpponentScoutScreen';
@@ -60,11 +69,22 @@ import {
   saveUserProfile,
 } from './src/utils/userProfile';
 import {
+  loadSeasonIndex,
+  findStaleTids,
+  bulkIndex,
+  refreshAll as refreshAllTimu,
+} from './src/utils/timuSeasonIndex';
+import {
+  autoDiscoverTeam,
+  type AutoDiscoverProgress,
+} from './src/utils/teamAutoDiscover';
+import {
   upsertTeamProfileForFavorite,
   addWatchingTeamProfile,
   setActiveTeamId,
+  removeTeamProfile,
 } from './src/utils/activeTeamProfile';
-import type { UserProfile } from './src/types/profile';
+import type { UserProfile, TeamProfile } from './src/types/profile';
 import {
   ThemeContext,
   lightColors,
@@ -111,7 +131,11 @@ type Screen =
   | 'TimuOpponentScout'
   | 'TimuManageSeason'
   | 'SeasonHistory'
-  | 'OvaRankings';
+  | 'OvaRankings'
+  | 'Scoreboard'
+  | 'MatchList'
+  | 'MatchSetup'
+  | 'MatchScoring';
 
 /**
  * Phase 4: which hamburger context to render. Home covers MyHome /
@@ -182,6 +206,43 @@ export default function App() {
   const [highlightCourt, setHighlightCourt] = useState<string | undefined>(undefined);
   const [courtMatchInfo, setCourtMatchInfo] = useState<{ opponentName: string; time: string } | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
+  // Aliases of the team currently displayed by SeasonHistoryScreen. Sourced
+  // from the active TeamProfile so the screen filters tournaments to ONLY
+  // that team's appearances — fixes the cross-pollution bug where Team A's
+  // history showed Team B's tournaments via the global alias list.
+  const [currentHistoryAliases, setCurrentHistoryAliases] = useState<string[] | null>(null);
+  // Tier 2 — active match being scored (transient; the canonical store
+  // is AsyncStorage via scoredMatchStore). Set when MatchSetup hands
+  // off a freshly-built Match, or when MatchList resumes one.
+  const [activeScoredMatch, setActiveScoredMatch] = useState<ScoredMatch | null>(null);
+  // Timu season-index sync state surfaced into MyHome. `syncing` flips on
+  // for both the silent boot refresh and the manual "Sync now" button.
+  // Progress is ({done, total}) — null when no sync has run yet this session.
+  const [timuSyncing, setTimuSyncing] = useState(false);
+  const [timuSyncProgress, setTimuSyncProgress] = useState<{ done: number; total: number } | null>(null);
+  // Auto-discovery state — flips on when a newly-added team triggers a
+  // background scan of AES + Timu for tournaments matching its aliases.
+  const [discoveringTeamLabel, setDiscoveringTeamLabel] = useState<string | null>(null);
+  const [discoveryProgress, setDiscoveryProgress] = useState<AutoDiscoverProgress | null>(null);
+  // Lingering result banner — kept on screen for a few seconds after a
+  // discovery completes so the user notices the new tournaments are
+  // ready. `teamId` lets the banner deep-link to that team's history.
+  const [discoveryResult, setDiscoveryResult] = useState<{
+    teamId: string;
+    teamLabel: string;
+    aliases: string[];
+    aesIndexed: number;
+    timuIndexed: number;
+  } | null>(null);
+  // Custom confirmation modal for "kick off auto-discover for this team?".
+  // We previously used Alert.alert, but on some devices the native dialog
+  // renders without visible buttons or gets dismissed by the slightest
+  // edge-tap. A controlled Modal is unambiguous: there is always a
+  // "Search Tournaments" button on screen.
+  const [confirmDiscovery, setConfirmDiscovery] = useState<{
+    team: TeamProfile;
+    resolve: (v: boolean) => void;
+  } | null>(null);
   const [navigatingToFav, setNavigatingToFav] = useState(false);
 
   // Timu state — independent of AES event/division/team context.
@@ -231,6 +292,298 @@ export default function App() {
     saveSavedEvents(savedEvents);
   }, [savedEvents, hydrated]);
 
+  // Configure local notifications so the discovery-complete event fires
+  // an OS-level banner even when the app is backgrounded. Best-effort —
+  // permissions failures or unsupported runtimes (e.g. iOS Expo Go on
+  // SDK 54) are swallowed; the in-app banner still fires either way.
+  useEffect(() => {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldShowAlert: true,
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+      } as Notifications.NotificationBehavior),
+    });
+    Notifications.requestPermissionsAsync().catch(() => {});
+  }, []);
+
+  // Once after hydration: silently refresh any Timu snapshots that look
+  // stale (results pending, no playoff data yet, missing core metadata).
+  // Best-effort — failures don't surface to the UI, the user can always
+  // hit the explicit "Sync now" button on MyHome to retry.
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const idx = await loadSeasonIndex();
+        const stale = findStaleTids(idx);
+        if (cancelled || stale.length === 0) return;
+        setTimuSyncing(true);
+        setTimuSyncProgress({ done: 0, total: stale.length });
+        await bulkIndex(stale, (done, total) => {
+          if (!cancelled) setTimuSyncProgress({ done, total });
+        });
+      } catch {
+        // ignore
+      } finally {
+        if (!cancelled) setTimuSyncing(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [hydrated]);
+
+  /**
+   * Kick off a background AES + Timu scan for any tournaments where this
+   * team appears, indexing the matches into the season indices. Throttled
+   * per alias-set inside `autoDiscoverTeam`, so calling repeatedly for
+   * the same team within 6 hours is a no-op.
+   *
+   * Best-effort: failures are swallowed; the user can re-trigger from
+   * the manual sync action on MyHome.
+   */
+  const handleAutoDiscoverTeam = useCallback(
+    async (team: TeamProfile, opts?: { force?: boolean }) => {
+      if (discoveringTeamLabel) return; // already running for some team
+      const aliases = team.aliases.length ? team.aliases : [team.label];
+      if (!aliases.length) return;
+
+      // Data warning — the Timu side alone fetches ~50 MB across the
+      // current season's tid range. Make the user opt in so they don't
+      // burn through cellular by accident. The confirmation lives in
+      // a controlled <Modal> at the App-level so the buttons are always
+      // visible (Alert.alert proved unreliable on some devices).
+      const confirmed = await new Promise<boolean>((resolve) => {
+        setConfirmDiscovery({ team, resolve });
+      });
+      setConfirmDiscovery(null);
+      if (!confirmed) return;
+
+      setDiscoveringTeamLabel(team.label);
+      setDiscoveryProgress({ phase: 'starting', done: 0, total: 0, matched: 0 });
+      // Clear any old result banner so it doesn't linger over the in-flight
+      // run from a previous team.
+      setDiscoveryResult(null);
+      try {
+        const out = await autoDiscoverTeam(
+          aliases,
+          (p) => setDiscoveryProgress(p),
+          { force: opts?.force }
+        );
+        if (!out.skipped) {
+          // Stamp the team profile with the completion time so the
+          // "Last synced X ago" badge on Season History and MyHome
+          // is accurate for this specific team.
+          const now = Date.now();
+          setUserProfile((prev) => {
+            if (!prev) return prev;
+            return {
+              ...prev,
+              teams: prev.teams.map((t) =>
+                t.id === team.id
+                  ? { ...t, lastDiscoveryAt: now, updatedAt: now }
+                  : t
+              ),
+              updatedAt: now,
+            };
+          });
+          setDiscoveryResult({
+            teamId: team.id,
+            teamLabel: team.label,
+            aliases,
+            aesIndexed: out.aesIndexed,
+            timuIndexed: out.timuIndexed,
+          });
+          // Local notification — surfaces the completion even if the
+          // user has navigated away from the app. Best-effort: any
+          // failure (permission, runtime) is swallowed.
+          const total = out.aesIndexed + out.timuIndexed;
+          if (total > 0) {
+            Notifications.scheduleNotificationAsync({
+              content: {
+                title: 'Tournament search complete',
+                body: `Found ${total} tournament${total === 1 ? '' : 's'} for ${team.label}.`,
+              },
+              trigger: null,
+            }).catch(() => {});
+          }
+        }
+      } catch {
+        /* best-effort; swallow */
+      } finally {
+        setDiscoveringTeamLabel(null);
+        setDiscoveryProgress(null);
+      }
+    },
+    [discoveringTeamLabel]
+  );
+
+  // Auto-dismiss the discovery result banner after a generous window so
+  // the user has time to notice it but the home screen doesn't stay
+  // cluttered indefinitely.
+  useEffect(() => {
+    if (!discoveryResult) return;
+    const t = setTimeout(() => setDiscoveryResult(null), 30 * 1000);
+    return () => clearTimeout(t);
+  }, [discoveryResult]);
+
+  // Manual re-run from Season History's "Find more tournaments" button.
+  // Forces past the 6h throttle so users can re-scan after a tournament
+  // weekend. We re-resolve the team profile from the current screen's
+  // aliases so the right TeamProfile.id ends up on the result banner.
+  const handleFindMoreForCurrentTeam = useCallback(() => {
+    if (!userProfile) return;
+    const aliasSet = currentHistoryAliases || [currentHistoryTeamName].filter(Boolean) as string[];
+    if (!aliasSet.length) return;
+    const lower = aliasSet.map((a) => a.toLowerCase().trim());
+    const match = userProfile.teams.find((t) =>
+      t.aliases.some((a) => lower.includes(a.toLowerCase().trim()))
+    );
+    if (!match) {
+      Alert.alert(
+        'No team profile found',
+        'Add this team via "+ Season" or the star icon first, then re-run.'
+      );
+      return;
+    }
+    handleAutoDiscoverTeam(match, { force: true });
+  }, [userProfile, currentHistoryAliases, currentHistoryTeamName, handleAutoDiscoverTeam]);
+
+  // Remove a TeamProfile entirely from MyTeams + watching list, plus any
+  // matching FavoriteTeam entries. Confirms via Alert.
+  const handleRemoveTeam = useCallback(
+    (team: TeamProfile) => {
+      Alert.alert(
+        `Remove ${team.label}?`,
+        'This unfollows the team and removes it from your home and the hamburger menu. Indexed tournament snapshots stay on the device — you can re-add the team later to see them again.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: () => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                return removeTeamProfile(prev, team.id);
+              });
+              // Drop matching favorite entries (AES match by primaryRef,
+              // Timu match by team-name alias).
+              setFavoriteTeams((prev) => {
+                return prev.filter((f) => {
+                  if (
+                    team.primaryRef &&
+                    team.primaryRef.source === f.source &&
+                    team.primaryRef.eventKey === f.eventKey &&
+                    team.primaryRef.teamId === f.teamId
+                  ) {
+                    return false;
+                  }
+                  // Also drop by team-name alias match (catches Timu favs
+                  // and any AES fav whose primaryRef wasn't an exact match).
+                  const favName = (f.teamText || f.teamName || '').toLowerCase().trim();
+                  if (
+                    favName &&
+                    team.aliases.some(
+                      (a) => a.toLowerCase().trim() === favName
+                    )
+                  ) {
+                    return false;
+                  }
+                  return true;
+                });
+              });
+              // If this team was the singular MyTeam, clear it.
+              setMyTeam((prev) => {
+                if (!prev) return prev;
+                if (
+                  team.primaryRef &&
+                  team.primaryRef.source === prev.source &&
+                  team.primaryRef.eventKey === prev.eventKey &&
+                  team.primaryRef.teamId === prev.teamId
+                ) {
+                  return null;
+                }
+                const myName = (prev.teamText || prev.teamName || '').toLowerCase().trim();
+                if (
+                  myName &&
+                  team.aliases.some((a) => a.toLowerCase().trim() === myName)
+                ) {
+                  return null;
+                }
+                return prev;
+              });
+            },
+          },
+        ]
+      );
+    },
+    []
+  );
+
+  /**
+   * Centralised "open this team's Season History" action used by every
+   * follow-list entry point (hamburger favorites, hamburger team-switcher,
+   * MyTeams screen, MyHome team cards). Pulls the team's per-team aliases
+   * from the UserProfile so the history view filters tournaments to ONLY
+   * that team — fixes the cross-pollution where the global alias list
+   * mixed every followed team's aliases together.
+   */
+  const openTeamSeasonHistory = useCallback(
+    (opts: { team?: TeamProfile; fav?: FavoriteTeam; fallbackName?: string }) => {
+      let primary = '';
+      let aliases: string[] | null = null;
+
+      if (opts.team) {
+        primary = opts.team.aliases[0] || opts.team.label;
+        aliases = opts.team.aliases.length > 0 ? opts.team.aliases : [primary];
+      } else if (opts.fav) {
+        primary = opts.fav.teamText || opts.fav.teamName || '';
+        // Try to find the matching TeamProfile so we can use its full alias
+        // set (handles spelling drift like "Defensa U18 Rob" vs "Defensa Rob").
+        const lower = primary.toLowerCase().trim();
+        const match = userProfile?.teams.find((t) =>
+          t.aliases.some((a) => a.toLowerCase().trim() === lower)
+        );
+        aliases = match?.aliases ?? null;
+      } else if (opts.fallbackName) {
+        primary = opts.fallbackName;
+      }
+
+      if (!primary) return;
+      setCurrentHistoryTeamName(primary);
+      setCurrentHistoryAliases(aliases);
+      setScreenHistory((prev) => [...prev, screen]);
+      setScreen('SeasonHistory');
+    },
+    [userProfile, screen]
+  );
+
+  // Manual "Sync now" — re-fetches every snapshot in the season index so
+  // results, brackets, and final rankings are pulled fresh in one shot.
+  // Used by the Sync button on MyHome.
+  const handleSyncSeason = useCallback(async () => {
+    if (timuSyncing) return;
+    try {
+      setTimuSyncing(true);
+      const idx = await loadSeasonIndex();
+      const tids = Object.keys(idx).map((k) => Number(k)).filter(Number.isFinite);
+      if (tids.length === 0) {
+        setTimuSyncProgress({ done: 0, total: 0 });
+        return;
+      }
+      setTimuSyncProgress({ done: 0, total: tids.length });
+      await refreshAllTimu((done, total) => {
+        setTimuSyncProgress({ done, total });
+      });
+    } catch (err: any) {
+      Alert.alert('Sync failed', err?.message || 'Could not refresh Timu snapshots.');
+    } finally {
+      setTimuSyncing(false);
+    }
+  }, [timuSyncing]);
+
   useEffect(() => {
     if (!hydrated) return;
     saveFavoriteTeams(favoriteTeams);
@@ -264,9 +617,21 @@ export default function App() {
       if (fav == null) {
         return setActiveTeamId(prev, null);
       }
-      return upsertTeamProfileForFavorite(prev, fav).profile;
+      const { profile: next, teamId } = upsertTeamProfileForFavorite(prev, fav);
+      // Auto-discover for newly-pinned my-teams too. The discover util
+      // throttles per alias-set, so this is harmless even if the team
+      // was already a watching profile that's now being promoted.
+      if (teamId) {
+        const upserted = next.teams.find((t) => t.id === teamId);
+        if (upserted) {
+          handleAutoDiscoverTeam(upserted).catch(() => {
+            /* swallow */
+          });
+        }
+      }
+      return next;
     });
-  }, []);
+  }, [handleAutoDiscoverTeam]);
 
   // Switching the active team via the new MyHome / HamburgerMenu UI:
   // updates profile, then mirrors into legacy `myTeam` so existing
@@ -368,12 +733,20 @@ export default function App() {
       if (willAdd && newFav) {
         setUserProfile((prev) => {
           if (!prev) return prev;
-          const { profile: next } = addWatchingTeamProfile(prev, newFav!);
+          const { profile: next, teamId } = addWatchingTeamProfile(prev, newFav!);
+          if (teamId) {
+            const added = next.teams.find((t) => t.id === teamId);
+            if (added) {
+              handleAutoDiscoverTeam(added).catch(() => {
+                /* swallow */
+              });
+            }
+          }
           return next;
         });
       }
     },
-    [currentTimuTid]
+    [currentTimuTid, handleAutoDiscoverTeam]
   );
 
   const setTimuAsMyTeam = useCallback(
@@ -835,6 +1208,14 @@ export default function App() {
             setScreen('TeamNotes');
           }
           break;
+        case 'Scoreboard':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('Scoreboard');
+          break;
+        case 'MatchList':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('MatchList');
+          break;
         case 'TimuTournament':
           if (currentTimuTid) {
             setScreenHistory((prev) => [...prev, screen]);
@@ -911,12 +1292,23 @@ export default function App() {
       if (willAdd) {
         setUserProfile((prev) => {
           if (!prev) return prev;
-          const { profile: next } = addWatchingTeamProfile(prev, team);
+          const { profile: next, teamId } = addWatchingTeamProfile(prev, team);
+          // Kick off auto-discovery for the freshly-added team so its
+          // SeasonHistory populates without the user having to visit
+          // every event manually. Best-effort, runs in background.
+          if (teamId) {
+            const added = next.teams.find((t) => t.id === teamId);
+            if (added) {
+              handleAutoDiscoverTeam(added).catch(() => {
+                /* swallow — already best-effort */
+              });
+            }
+          }
           return next;
         });
       }
     },
-    []
+    [handleAutoDiscoverTeam]
   );
 
   const isFavorite = useCallback(
@@ -943,15 +1335,28 @@ export default function App() {
           <MyHomeScreen
             profile={userProfile}
             onOpenTeam={(team) => {
-              // Make the tapped team the active team, then navigate to
-              // its dashboard if a primaryRef exists. If not, stay on
-              // MyHome — the team card will show the "no tournament
-              // linked yet" warning.
               handleSwitchActiveTeam(team.id);
-              if (team.primaryRef) {
-                handleNavigateToFavorite(team.primaryRef);
+              openTeamSeasonHistory({ team });
+            }}
+            syncing={timuSyncing}
+            syncProgress={timuSyncProgress}
+            onSyncSeason={handleSyncSeason}
+            discoveringTeamLabel={discoveringTeamLabel}
+            discoveryProgress={discoveryProgress}
+            discoveryResult={discoveryResult}
+            onDismissDiscoveryResult={() => setDiscoveryResult(null)}
+            onViewDiscoveryResult={() => {
+              if (!discoveryResult) return;
+              const r = discoveryResult;
+              setDiscoveryResult(null);
+              const team = userProfile?.teams.find((t) => t.id === r.teamId);
+              if (team) {
+                openTeamSeasonHistory({ team });
+              } else {
+                openTeamSeasonHistory({ fallbackName: r.teamLabel });
               }
             }}
+            onRemoveTeam={handleRemoveTeam}
             onAddTeam={() => {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('AddTeamChooser');
@@ -1133,15 +1538,13 @@ export default function App() {
             onSetAsMyTeam={handleSetMyTeam}
             onClearMyTeam={handleClearMyTeam}
             onViewSeasonHistory={(_name) => {
-              const primary =
-                myTeam?.teamText ||
-                myTeam?.teamName ||
-                currentTeam?.TeamText ||
-                currentTeam?.TeamName ||
-                'My Team';
-              setCurrentHistoryTeamName(primary);
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('SeasonHistory');
+              // Use openTeamSeasonHistory so we get this team's aliases.
+              if (myTeam) {
+                openTeamSeasonHistory({ fav: myTeam });
+              } else if (currentTeam) {
+                const fallback = currentTeam.TeamText || currentTeam.TeamName || 'My Team';
+                openTeamSeasonHistory({ fallbackName: fallback });
+              }
             }}
           />
         );
@@ -1150,7 +1553,7 @@ export default function App() {
           <MyTeamsScreen
             myTeam={myTeam}
             favoriteTeams={favoriteTeams}
-            onNavigateToTeam={handleNavigateToFavorite}
+            onNavigateToTeam={(fav: FavoriteTeam) => openTeamSeasonHistory({ fav })}
             onBack={goBack}
           />
         );
@@ -1223,6 +1626,49 @@ export default function App() {
             onBack={goBack}
           />
         );
+      case 'Scoreboard':
+        return <ScoreboardScreen onBack={goBack} />;
+      case 'MatchList':
+        return (
+          <MatchListScreen
+            onBack={goBack}
+            onNewMatch={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MatchSetup');
+            }}
+            onOpenMatch={(m) => {
+              setActiveScoredMatch(m);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MatchScoring');
+            }}
+          />
+        );
+      case 'MatchSetup':
+        return (
+          <MatchSetupScreen
+            onCancel={goBack}
+            onStart={async (m) => {
+              // Persist immediately so a refresh / crash mid-setup
+              // doesn't lose what the scorer just typed.
+              await saveScoredMatch(m).catch(() => {});
+              setActiveScoredMatch(m);
+              setScreenHistory((prev) => [...prev, 'MatchList']);
+              setScreen('MatchScoring');
+            }}
+          />
+        );
+      case 'MatchScoring':
+        if (!activeScoredMatch) return null;
+        return (
+          <MatchScoringScreen
+            initialMatch={activeScoredMatch}
+            onBack={() => {
+              setActiveScoredMatch(null);
+              setScreenHistory([]);
+              setScreen('MatchList');
+            }}
+          />
+        );
       case 'TeamNotes':
         return currentTeam && currentEvent ? (
           <TeamNotesScreen
@@ -1279,14 +1725,11 @@ export default function App() {
               setScreen('TimuOpponentScout');
             }}
             onViewSeasonHistory={(_name) => {
-              const primary =
-                myTeam?.teamText ||
-                myTeam?.teamName ||
-                currentTimuTeamName ||
-                'My Team';
-              setCurrentHistoryTeamName(primary);
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('SeasonHistory');
+              if (myTeam) {
+                openTeamSeasonHistory({ fav: myTeam });
+              } else if (currentTimuTeamName) {
+                openTeamSeasonHistory({ fallbackName: currentTimuTeamName });
+              }
             }}
             onManageSeason={() => {
               setScreenHistory((prev) => [...prev, screen]);
@@ -1364,6 +1807,7 @@ export default function App() {
         return (
           <SeasonHistoryScreen
             primaryName={currentHistoryTeamName}
+            aliases={currentHistoryAliases}
             onBack={goBack}
             onOpenTimuTournament={(tid, myTeamAsSeen) => {
               setCurrentTimuTid(tid);
@@ -1428,6 +1872,30 @@ export default function App() {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('TimuManageSeason');
             }}
+            onFindMoreTournaments={handleFindMoreForCurrentTeam}
+            lastDiscoveryAt={(() => {
+              if (!userProfile || !currentHistoryAliases) return undefined;
+              const lower = currentHistoryAliases.map((a) => a.toLowerCase().trim());
+              const match = userProfile.teams.find((t) =>
+                t.aliases.some((a) => lower.includes(a.toLowerCase().trim()))
+              );
+              return match?.lastDiscoveryAt;
+            })()}
+            discoveringTeamLabel={discoveringTeamLabel}
+            discoveryProgress={discoveryProgress}
+            discoveryResult={discoveryResult}
+            onDismissDiscoveryResult={() => setDiscoveryResult(null)}
+            onViewDiscoveryResult={() => {
+              if (!discoveryResult) return;
+              const r = discoveryResult;
+              setDiscoveryResult(null);
+              const team = userProfile?.teams.find((t) => t.id === r.teamId);
+              if (team) {
+                openTeamSeasonHistory({ team });
+              } else {
+                openTeamSeasonHistory({ fallbackName: r.teamLabel });
+              }
+            }}
           />
         );
       default:
@@ -1442,6 +1910,9 @@ export default function App() {
         renderScreen={renderScreen}
         handleMenuNavigate={handleMenuNavigate}
         handleNavigateToFavorite={handleNavigateToFavorite}
+        handleOpenFavoriteSeasonHistory={(fav: FavoriteTeam) =>
+          openTeamSeasonHistory({ fav })
+        }
         handleRemoveFavorite={handleRemoveFavorite}
         currentEvent={currentEvent}
         currentDivision={currentDivision}
@@ -1457,29 +1928,158 @@ export default function App() {
         userProfile={userProfile}
         onSwitchTeam={(teamId: string) => {
           handleSwitchActiveTeam(teamId);
-          // Mirror the MyHome behaviour: opening the team's dashboard if
-          // it has a primaryRef. Caller in HamburgerMenu closes the modal
-          // before invoking this.
+          // Land on the team's Season History (matches MyHome's behaviour
+          // and the new "team home" model). If the team has nothing linked
+          // yet, drop the user back to MyHome so they can add a tournament.
           const team = userProfile?.teams.find((t) => t.id === teamId);
-          if (team?.primaryRef) {
-            handleNavigateToFavorite(team.primaryRef);
+          if (team) {
+            openTeamSeasonHistory({ team });
           } else {
-            // No tournament linked yet — drop them on MyHome so they can
-            // see the active team and add a tournament.
             setScreenHistory([]);
             setScreen('MyHome');
           }
         }}
+        onToggleScorerMode={(next: boolean) => {
+          setUserProfile((prev) =>
+            prev ? { ...prev, scorerMode: next, updatedAt: Date.now() } : prev
+          );
+        }}
       />
+      <DiscoveryConfirmModal pending={confirmDiscovery} />
     </SafeAreaProvider>
     </ThemeContext.Provider>
   );
 }
 
+// ── Discovery confirmation modal ──────────────────────────────────────────
+//
+// In-app modal replacing Alert.alert for the "kick off auto-discovery?"
+// prompt. Renders the data warning prominently and exposes two clearly
+// labelled buttons. The dim backdrop is non-dismissible — the user must
+// pick a button — so we never end up in a "what happened to the dialog"
+// state.
+function DiscoveryConfirmModal({
+  pending,
+}: {
+  pending: { team: TeamProfile; resolve: (v: boolean) => void } | null;
+}) {
+  if (!pending) return null;
+  return (
+    <Modal visible transparent animationType="fade">
+      <View style={modalStyles.backdrop}>
+        <View style={modalStyles.card}>
+          <Text style={modalStyles.title}>
+            Find tournaments for {pending.team.label}?
+          </Text>
+          <Text style={modalStyles.body}>
+            The app will scan AES and every recent Timu season for every tournament where this team has played.
+          </Text>
+          <View style={modalStyles.warnBox}>
+            <Text style={modalStyles.warnText}>
+              ⚠️ The first scan can download up to ~150 MB and take 5–10 minutes (covering several years of Timu data).{'\n'}{'\n'}
+              We strongly recommend connecting to Wi-Fi — running this on cellular may use a noticeable amount of data.{'\n'}{'\n'}
+              Subsequent scans within a week are much faster because results are cached.
+            </Text>
+          </View>
+          <View style={modalStyles.buttonsRow}>
+            <TouchableOpacity
+              style={[modalStyles.btn, modalStyles.btnCancel]}
+              onPress={() => pending.resolve(false)}
+              activeOpacity={0.7}
+            >
+              <Text style={modalStyles.btnCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[modalStyles.btn, modalStyles.btnConfirm]}
+              onPress={() => pending.resolve(true)}
+              activeOpacity={0.7}
+            >
+              <Text style={modalStyles.btnConfirmText}>Search Tournaments</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const modalStyles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  card: {
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 12,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1a1a1a',
+    marginBottom: 12,
+  },
+  body: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#333',
+    marginBottom: 12,
+  },
+  warnBox: {
+    backgroundColor: '#fff3ee',
+    borderLeftWidth: 4,
+    borderLeftColor: '#ff6b35',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  warnText: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: '#1a1a1a',
+  },
+  buttonsRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 8,
+  },
+  btn: {
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    borderRadius: 10,
+    minWidth: 100,
+    alignItems: 'center',
+  },
+  btnCancel: {
+    backgroundColor: '#f0f0f0',
+  },
+  btnConfirm: {
+    backgroundColor: '#1a73e8',
+  },
+  btnCancelText: {
+    color: '#1a1a1a',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  btnConfirmText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+});
+
 function AppContent({
   renderScreen,
   handleMenuNavigate,
   handleNavigateToFavorite,
+  handleOpenFavoriteSeasonHistory,
   handleRemoveFavorite,
   currentEvent,
   currentDivision,
@@ -1494,6 +2094,7 @@ function AppContent({
   navigatingToFav,
   userProfile,
   onSwitchTeam,
+  onToggleScorerMode,
 }: any) {
   const insets = useSafeAreaInsets();
 
@@ -1510,7 +2111,7 @@ function AppContent({
       <View style={[styles.menuOverlay, { top: insets.top + 8 }]} pointerEvents="box-none">
         <HamburgerMenu
           onNavigate={handleMenuNavigate}
-          onNavigateToFavorite={handleNavigateToFavorite}
+          onNavigateToFavorite={handleOpenFavoriteSeasonHistory}
           onRemoveFavorite={handleRemoveFavorite}
           hasEvent={!!currentEvent || !!currentTimuTid}
           hasDivision={!!currentDivision}
@@ -1540,6 +2141,7 @@ function AppContent({
           }
           userProfile={userProfile}
           onSwitchTeam={onSwitchTeam}
+          onToggleScorerMode={onToggleScorerMode}
           menuContext={menuContextForScreen(screen)}
         />
       </View>

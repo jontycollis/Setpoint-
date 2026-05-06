@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,8 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getTeamAssignments } from '../api/aesClient';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 
@@ -27,6 +28,8 @@ export function TeamSelectScreen({
   onBack,
   isFavorite,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [teams, setTeams] = useState<AESTeamAssignment[]>([]);
   const [filtered, setFiltered] = useState<AESTeamAssignment[]>([]);
   const [search, setSearch] = useState('');
@@ -139,7 +142,8 @@ export function TeamSelectScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   header: {
     padding: spacing.lg,
@@ -200,3 +204,4 @@ const styles = StyleSheet.create({
   errorText: { fontSize: fontSize.md, color: colors.error, textAlign: 'center', marginBottom: spacing.md },
   retryText: { fontSize: fontSize.md, color: colors.primary, fontWeight: '600' },
 });
+}

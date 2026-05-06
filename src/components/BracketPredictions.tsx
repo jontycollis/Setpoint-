@@ -1,5 +1,5 @@
 // Bracket Predictions — predicts playoff seeding from pool standings
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,8 @@ import {
   StyleSheet,
   ActivityIndicator,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { getStandings } from '../api/aesClient';
 import type { AESStanding } from '../types/aes';
 
@@ -30,6 +31,8 @@ export function BracketPredictions({
   divisionTeamCount,
   onViewBrackets,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   const [standings, setStandings] = useState<AESStanding[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -205,7 +208,8 @@ function nearestPowerOf2(n: number): number {
   return p;
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: {
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
@@ -366,3 +370,4 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
 });
+}

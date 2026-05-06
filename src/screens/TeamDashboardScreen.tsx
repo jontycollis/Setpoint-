@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -12,7 +12,8 @@ import {
   Share,
   Alert,
 } from 'react-native';
-import { colors, spacing, fontSize, borderRadius } from '../utils/theme';
+import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import type { ThemeColors } from '../utils/theme';
 import { BracketPredictions } from '../components/BracketPredictions';
 import {
   getTeamAssignments,
@@ -84,6 +85,8 @@ export function TeamDashboardScreen({
   onClearMyTeam,
   onViewSeasonHistory,
 }: Props) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
   // Each pool the team belongs to (Day 1 pools, Day 2 power pools, etc.)
   interface PoolEntry {
     poolRecord: PoolTeam;
@@ -130,15 +133,21 @@ export function TeamDashboardScreen({
     if (adding) return;
     setAdding(true);
     try {
-      // Add this team's text/name to the alias list so cross-source matching
-      // picks it up when assembling unified history. This is safe even if
-      // it's not literally MyTeam — the alias list is purely additive.
+      // Index this event into the AES snapshot store so SeasonHistory
+      // can render it. We deliberately no longer touch the global
+      // `addMyTeamAlias` list — it caused cross-team pollution. The
+      // canonical alias list now lives on the per-team TeamProfile,
+      // which `onToggleFavorite` (below) keeps in sync via
+      // `addWatchingTeamProfile` in App.tsx.
       const aliasName = team.TeamText || team.TeamName;
-      if (aliasName) {
-        await addMyTeamAlias(aliasName).catch(() => undefined);
-      }
       await indexAesSnapshot(event.Key, division.DivisionId, team.TeamId);
       setAesIndexed(true);
+      // "+ Season" should also follow the team — otherwise the user
+      // can index a tournament but the team never lands in their
+      // hamburger / MyTeams / MyHome lists.
+      if (!isFavorite) {
+        onToggleFavorite();
+      }
       Alert.alert(
         'Added to season history',
         `"${aliasName}" at ${event.Name} is now part of your season history.`,
@@ -151,7 +160,7 @@ export function TeamDashboardScreen({
     } finally {
       setAdding(false);
     }
-  }, [adding, event.Key, event.Name, division.DivisionId, team.TeamId, team.TeamText, team.TeamName]);
+  }, [adding, event.Key, event.Name, division.DivisionId, team.TeamId, team.TeamText, team.TeamName, isFavorite, onToggleFavorite]);
 
   // ─── Live countdown tick (updates every 30s) ───────────────────────────
   const [now, setNow] = useState(Date.now());
@@ -524,8 +533,16 @@ export function TeamDashboardScreen({
   );
 
   // Confirmed upcoming matches (from team schedule endpoints, which have team IDs for scouting)
+  // Drop entries whose scheduled time is well in the past — keeps "upcoming"
+  // honest when AES hasn't ingested a result yet. 30-min grace so an
+  // in-progress match still surfaces while it's actually being played.
   const upcomingMatches = scheduleMatches
     .filter((m) => !m.HasScores && !m.FirstTeamWon && !m.SecondTeamWon)
+    .filter((m) => {
+      const startMs = new Date(m.ScheduledStartDateTime).getTime();
+      if (!isFinite(startMs)) return true;
+      return startMs > Date.now() - 30 * 60 * 1000;
+    })
     .sort((a, b) => new Date(a.ScheduledStartDateTime).getTime() - new Date(b.ScheduledStartDateTime).getTime());
 
   // Past results (completed matches with scores from team schedule endpoints)
@@ -1542,7 +1559,8 @@ export function TeamDashboardScreen({
   );
 }
 
-const styles = StyleSheet.create({
+function makeStyles(colors: ThemeColors) {
+  return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { marginTop: spacing.md, fontSize: fontSize.md, color: colors.textSecondary },
@@ -2103,3 +2121,4 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
 });
+}
