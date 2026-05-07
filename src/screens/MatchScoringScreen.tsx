@@ -31,7 +31,11 @@ import {
   useWindowDimensions,
   type LayoutChangeEvent,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+// Note: this screen used to read safe-area insets directly to pad its
+// shelf and top container. After the navigation pass, the App.tsx
+// wrapper handles paddingTop (insets.top) and paddingBottom
+// (BOTTOM_TAB_BAR_HEIGHT + insets.bottom) on every screen. The
+// useSafeAreaInsets call here was dropped to avoid double-counting.
 import {
   useTheme,
   spacing,
@@ -91,7 +95,6 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const { width, height } = useWindowDimensions();
   const isLandscape = width > height;
-  const insets = useSafeAreaInsets();
 
   const [match, setMatch] = useState<Match>(initialMatch);
   const state = useMemo(() => deriveMatchState(match), [match]);
@@ -642,7 +645,7 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
   );
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <View style={styles.container}>
       <View style={[styles.topBar, isLandscape && styles.topBarLandscape]}>
         <TouchableOpacity onPress={onBack} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Text style={styles.backBtn}>{'< Back'}</Text>
@@ -853,8 +856,11 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
         />
       ) : null}
 
-      {/* Action shelf — bottom safe-area padding so OS gesture bar doesn't cover it */}
-      <View style={[styles.shelf, { paddingBottom: spacing.sm + insets.bottom }]}>
+      {/* Action shelf — sits at the bottom of the screen content. The
+          parent App.tsx wrapper reserves BOTTOM_TAB_BAR_HEIGHT + safe-area
+          inset below this screen so the tab bar never overlaps; the shelf
+          itself just needs its standard internal padding. */}
+      <View style={[styles.shelf, { paddingBottom: spacing.sm }]}>
         <ShelfBtn label="↶ Undo" onPress={undoLast} disabled={match.events.length === 0 || matchOver} colors={colors} styles={styles} />
         <ShelfBtn
           label="▦ Line ups"

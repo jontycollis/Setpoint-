@@ -28,6 +28,7 @@ import {
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
+import { UpcomingTournamentsSection } from '../components/UpcomingTournamentsSection';
 import {
   VenueInfoCard,
   ContactButtonsRow,
@@ -347,6 +348,16 @@ export function TimuTeamDashboardScreen({
           setsLost={setsLostTotal}
           poolRank={myStanding?.rank ?? null}
           finalRank={finalRanking?.rankLabel}
+        />
+
+        {/* Upcoming Tournaments — forward-looking metadata: which events
+            this team is registered for next, across both AES and Timu.
+            Same data path as MyHome's per-team next-tournament line; same
+            component as the AES dashboard for consistency. Distinct from
+            "Upcoming matches" below (matches WITHIN the current event). */}
+        <UpcomingTournamentsSection
+          aliases={matchAliases.length > 0 ? matchAliases : [teamName]}
+          debugLabel={`Timu TeamDashboard "${teamName}"`}
         />
 
         {/* Next match — only shown if the tournament hasn't completed. */}

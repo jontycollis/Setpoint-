@@ -46,7 +46,7 @@ import { saveMatch as saveScoredMatch } from './src/utils/scoredMatchStore';
 import { TimuTournamentScreen } from './src/screens/TimuTournamentScreen';
 import { TimuTeamDashboardScreen } from './src/screens/TimuTeamDashboardScreen';
 import { TimuOpponentScoutScreen } from './src/screens/TimuOpponentScoutScreen';
-import { TimuManageSeasonScreen } from './src/screens/TimuManageSeasonScreen';
+import { AddTournamentsScreen } from './src/screens/AddTournamentsScreen';
 import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
 import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { ToolsScreen } from './src/screens/ToolsScreen';
@@ -139,7 +139,7 @@ type Screen =
   | 'TimuTournament'
   | 'TimuTeamDashboard'
   | 'TimuOpponentScout'
-  | 'TimuManageSeason'
+  | 'AddTournaments'
   | 'SeasonHistory'
   | 'OvaRankings'
   | 'Scoreboard'
@@ -162,9 +162,18 @@ function tabForScreen(screen: Screen): TabKey | null {
   return null;
 }
 
-// Screens that DON'T show the active-team pill in the TopBar. Everything
-// else shows the pill when an activeTeamId is set.
+// Screens that DON'T show the active-team pill in the TopBar. The pill
+// exists to remind the user which team they're scoped to on screens that
+// don't already make that obvious (Tools, hamburger-driven menus, etc.).
+// We suppress it on:
+//   • screens whose own header already shows the team name (collision)
+//   • team-detail dashboards (redundant — the team identity IS the page)
+//   • the Tier 1 scoreboard + Tier 2 scoring screens (the team identity
+//     is plastered all over the score panels themselves AND the pill was
+//     covering banners on the hold-up scoreboard)
+//   • home / browse / connection / tools / global search (no team scope)
 const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
+  // No-team-scope screens
   'MyHome',
   'AddTeamChooser',
   'MrsConnection',
@@ -172,14 +181,32 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'TournamentSelect',
   'Tools',
   'GlobalSearch',
+  // Team-detail screens (team name in their own header)
+  'TeamDashboard',
+  'TimuTeamDashboard',
+  'SeasonHistory',
+  'TeamNotes',
+  // Tournament screens that show team-name subtitles or where the pill
+  // would compete for the same horizontal space as the screen's title
+  'Standings',
+  'Brackets',
+  'ClubView',
+  'OpponentScout',
+  'TimuOpponentScout',
+  'LiveScoreboard',
+  // Tier 1 + Tier 2 scoring — team identity already on-screen and the
+  // pill was covering banners on the hold-up scoreboard.
+  'Scoreboard',
+  'MatchSetup',
+  'MatchScoring',
 ]);
 
 // Screens where the bottom tab bar is hidden (focused full-screen flows).
+// User decision: keep the tab bar on the scoring screens too — only
+// GlobalSearch is fullscreen. Iterate later if the tab bar competes with
+// the action shelves on the scoring screens.
 const TAB_BAR_HIDDEN_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'GlobalSearch',
-  'MatchSetup',
-  'MatchScoring',
-  'Scoreboard',
 ]);
 
 /**
@@ -262,6 +289,13 @@ export default function App() {
   // is AsyncStorage via scoredMatchStore). Set when MatchSetup hands
   // off a freshly-built Match, or when MatchList resumes one.
   const [activeScoredMatch, setActiveScoredMatch] = useState<ScoredMatch | null>(null);
+  // When a team dashboard's "+ Add a tournament" button routes the user
+  // to AddTournamentsScreen, this carries the dashboard's source so the
+  // matching paste-card scrolls into view + flashes a highlight on
+  // first render. Cleared on screen exit.
+  const [addTournamentsFocusSource, setAddTournamentsFocusSource] = useState<
+    'aes' | 'timu' | null
+  >(null);
   // Timu season-index sync state surfaced into MyHome. `syncing` flips on
   // for both the silent boot refresh and the manual "Sync now" button.
   // Progress is ({done, total}) — null when no sync has run yet this session.
@@ -1338,9 +1372,9 @@ export default function App() {
             setScreen('TimuTeamDashboard');
           }
           break;
-        case 'TimuManageSeason':
+        case 'AddTournaments':
           setScreenHistory((prev) => [...prev, screen]);
-          setScreen('TimuManageSeason');
+          setScreen('AddTournaments');
           break;
         case 'SeasonHistory':
           if (myTeam) {
@@ -1483,7 +1517,7 @@ export default function App() {
     'TimuTournament',
     'TimuTeamDashboard',
     'TimuOpponentScout',
-    'TimuManageSeason',
+    'AddTournaments',
     'SeasonHistory',
     'OvaRankings',
     'GlobalSearch',
@@ -1605,11 +1639,11 @@ export default function App() {
               setScreen('TournamentSelect');
             }}
             onChooseTimu={() => {
-              // Timu path → TimuManageSeason where they paste a URL/tid.
+              // Timu path → AddTournaments where they paste a URL/tid.
               // From the indexed tournament they tap into the team and
               // hit "Set As My Team" the same way.
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('TimuManageSeason');
+              setScreen('AddTournaments');
             }}
           />
         );
@@ -1836,14 +1870,41 @@ export default function App() {
             onTeamPress={navigateToTeamByText}
           />
         );
-      case 'TournamentHistory':
+      case 'TournamentHistory': {
+        // Derive aliases from the active team context. Match the team
+        // currently being viewed (AES `currentTeam` if set, otherwise the
+        // Timu team-name in scope) to the user's saved TeamProfile so
+        // the strict alias matcher in `buildMySeasonHistory` finds every
+        // indexed snapshot — both AES and Timu — that belongs to this
+        // team. Falls back to the bare team-name list when no profile
+        // matches (still works for any team that's been indexed under
+        // the same spelling).
+        const teamName =
+          currentTeam?.TeamName ?? currentTimuTeamName ?? null;
+        const teamText = currentTeam?.TeamText ?? null;
+        const profileMatch = teamName
+          ? userProfile?.teams.find((t) => {
+              const lower = teamName.toLowerCase().trim();
+              return (
+                t.label.toLowerCase().trim() === lower ||
+                t.aliases.some(
+                  (a) => a.toLowerCase().trim() === lower
+                )
+              );
+            })
+          : null;
+        const aliases =
+          profileMatch?.aliases?.length
+            ? profileMatch.aliases
+            : ([teamName, teamText].filter(Boolean) as string[]);
         return (
           <CrossTournamentScreen
-            clubName={currentTeam?.TeamClub?.Name}
-            teamFilter={currentTeam?.TeamText}
+            aliases={aliases}
+            headerLabel={teamName ?? undefined}
             onBack={goBack}
           />
         );
+      }
       case 'Scoreboard':
         return <ScoreboardScreen onBack={goBack} />;
       case 'MatchList':
@@ -1951,7 +2012,7 @@ export default function App() {
             }}
             onManageSeason={() => {
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('TimuManageSeason');
+              setScreen('AddTournaments');
             }}
             isFavorite={isTimuFavorite(currentTimuTeamName)}
             onToggleFavorite={() =>
@@ -1996,20 +2057,26 @@ export default function App() {
             }}
             onManageSeason={() => {
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('TimuManageSeason');
+              setScreen('AddTournaments');
             }}
           />
         );
-      case 'TimuManageSeason':
+      case 'AddTournaments':
         return (
-          <TimuManageSeasonScreen
-            onBack={goBack}
+          <AddTournamentsScreen
+            onBack={() => {
+              // Clear focus on exit so a re-entry from the hamburger
+              // doesn't carry the previous dashboard's source forward.
+              setAddTournamentsFocusSource(null);
+              goBack();
+            }}
             onOpenTid={(tid) => {
               setCurrentTimuTid(tid);
               setCurrentTimuTeamName(null);
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('TimuTournament');
             }}
+            focusSource={addTournamentsFocusSource ?? undefined}
           />
         );
       case 'OvaRankings':
@@ -2088,7 +2155,7 @@ export default function App() {
             }}
             onManageSeason={() => {
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('TimuManageSeason');
+              setScreen('AddTournaments');
             }}
             onFindMoreTournaments={handleFindMoreForCurrentTeam}
             lastDiscoveryAt={(() => {
@@ -2470,8 +2537,12 @@ const styles = StyleSheet.create({
   },
   topBarOverlay: {
     position: 'absolute',
-    left: 8,
+    left: 0,
+    right: 0,
     zIndex: 100,
-    alignItems: 'flex-start',
+    // alignItems removed — the TopBar component controls horizontal
+    // distribution via its own 3-cell layout (search left / pill centre /
+    // hamburger-spacer right) so the pill ends up centred relative to
+    // the screen rather than crowding the left edge.
   },
 });

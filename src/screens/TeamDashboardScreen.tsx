@@ -42,14 +42,20 @@ import { LiveMatchTracker } from '../components/LiveMatchTracker';
 import { PoolStandings } from '../components/PoolStandings';
 import { MatchScoresModal } from '../components/MatchScoresModal';
 import { WatchLiveButton } from '../components/WatchLiveButton';
-import { loadCourtStreams, CourtStreamMap, addTournamentHistoryEntry } from '../utils/storage';
-import type { TournamentMatchResult } from '../utils/storage';
+import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
+// Note: the legacy `addTournamentHistoryEntry` write that used to live
+// in this screen has been removed. CrossTournamentScreen now reads from
+// the unified AES + Timu indices (`buildMySeasonHistory`), which the
+// dashboard already populates via `indexAesSnapshot` on refresh, so the
+// duplicate write is no longer needed. The legacy `tournamentHistory`
+// store key is retained in storage.ts but is read-only / dead.
 import { scheduleAllMatchNotifications } from '../utils/notifications';
 import type { MatchNotification } from '../utils/notifications';
 import { formatTime, formatDate, getRelativeTime } from '../utils/dates';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 import { ensureAesIndexed, indexAesSnapshot, loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { addMyTeamAlias } from '../utils/seasonTeamIdentity';
+import { UpcomingTournamentsSection } from '../components/UpcomingTournamentsSection';
 
 interface Props {
   event: AESEvent;
@@ -417,65 +423,10 @@ export function TeamDashboardScreen({
     }
   }
 
-  // Auto-save tournament history when we have past results
-  useEffect(() => {
-    if (scheduleMatches.length === 0) return;
-    const past = scheduleMatches.filter(
-      (m) => m.HasScores || m.FirstTeamWon || m.SecondTeamWon
-    );
-    if (past.length === 0) return;
-
-    let wins = 0;
-    let losses = 0;
-    let sWon = 0;
-    let sLost = 0;
-    const resultEntries: TournamentMatchResult[] = [];
-
-    for (const m of past) {
-      const isFirst = m.FirstTeamId === team.TeamId;
-      const won = isFirst ? m.FirstTeamWon : m.SecondTeamWon;
-      if (won) wins++; else losses++;
-      const sets = m.Sets?.filter((s) => s.FirstTeamScore != null) || [];
-      const setScores = sets
-        .map((s) => {
-          const my = (isFirst ? s.FirstTeamScore : s.SecondTeamScore) ?? 0;
-          const opp = (isFirst ? s.SecondTeamScore : s.FirstTeamScore) ?? 0;
-          return `${my}-${opp}`;
-        })
-        .join(', ');
-      for (const s of sets) {
-        const my = (isFirst ? s.FirstTeamScore : s.SecondTeamScore) ?? 0;
-        const opp = (isFirst ? s.SecondTeamScore : s.FirstTeamScore) ?? 0;
-        if (my > opp) sWon++; else if (opp > my) sLost++;
-      }
-      const oppName = isFirst
-        ? m.SecondTeamText || m.SecondTeamName
-        : m.FirstTeamText || m.FirstTeamName;
-      resultEntries.push({
-        opponentName: oppName,
-        won,
-        setScores,
-        matchType: m.MatchShortName || m.MatchFullName || '',
-      });
-    }
-
-    addTournamentHistoryEntry({
-      eventKey: event.Key,
-      eventName: event.Name,
-      divisionName: division.Name,
-      teamName: team.TeamName,
-      teamText: team.TeamText,
-      clubName: team.TeamClub?.Name || '',
-      date: event.StartDate?.split('T')[0] || new Date().toISOString().split('T')[0],
-      wins,
-      losses,
-      setsWon: sWon,
-      setsLost: sLost,
-      finishRank: null,
-      totalTeams: division.TeamCount,
-      results: resultEntries,
-    }).catch(() => {});
-  }, [scheduleMatches]);
+  // (Legacy `addTournamentHistoryEntry` auto-save removed — see import-block
+  // comment above. The cross-tournament screen now reads from the unified
+  // AES + Timu indices populated by `indexAesSnapshot`, which already runs
+  // on this screen's refresh path.)
 
   // Auto-schedule notifications for upcoming matches
   useEffect(() => {
@@ -725,6 +676,17 @@ export function TeamDashboardScreen({
           </View>
         </View>
       </View>
+
+      {/* Upcoming Tournaments — forward-looking metadata: which events
+          this team is registered for next, across both AES and Timu.
+          Distinct from the "Upcoming Matches" section below (which is
+          about individual matches WITHIN the current event). Same data
+          source as MyHome's per-team next-tournament line. */}
+      <UpcomingTournamentsSection
+        aliases={[current.TeamName, current.TeamText].filter(Boolean) as string[]}
+        debugLabel={`AES TeamDashboard "${current.TeamName}"`}
+      />
+
 
       {/* Work Duty Reminder */}
       {nextWorkDuty && (

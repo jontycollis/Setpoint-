@@ -30,7 +30,7 @@ export type MenuDestination =
   | 'VenueMap'
   | 'TimuTournament'
   | 'TimuTeamDashboard'
-  | 'TimuManageSeason'
+  | 'AddTournaments'
   | 'SeasonHistory'
   | 'OvaRankings'
   | 'AddTeamChooser'
@@ -312,11 +312,11 @@ export function HamburgerMenu({
                   {/* Tournaments (Manage Season) */}
                   <MenuRow
                     icon={'\u{1F5C2}'}
-                    label="Tournaments"
+                    label="Add Tournaments"
                     subtitle="Add AES or Timu, refresh, browse"
                     available={true}
-                    isCurrent={isCurrentScreen('TimuManageSeason')}
-                    onPress={() => handleSelect('TimuManageSeason')}
+                    isCurrent={isCurrentScreen('AddTournaments')}
+                    onPress={() => handleSelect('AddTournaments')}
                   />
 
                   {onTimu && (

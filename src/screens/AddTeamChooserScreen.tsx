@@ -8,7 +8,7 @@
 //                     The existing flow's "Set As My Team" now
 //                     upserts a TeamProfile (Phase 2 wiring).
 //
-//   Timu tournament → routes through TimuManageSeason where the user
+//   Timu tournament → routes through AddTournaments where the user
 //                     pastes a Timu URL/tid → indexed → tap into
 //                     tournament → tap their team → Set As My Team.
 //                     Same upsert wiring lands them on Home with the

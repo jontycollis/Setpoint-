@@ -96,7 +96,19 @@ export async function saveSavedTimuTournaments(tournaments: SavedTimuTournament[
   return setJson(KEYS.timuTournaments, tournaments);
 }
 
-// ─── Cross-Tournament History ────────────────────────────────────────────────
+// ─── Cross-Tournament History (DEPRECATED / DEAD STORE) ─────────────────────
+//
+// This was the original AES-only cross-tournament store, populated by
+// `addTournamentHistoryEntry` whenever the user opened a TeamDashboard
+// for a team in an event. CrossTournamentScreen now reads from the
+// unified AES + Timu indices (`buildMySeasonHistory` in
+// `unifiedSeasonHistory.ts`), so this store is no longer written to by
+// any screen. The key + types + helpers are kept so devices upgrading
+// from older builds don't lose access to their legacy data; nothing
+// CALLS the helpers below in current code, and tooling can safely
+// retire the storage key in a future migration. **Do not add new
+// writes here** — every history surface should come through
+// `loadAllSeasonIndices()` so AES and Timu stay in lockstep.
 
 export interface TournamentHistoryEntry {
   eventKey: string;
@@ -122,14 +134,22 @@ export interface TournamentMatchResult {
   matchType: string; // "Pool A", "Gold Semi", etc.
 }
 
+/** @deprecated Use `loadAllSeasonIndices()` + `buildMySeasonHistory()` from
+ *  `unifiedSeasonHistory.ts`. Retained for legacy data only. */
 export async function loadTournamentHistory(): Promise<TournamentHistoryEntry[]> {
   return getJson<TournamentHistoryEntry[]>(KEYS.tournamentHistory, []);
 }
 
+/** @deprecated See `loadTournamentHistory`. */
 export async function saveTournamentHistory(history: TournamentHistoryEntry[]): Promise<void> {
   return setJson(KEYS.tournamentHistory, history);
 }
 
+/** @deprecated The legacy `tournamentHistory` store is no longer the source
+ *  of truth for cross-tournament views — `loadAllSeasonIndices()` is. New
+ *  code should NEVER call this; AES indexing is handled by
+ *  `indexAesSnapshot` and Timu by `indexTimuTournament`, both of which
+ *  feed the unified path that every history screen reads from. */
 export async function addTournamentHistoryEntry(entry: TournamentHistoryEntry): Promise<void> {
   const history = await loadTournamentHistory();
   // Replace if same event+team already exists, otherwise append

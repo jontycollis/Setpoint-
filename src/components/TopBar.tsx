@@ -66,7 +66,8 @@ export function TopBar({
   const showPill = showActiveTeamPill && !!active;
 
   // Nothing to render — keep the overlay container empty so it stays
-  // pointer-transparent.
+  // pointer-transparent. We still render the row when the pill is the
+  // only thing showing because the row is what centres it.
   if (!showPill && !showSearch) return null;
 
   const pillBg = light ? 'rgba(255,255,255,0.18)' : theme.colors.primaryLight;
@@ -74,39 +75,51 @@ export function TopBar({
   const pillText = light ? '#ffffff' : theme.colors.primary;
   const iconColor = light ? '#ffffff' : theme.colors.text;
 
+  // Three-cell layout: [search slot] [pill centre] [hamburger spacer].
+  // The hamburger lives in a sibling overlay (App.tsx menuOverlay) and
+  // takes ~SLOT_WIDTH on the right; we reserve the same width on each
+  // side so the centre slot is visually balanced regardless of whether
+  // the search icon is present.
   return (
     <View style={styles.row} pointerEvents="box-none">
-      {showPill && active && (
-        <TouchableOpacity
-          onPress={() => setSwitcherVisible(true)}
-          activeOpacity={0.7}
-          style={[
-            styles.pill,
-            { backgroundColor: pillBg, borderColor: pillBorder },
-          ]}
-          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-        >
-          <Text style={[styles.pillIcon, { color: pillText }]}>{'\u{1F3D0}'}</Text>
-          <Text
-            style={[styles.pillLabel, { color: pillText }]}
-            numberOfLines={1}
+      <View style={styles.sideSlot}>
+        {showSearch && (
+          <TouchableOpacity
+            onPress={onOpenSearch}
+            activeOpacity={0.7}
+            style={styles.searchBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
           >
-            {active.label}
-          </Text>
-          <Text style={[styles.pillChevron, { color: pillText }]}>{'▾'}</Text>
-        </TouchableOpacity>
-      )}
+            <Text style={[styles.searchIcon, { color: iconColor }]}>{'\u{1F50D}'}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <View style={styles.centreSlot} pointerEvents="box-none">
+        {showPill && active && (
+          <TouchableOpacity
+            onPress={() => setSwitcherVisible(true)}
+            activeOpacity={0.7}
+            style={[
+              styles.pill,
+              { backgroundColor: pillBg, borderColor: pillBorder },
+            ]}
+            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+          >
+            <Text style={[styles.pillIcon, { color: pillText }]}>{'\u{1F3D0}'}</Text>
+            <Text
+              style={[styles.pillLabel, { color: pillText }]}
+              numberOfLines={1}
+            >
+              {active.label}
+            </Text>
+            <Text style={[styles.pillChevron, { color: pillText }]}>{'▾'}</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      {/* Right slot reserves space for the hamburger which is rendered
+          in a sibling overlay. Empty here — present only for symmetry. */}
+      <View style={styles.sideSlot} />
 
-      {showSearch && (
-        <TouchableOpacity
-          onPress={onOpenSearch}
-          activeOpacity={0.7}
-          style={styles.searchBtn}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Text style={[styles.searchIcon, { color: iconColor }]}>{'\u{1F50D}'}</Text>
-        </TouchableOpacity>
-      )}
 
       {/* ── Team-switcher modal (mirrors HamburgerMenu's switcher list) ── */}
       <Modal
@@ -236,11 +249,26 @@ function TeamRow({
   );
 }
 
+// Width reserved on each side of the centred pill for the search icon
+// (left) and the hamburger (rendered in a sibling overlay; right). 56px
+// comfortably fits a 44pt tap-target plus 8pt screen-edge padding.
+const SIDE_SLOT_WIDTH = 56;
+
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+  },
+  sideSlot: {
+    width: SIDE_SLOT_WIDTH,
+    paddingHorizontal: 8,
+    alignItems: 'flex-start',
+    justifyContent: 'center',
+  },
+  centreSlot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pill: {
     flexDirection: 'row',

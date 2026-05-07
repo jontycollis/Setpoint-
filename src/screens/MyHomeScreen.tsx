@@ -39,6 +39,7 @@ import {
   buildMySeasonHistory,
   loadAllSeasonIndices,
   aggregateUnifiedStats,
+  getNextUpcomingTournament,
   type LoadedIndices,
   type UnifiedAggregateStats,
   type UnifiedTournamentEntry,
@@ -148,14 +149,19 @@ export function MyHomeScreen({
   const upcomingByTeamId = useMemo(() => {
     const out = new Map<string, UnifiedTournamentEntry | null>();
     if (!indices) return out;
-    const now = Date.now();
     for (const team of profile.teams) {
+      // Fall back to [team.label] when no aliases exist — same behaviour
+      // as before. Strict matcher means even a slight spelling drift
+      // between the alias and the indexed team-name will produce zero
+      // matches; the DEV diagnostic in `getNextUpcomingTournament`
+      // logs the gap so we can spot it without a debugger.
       const aliases = team.aliases.length ? team.aliases : [team.label];
-      const history = buildMySeasonHistory(indices, aliases);
-      const future = history
-        .filter((e) => e.dateMs != null && e.dateMs > now)
-        .sort((a, b) => (a.dateMs ?? 0) - (b.dateMs ?? 0));
-      out.set(team.id, future[0] ?? null);
+      out.set(
+        team.id,
+        getNextUpcomingTournament(indices, aliases, {
+          debugLabel: `MyHome team "${team.label}"`,
+        })
+      );
     }
     return out;
   }, [indices, profile.teams]);

@@ -138,6 +138,70 @@ export function buildMySeasonHistory(
   return out;
 }
 
+// ── Upcoming-tournaments helpers (shared between MyHome, dashboards) ─────
+
+/**
+ * Filter `buildMySeasonHistory` results to entries whose `dateMs` is in
+ * the future, sorted earliest → latest. Used by MyHome's per-team card
+ * upcoming line and by the team dashboards' "Upcoming Tournaments"
+ * section. One source of truth for what counts as "upcoming" so the
+ * different screens can never disagree about which tournament is next.
+ *
+ * If the lookup returns empty in __DEV__ AND debugLabel is provided, we
+ * log a diagnostic dump of the matcher's inputs (aliases vs every
+ * indexed AES / Timu team-name) so the gap is investigable without a
+ * debugger session. Disabled silently in production builds.
+ */
+export function getUpcomingTournaments(
+  indices: LoadedIndices,
+  aliases: string[],
+  opts?: { debugLabel?: string }
+): UnifiedTournamentEntry[] {
+  const history = buildMySeasonHistory(indices, aliases);
+  const now = Date.now();
+  const upcoming = history
+    .filter((e) => e.dateMs != null && e.dateMs > now)
+    .sort((a, b) => (a.dateMs ?? 0) - (b.dateMs ?? 0));
+
+  if (__DEV__ && opts?.debugLabel && upcoming.length === 0) {
+    // Build a one-shot diagnostic. The two failure modes we've seen so far:
+    //   (a) aliases miss the indexed team-name spelling (strict matcher)
+    //   (b) entries match but every dateMs is null or in the past
+    const indexedAesNames = new Set<string>();
+    for (const snap of sortedAesSnapshots(indices.aes)) {
+      if (snap.myTeamText) indexedAesNames.add(snap.myTeamText);
+      if (snap.myTeamName) indexedAesNames.add(snap.myTeamName);
+    }
+    const indexedTimuNames = new Set<string>();
+    for (const snap of sortedTimuSnapshots(indices.timu)) {
+      for (const t of snap.teams) indexedTimuNames.add(t.teamName);
+    }
+    const matchedHistory = history.length;
+    const futureCandidates = history.filter((e) => e.dateMs != null && e.dateMs > now).length;
+    const undatedMatches = history.filter((e) => e.dateMs == null).length;
+    const pastMatches = history.filter((e) => e.dateMs != null && e.dateMs <= now).length;
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[upcoming-tournaments] ${opts.debugLabel}: 0 upcoming.\n` +
+        `  aliases (normalized): ${aliases.map((a) => normalizeName(a)).filter(Boolean).join(' | ') || '(empty)'}\n` +
+        `  history matches: ${matchedHistory} (undated: ${undatedMatches}, past: ${pastMatches}, future: ${futureCandidates})\n` +
+        `  indexed AES team-names: ${[...indexedAesNames].join(' | ') || '(empty index)'}\n` +
+        `  indexed Timu team-names: ${[...indexedTimuNames].join(' | ') || '(empty index)'}`
+    );
+  }
+
+  return upcoming;
+}
+
+/** Convenience: just the next one (or null). */
+export function getNextUpcomingTournament(
+  indices: LoadedIndices,
+  aliases: string[],
+  opts?: { debugLabel?: string }
+): UnifiedTournamentEntry | null {
+  return getUpcomingTournaments(indices, aliases, opts)[0] ?? null;
+}
+
 // ── Source-specific adapters ──────────────────────────────────────────────
 
 function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEntry {

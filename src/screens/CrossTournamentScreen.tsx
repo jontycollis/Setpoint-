@@ -1,86 +1,81 @@
-// Cross-Tournament History — season-long view across multiple tournaments
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+// ── CrossTournamentScreen ─────────────────────────────────────────────────
+//
+// Season-long view across multiple tournaments for a single team. Reads
+// the same unified AES + Timu indices (`loadAllSeasonIndices()` +
+// `buildMySeasonHistory()`) that SeasonHistoryScreen and the MyHome
+// next-tournament line use, so all three history surfaces stay in
+// lockstep about which tournaments belong to a team.
+//
+// Was previously backed by a legacy AES-only `tournamentHistory` store
+// (populated on TeamDashboard visits). That store was the cause of the
+// "missing tournaments" complaint — Timu entries were never written to
+// it, and AES entries only landed when the user actually opened the
+// dashboard. This screen now reads the unified path; the legacy store
+// is no longer written by anywhere and can be retired.
+// ────────────────────────────────────────────────────────────────────────────
+
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  ScrollView,
-  TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
-  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
+import { borderRadius, fontSize, spacing, useTheme } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import {
-  loadTournamentHistory,
-  saveTournamentHistory,
-} from '../utils/storage';
-import type {
-  TournamentHistoryEntry,
-  TournamentMatchResult,
-} from '../utils/storage';
+  buildMySeasonHistory,
+  loadAllSeasonIndices,
+  type LoadedIndices,
+  type UnifiedMatchEntry,
+  type UnifiedTournamentEntry,
+} from '../utils/unifiedSeasonHistory';
 
 interface Props {
-  clubName?: string;
-  teamFilter?: string; // Filter to specific team name/text
+  /** Aliases identifying the team. Strict matcher applied downstream — the
+   *  caller should supply the team's saved aliases (from TeamProfile)
+   *  plus the team-name-as-displayed for fallback. */
+  aliases: string[];
+  /** Friendly label rendered in the header subtitle ("Defensa U18 Rob"). */
+  headerLabel?: string;
   onBack: () => void;
 }
 
-export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
+export function CrossTournamentScreen({ aliases, headerLabel, onBack }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const [history, setHistory] = useState<TournamentHistoryEntry[]>([]);
+
+  const [history, setHistory] = useState<UnifiedTournamentEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set());
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
 
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      let entries = await loadTournamentHistory();
-      // Filter by club or team if specified
-      if (teamFilter) {
-        const q = teamFilter.toLowerCase();
-        entries = entries.filter(
-          (e) =>
-            e.teamText.toLowerCase().includes(q) ||
-            e.teamName.toLowerCase().includes(q)
-        );
-      } else if (clubName) {
-        const q = clubName.toLowerCase();
-        entries = entries.filter((e) => e.clubName.toLowerCase().includes(q));
-      }
-      setHistory(entries);
+      const indices: LoadedIndices = await loadAllSeasonIndices();
+      // buildMySeasonHistory already returns the merged AES + Timu list
+      // sorted newest → oldest. Past + future entries both included; the
+      // "Tournament History" label is intentionally past-leaning but we
+      // keep future entries in too — the user can see the full picture
+      // of registered events on one screen.
+      setHistory(buildMySeasonHistory(indices, aliases));
     } catch {
-      // ignore
+      // No diagnostic spam on render path; the upcoming-tournaments
+      // helper already logs alias-matching gaps in __DEV__.
+      setHistory([]);
     } finally {
       setLoading(false);
     }
-  }, [clubName, teamFilter]);
+  }, [aliases]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
-  const handleClearHistory = useCallback(() => {
-    Alert.alert(
-      'Clear History',
-      'This will delete all saved tournament history. Are you sure?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Clear',
-          style: 'destructive',
-          onPress: async () => {
-            await saveTournamentHistory([]);
-            setHistory([]);
-          },
-        },
-      ]
-    );
-  }, []);
-
-  const toggleEvent = (key: string) => {
-    setExpandedEvents((prev) => {
+  const toggle = (key: string) => {
+    setExpandedKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
       else next.add(key);
@@ -97,13 +92,25 @@ export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
     );
   }
 
-  // Aggregate stats across all tournaments
-  const totalWins = history.reduce((s, h) => s + h.wins, 0);
-  const totalLosses = history.reduce((s, h) => s + h.losses, 0);
-  const totalSetsWon = history.reduce((s, h) => s + h.setsWon, 0);
-  const totalSetsLost = history.reduce((s, h) => s + h.setsLost, 0);
+  // Aggregate stats — match counts come from the per-match lists so pool
+  // and playoff matches both contribute. (The pool-only `matchesFor`
+  // and `setsFor` fields on the entry would underreport for divisions
+  // with playoffs.)
+  let totalWins = 0;
+  let totalLosses = 0;
+  let totalSetsWon = 0;
+  let totalSetsLost = 0;
+  for (const entry of history) {
+    for (const m of entry.matches) {
+      if (m.iWon) totalWins++;
+      else totalLosses++;
+      totalSetsWon += m.mySetsWon;
+      totalSetsLost += m.oppSetsWon;
+    }
+  }
   const totalMatches = totalWins + totalLosses;
-  const winPct = totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
+  const winPct =
+    totalMatches > 0 ? Math.round((totalWins / totalMatches) * 100) : 0;
 
   return (
     <ScrollView style={styles.container}>
@@ -116,12 +123,11 @@ export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
         </TouchableOpacity>
         <Text style={styles.title}>Tournament History</Text>
         <Text style={styles.subtitle}>
-          {teamFilter || clubName || 'All teams'} — {history.length} tournament
+          {headerLabel || aliases[0] || 'All teams'} — {history.length} tournament
           {history.length !== 1 ? 's' : ''}
         </Text>
       </View>
 
-      {/* Season stats summary */}
       {totalMatches > 0 && (
         <View style={styles.statsCard}>
           <Text style={styles.statsTitle}>Season Overview</Text>
@@ -155,7 +161,8 @@ export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
                   styles.winRateBarFill,
                   {
                     width: `${Math.max(winPct, 2)}%`,
-                    backgroundColor: winPct >= 50 ? colors.success : colors.error,
+                    backgroundColor:
+                      winPct >= 50 ? colors.success : colors.error,
                   },
                 ]}
               />
@@ -168,77 +175,65 @@ export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
         </View>
       )}
 
-      {/* Tournament entries */}
       {history.map((entry) => {
-        const eventId = `${entry.eventKey}-${entry.teamText}`;
-        const isExpanded = expandedEvents.has(eventId);
+        const expanded = expandedKeys.has(entry.sourceKey);
+        const wins = entry.matches.filter((m) => m.iWon).length;
+        const losses = entry.matches.length - wins;
         const entryWinPct =
-          entry.wins + entry.losses > 0
-            ? Math.round((entry.wins / (entry.wins + entry.losses)) * 100)
-            : 0;
+          wins + losses > 0 ? Math.round((wins / (wins + losses)) * 100) : 0;
+        const sourceBadgeStyle =
+          entry.source === 'timu' ? styles.sourceBadgeTimu : styles.sourceBadgeAes;
 
         return (
-          <View key={eventId} style={styles.tournamentCard}>
+          <View key={entry.sourceKey} style={styles.tournamentCard}>
             <TouchableOpacity
               style={styles.tournamentHeader}
-              onPress={() => toggleEvent(eventId)}
+              onPress={() => toggle(entry.sourceKey)}
               activeOpacity={0.7}
             >
+              <View style={[styles.sourceBadge, sourceBadgeStyle]}>
+                <Text style={styles.sourceBadgeText}>
+                  {entry.source.toUpperCase()}
+                </Text>
+              </View>
               <View style={styles.tournamentHeaderLeft}>
                 <Text style={styles.tournamentName} numberOfLines={1}>
-                  {entry.eventName}
+                  {entry.tournamentName}
                 </Text>
-                <Text style={styles.tournamentMeta}>
-                  {entry.divisionName} — {entry.teamText}
+                {entry.subtitle ? (
+                  <Text style={styles.tournamentMeta} numberOfLines={1}>
+                    {entry.subtitle}
+                  </Text>
+                ) : null}
+                <Text style={styles.tournamentDate}>
+                  {entry.dateText || formatDate(entry.dateMs)}
+                  {entry.venueName ? ` · ${entry.venueName}` : ''}
                 </Text>
-                <Text style={styles.tournamentDate}>{entry.date}</Text>
               </View>
               <View style={styles.tournamentHeaderRight}>
-                <Text
-                  style={[
-                    styles.tournamentRecord,
-                    entryWinPct >= 50
-                      ? { color: colors.success }
-                      : { color: colors.error },
-                  ]}
-                >
-                  {entry.wins}W-{entry.losses}L
-                </Text>
-                {entry.finishRank && (
-                  <Text style={styles.tournamentRank}>
-                    #{entry.finishRank}/{entry.totalTeams}
+                {wins + losses > 0 ? (
+                  <Text
+                    style={[
+                      styles.tournamentRecord,
+                      entryWinPct >= 50
+                        ? { color: colors.success }
+                        : { color: colors.error },
+                    ]}
+                  >
+                    {wins}W-{losses}L
                   </Text>
-                )}
-                <Text style={styles.expandIcon}>
-                  {isExpanded ? '\u25B2' : '\u25BC'}
-                </Text>
+                ) : null}
+                {entry.finalRankLabel ? (
+                  <Text style={styles.tournamentRank}>{entry.finalRankLabel}</Text>
+                ) : null}
+                <Text style={styles.expandIcon}>{expanded ? '▲' : '▼'}</Text>
               </View>
             </TouchableOpacity>
 
-            {isExpanded && entry.results.length > 0 && (
+            {expanded && entry.matches.length > 0 && (
               <View style={styles.resultsList}>
-                {entry.results.map((result, idx) => (
-                  <View key={idx} style={styles.resultRow}>
-                    <View
-                      style={[
-                        styles.resultDot,
-                        {
-                          backgroundColor: result.won
-                            ? colors.success
-                            : colors.error,
-                        },
-                      ]}
-                    />
-                    <View style={styles.resultInfo}>
-                      <Text style={styles.resultOpponent} numberOfLines={1}>
-                        {result.won ? 'W' : 'L'} vs {result.opponentName}
-                      </Text>
-                      <Text style={styles.resultDetail}>
-                        {result.matchType}
-                        {result.setScores ? ` — ${result.setScores}` : ''}
-                      </Text>
-                    </View>
-                  </View>
+                {entry.matches.map((m, idx) => (
+                  <ResultRow key={idx} match={m} colors={colors} styles={styles} />
                 ))}
               </View>
             )}
@@ -248,22 +243,11 @@ export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
 
       {history.length === 0 && (
         <View style={styles.emptyState}>
-          <Text style={styles.emptyTitle}>No History Yet</Text>
+          <Text style={styles.emptyTitle}>No tournaments yet</Text>
           <Text style={styles.emptyText}>
-            Tournament results are saved automatically when you view a team's
-            dashboard. Results will appear here across multiple tournaments.
+            Tournaments are indexed automatically when you open them. Discover this team's history from MyHome's "Find more tournaments" button if events are missing.
           </Text>
         </View>
-      )}
-
-      {history.length > 0 && (
-        <TouchableOpacity
-          style={styles.clearButton}
-          onPress={handleClearHistory}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.clearButtonText}>Clear All History</Text>
-        </TouchableOpacity>
       )}
 
       <View style={{ height: 60 }} />
@@ -271,220 +255,236 @@ export function CrossTournamentScreen({ clubName, teamFilter, onBack }: Props) {
   );
 }
 
+function ResultRow({
+  match,
+  colors,
+  styles,
+}: {
+  match: UnifiedMatchEntry;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const setScores =
+    match.myScores && match.oppScores && match.myScores.length > 0
+      ? match.myScores
+          .map((s, i) => `${s}-${match.oppScores[i] ?? 0}`)
+          .join(', ')
+      : '';
+  return (
+    <View style={styles.resultRow}>
+      <View
+        style={[
+          styles.resultDot,
+          { backgroundColor: match.iWon ? colors.success : colors.error },
+        ]}
+      />
+      <View style={styles.resultInfo}>
+        <Text style={styles.resultOpponent} numberOfLines={1}>
+          {match.iWon ? 'W' : 'L'} vs {match.opponentName || 'Unknown'}
+        </Text>
+        <Text style={styles.resultDetail}>
+          {match.roundLabel}
+          {setScores ? ` — ${setScores}` : ''}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+function formatDate(ms?: number): string {
+  if (!ms) return '';
+  return new Date(ms).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  centered: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: colors.background,
-  },
-  loadingText: {
-    marginTop: spacing.md,
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-  },
-  header: {
-    padding: spacing.lg,
-    paddingTop: spacing.xl,
-    backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
-  },
-  backText: {
-    color: colors.primary,
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    marginBottom: spacing.sm,
-  },
-  title: {
-    fontSize: fontSize.xxl,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  subtitle: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  // Season stats
-  statsCard: {
-    margin: spacing.lg,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    padding: spacing.lg,
-    borderWidth: 1,
-    borderColor: colors.divider,
-  },
-  statsTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.md,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    marginBottom: spacing.md,
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: fontSize.xxl,
-    fontWeight: '800',
-    color: colors.text,
-  },
-  statLabel: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  winRateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  winRateLabel: {
-    fontSize: fontSize.sm,
-    fontWeight: '600',
-    color: colors.textSecondary,
-    width: 70,
-  },
-  winRateBarTrack: {
-    flex: 1,
-    height: 8,
-    backgroundColor: colors.divider,
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginHorizontal: spacing.sm,
-  },
-  winRateBarFill: {
-    height: 8,
-    borderRadius: 4,
-  },
-  winRatePct: {
-    fontSize: fontSize.sm,
-    fontWeight: '700',
-    color: colors.text,
-    width: 36,
-    textAlign: 'right',
-  },
-  setRecord: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    marginTop: spacing.sm,
-  },
-  // Tournament cards
-  tournamentCard: {
-    marginHorizontal: spacing.lg,
-    marginBottom: spacing.sm,
-    backgroundColor: colors.surface,
-    borderRadius: borderRadius.md,
-    borderWidth: 1,
-    borderColor: colors.divider,
-    overflow: 'hidden',
-  },
-  tournamentHeader: {
-    flexDirection: 'row',
-    padding: spacing.md,
-  },
-  tournamentHeaderLeft: {
-    flex: 1,
-  },
-  tournamentName: {
-    fontSize: fontSize.md,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  tournamentMeta: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  tournamentDate: {
-    fontSize: fontSize.xs,
-    color: colors.textLight,
-    marginTop: 2,
-  },
-  tournamentHeaderRight: {
-    alignItems: 'flex-end',
-    justifyContent: 'center',
-  },
-  tournamentRecord: {
-    fontSize: fontSize.lg,
-    fontWeight: '800',
-  },
-  tournamentRank: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  expandIcon: {
-    fontSize: 10,
-    color: colors.textLight,
-    marginTop: spacing.xs,
-  },
-  // Results list
-  resultsList: {
-    borderTopWidth: 1,
-    borderTopColor: colors.divider,
-    paddingVertical: spacing.xs,
-  },
-  resultRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.md,
-  },
-  resultDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: spacing.sm,
-  },
-  resultInfo: {
-    flex: 1,
-  },
-  resultOpponent: {
-    fontSize: fontSize.sm,
-    fontWeight: '600',
-    color: colors.text,
-  },
-  resultDetail: {
-    fontSize: fontSize.xs,
-    color: colors.textSecondary,
-  },
-  // Empty state
-  emptyState: {
-    padding: spacing.xxxl,
-    alignItems: 'center',
-  },
-  emptyTitle: {
-    fontSize: fontSize.lg,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: spacing.sm,
-  },
-  emptyText: {
-    fontSize: fontSize.md,
-    color: colors.textSecondary,
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  // Clear button
-  clearButton: {
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.lg,
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-  },
-  clearButtonText: {
-    fontSize: fontSize.sm,
-    color: colors.error,
-    fontWeight: '600',
-  },
-});
+    container: { flex: 1, backgroundColor: colors.background },
+    centered: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+      backgroundColor: colors.background,
+    },
+    loadingText: {
+      marginTop: spacing.md,
+      fontSize: fontSize.md,
+      color: colors.textSecondary,
+    },
+    header: {
+      padding: spacing.lg,
+      paddingTop: spacing.xl,
+      backgroundColor: colors.surface,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.divider,
+    },
+    backText: {
+      color: colors.primary,
+      fontSize: fontSize.md,
+      fontWeight: '600',
+      marginBottom: spacing.sm,
+    },
+    title: { fontSize: fontSize.xxl, fontWeight: '800', color: colors.text },
+    subtitle: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
+
+    // Season stats
+    statsCard: {
+      margin: spacing.lg,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius.md,
+      padding: spacing.lg,
+      borderWidth: 1,
+      borderColor: colors.divider,
+    },
+    statsTitle: {
+      fontSize: fontSize.lg,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: spacing.md,
+    },
+    statsGrid: { flexDirection: 'row', marginBottom: spacing.md },
+    statItem: { flex: 1, alignItems: 'center' },
+    statValue: { fontSize: fontSize.xxl, fontWeight: '800', color: colors.text },
+    statLabel: { fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 },
+    winRateRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+    },
+    winRateLabel: {
+      fontSize: fontSize.sm,
+      fontWeight: '600',
+      color: colors.textSecondary,
+      width: 70,
+    },
+    winRateBarTrack: {
+      flex: 1,
+      height: 8,
+      backgroundColor: colors.divider,
+      borderRadius: 4,
+      overflow: 'hidden',
+      marginHorizontal: spacing.sm,
+    },
+    winRateBarFill: { height: 8, borderRadius: 4 },
+    winRatePct: {
+      fontSize: fontSize.sm,
+      fontWeight: '700',
+      color: colors.text,
+      width: 36,
+      textAlign: 'right',
+    },
+    setRecord: {
+      fontSize: fontSize.sm,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      marginTop: spacing.sm,
+    },
+
+    // Tournament cards
+    tournamentCard: {
+      marginHorizontal: spacing.lg,
+      marginBottom: spacing.sm,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius.md,
+      borderWidth: 1,
+      borderColor: colors.divider,
+      overflow: 'hidden',
+    },
+    tournamentHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      padding: spacing.md,
+      gap: spacing.sm,
+    },
+    sourceBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: borderRadius.sm,
+      minWidth: 38,
+      alignItems: 'center',
+    },
+    sourceBadgeAes: { backgroundColor: colors.primary },
+    sourceBadgeTimu: { backgroundColor: colors.accent },
+    sourceBadgeText: {
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    tournamentHeaderLeft: { flex: 1 },
+    tournamentName: {
+      fontSize: fontSize.md,
+      fontWeight: '700',
+      color: colors.text,
+    },
+    tournamentMeta: {
+      fontSize: fontSize.sm,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+    tournamentDate: {
+      fontSize: fontSize.xs,
+      color: colors.textLight,
+      marginTop: 2,
+    },
+    tournamentHeaderRight: {
+      alignItems: 'flex-end',
+      justifyContent: 'center',
+    },
+    tournamentRecord: { fontSize: fontSize.lg, fontWeight: '800' },
+    tournamentRank: {
+      fontSize: fontSize.xs,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+    expandIcon: {
+      fontSize: 10,
+      color: colors.textLight,
+      marginTop: spacing.xs,
+    },
+
+    // Results list
+    resultsList: {
+      borderTopWidth: 1,
+      borderTopColor: colors.divider,
+      paddingVertical: spacing.xs,
+    },
+    resultRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+    },
+    resultDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      marginRight: spacing.sm,
+    },
+    resultInfo: { flex: 1 },
+    resultOpponent: {
+      fontSize: fontSize.sm,
+      fontWeight: '600',
+      color: colors.text,
+    },
+    resultDetail: { fontSize: fontSize.xs, color: colors.textSecondary },
+
+    // Empty state
+    emptyState: { padding: spacing.xxxl, alignItems: 'center' },
+    emptyTitle: {
+      fontSize: fontSize.lg,
+      fontWeight: '700',
+      color: colors.text,
+      marginBottom: spacing.sm,
+    },
+    emptyText: {
+      fontSize: fontSize.md,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      lineHeight: 20,
+    },
+  });
 }

@@ -1,17 +1,22 @@
-// ── ManageSeasonScreen (formerly TimuManageSeasonScreen) ──────────────────
+// ── AddTournamentsScreen ──────────────────────────────────────────────────
 //
 // Lets the user grow their scouting database by adding prior tournaments
 // to the season index — AES *or* Timu. Shows currently-indexed events
 // (both sources, source-badged) with team counts and last-indexed time;
-// supports bulk add (paste multiple Timu URLs/tids), tid-range discovery
-// against aliases, manual AES event add (paste event key → pick division
-// → pick team), and per-row remove/refresh.
+// supports bulk add (paste multiple Timu URLs / bare 4-digit tids), tid-
+// range discovery against aliases, manual AES event add (paste event
+// key → pick division → pick team), and per-row remove/refresh.
 //
-// File name kept as TimuManageSeasonScreen.tsx so existing imports continue
-// to resolve; the content is now source-agnostic.
+// Renamed from TimuManageSeasonScreen — the screen always handled both
+// sources, the old name was misleading. Reachable from:
+//   • Hamburger menu
+//   • Either team dashboard's "+ Add a tournament" pill (with the
+//     `focusSource` prop set so the matching card is scrolled into
+//     view + briefly highlighted on mount)
+//   • Add-Team Timu fallback flow
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -68,9 +73,14 @@ import type { AESEvent, AESTeamAssignment } from '../types/aes';
 interface Props {
   onBack: () => void;
   onOpenTid: (tid: number) => void;
+  /** When set, scroll the matching card into view on first render and
+   *  flash a highlight border for ~1.5s so the user sees where the
+   *  source-specific paste field lives. Used by the team-dashboard
+   *  "+ Add a tournament" buttons. */
+  focusSource?: 'aes' | 'timu';
 }
 
-export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
+export function AddTournamentsScreen({ onBack, onOpenTid, focusSource }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [index, setIndex] = useState<SeasonIndex>({});
@@ -82,6 +92,29 @@ export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
     done: number;
     failures: number[];
   } | null>(null);
+
+  // ── Focus-source highlight (for arrivals from a team dashboard) ─────────
+  // When focusSource is 'aes' or 'timu', we scroll the corresponding card
+  // into view on first render and flash its border for ~1.5s. The
+  // ScrollView ref + per-card y-offset state are populated via onLayout
+  // so the scroll is correct regardless of dynamic content above (the
+  // intro card, indexed-events list, etc).
+  const scrollRef = useRef<ScrollView | null>(null);
+  const [timuCardY, setTimuCardY] = useState<number | null>(null);
+  const [aesCardY, setAesCardY] = useState<number | null>(null);
+  const [highlightedCard, setHighlightedCard] = useState<'aes' | 'timu' | null>(
+    focusSource ?? null
+  );
+  useEffect(() => {
+    if (!focusSource) return;
+    // Wait for both layouts before scrolling (the matching y is the one
+    // we need; the other ensures intervening cards have been measured).
+    const targetY = focusSource === 'aes' ? aesCardY : timuCardY;
+    if (targetY == null) return;
+    scrollRef.current?.scrollTo({ y: Math.max(0, targetY - 16), animated: true });
+    const t = setTimeout(() => setHighlightedCard(null), 1600);
+    return () => clearTimeout(t);
+  }, [focusSource, aesCardY, timuCardY]);
 
   // ── Discovery state ─────────────────────────────────────────────────────
   const [aliases, setAliases] = useState<string[]>([]);
@@ -577,7 +610,7 @@ export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <Header onBack={onBack} />
-      <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
         {/* Intro */}
         <Card variant="outlined" style={styles.introCard}>
           <Text style={styles.introTitle}>Season tournaments</Text>
@@ -588,7 +621,11 @@ export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
           </Text>
         </Card>
 
-        {/* Add form */}
+        {/* Add form (Timu) */}
+        <View
+          onLayout={(e) => setTimuCardY(e.nativeEvent.layout.y)}
+          style={highlightedCard === 'timu' ? styles.cardHighlightWrap : undefined}
+        >
         <Card style={styles.addCard}>
           <Text style={styles.sectionLabel}>Add tournaments</Text>
           <Text style={styles.help}>
@@ -630,8 +667,13 @@ export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
             </View>
           ) : null}
         </Card>
+        </View>
 
         {/* Add AES event (manual) */}
+        <View
+          onLayout={(e) => setAesCardY(e.nativeEvent.layout.y)}
+          style={highlightedCard === 'aes' ? styles.cardHighlightWrap : undefined}
+        >
         <Card style={styles.aesAddCard}>
           <Text style={styles.sectionLabel}>Add an AES event</Text>
           <Text style={styles.help}>
@@ -790,6 +832,7 @@ export function TimuManageSeasonScreen({ onBack, onOpenTid }: Props) {
             </View>
           ) : null}
         </Card>
+        </View>
 
         {/* Discover team's events */}
         <Card style={styles.discoverCard}>
@@ -1210,6 +1253,16 @@ function makeStyles(colors: ThemeColors) {
   body: { padding: spacing.lg, paddingBottom: spacing.xxxl },
 
   introCard: { backgroundColor: colors.primaryLight },
+  // Wrapper applied to whichever card matches `focusSource` on first
+  // render. Brief flash + thicker border so the user sees where the
+  // dashboard's "+ Add a tournament" jumped them to.
+  cardHighlightWrap: {
+    borderWidth: 2,
+    borderColor: colors.accent,
+    borderRadius: borderRadius.lg,
+    padding: 2,
+    marginBottom: spacing.md,
+  },
   introTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.primary, marginBottom: spacing.xs },
   introBody: { fontSize: fontSize.sm, color: colors.text, lineHeight: 20 },
 
