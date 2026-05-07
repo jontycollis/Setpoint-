@@ -7,15 +7,43 @@ import {
   TextInput,
   StyleSheet,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
-import { getTeamAssignments } from '../api/aesClient';
+import { getTeamAssignments, getStandings } from '../api/aesClient';
 import type {
   AESEvent,
   AESDivision,
   AESTeamAssignment,
+  AESStanding,
 } from '../types/aes';
+
+/**
+ * Convert a standings entry into a minimal AESTeamAssignment shape
+ * so it can be used in the team search index when nextassignments
+ * returns empty (event not started or already finished).
+ */
+function standingToTeamAssignment(s: AESStanding): AESTeamAssignment {
+  return {
+    TeamId: s.TeamId,
+    TeamName: s.TeamName,
+    TeamCode: s.TeamCode,
+    TeamText: s.TeamText,
+    SearchableTeamName: s.SearchableTeamName,
+    TeamClub: s.Club,
+    TeamDivision: { ...s.Division, IsFinished: false },
+    // Fields not available from standings — use safe defaults
+    OpponentTeamName: '',
+    OpponentTeamText: '',
+    OpponentTeamId: 0,
+    NextPendingReseed: false,
+    NextWorkMatchDate: null,
+    OpponentClub: { ClubId: 0, Name: '' },
+    NextMatch: null,
+    WorkMatchs: [],
+  } as AESTeamAssignment;
+}
 
 interface Props {
   event: AESEvent;
@@ -32,6 +60,7 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
   const [index, setIndex] = useState<IndexEntry[]>([]);
@@ -56,13 +85,40 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
         const results = await Promise.all(
           batch.map(async (division) => {
             try {
+              // Primary: nextassignments (works when schedule is published
+              // and event is in progress)
               const teams = await getTeamAssignments(
                 event.Key,
                 division.DivisionId
               );
-              return { division, teams };
-            } catch {
+              if (teams.length > 0) {
+                return { division, teams };
+              }
+              // Fallback: standings endpoint — works for events that are
+              // finished, haven't started, or whose schedule isn't published
+              // yet. Standings contain TeamId/TeamName/Club/Division which
+              // is everything the search screen needs.
+              const standings = await getStandings(
+                event.Key,
+                division.DivisionId
+              );
+              if (standings.length > 0) {
+                const fallbackTeams = standings.map(standingToTeamAssignment);
+                return { division, teams: fallbackTeams };
+              }
               return { division, teams: [] as AESTeamAssignment[] };
+            } catch {
+              // If both endpoints fail, try standings alone as last resort
+              try {
+                const standings = await getStandings(
+                  event.Key,
+                  division.DivisionId
+                );
+                const fallbackTeams = standings.map(standingToTeamAssignment);
+                return { division, teams: fallbackTeams };
+              } catch {
+                return { division, teams: [] as AESTeamAssignment[] };
+              }
             }
           })
         );
@@ -79,7 +135,13 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
       setError(err.message || 'Failed to load teams');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true);
+    await loadAllTeams();
   }
 
   const filtered = useMemo(() => {
@@ -189,11 +251,36 @@ export function TeamSearchScreen({ event, onTeamSelected, onBack }: Props) {
             data={filtered}
             keyExtractor={(item) => `${item.division.DivisionId}-${item.team.TeamId}`}
             renderItem={renderItem}
-            contentContainerStyle={styles.list}
+            contentContainerStyle={[styles.list, filtered.length === 0 && { flexGrow: 1 }]}
             keyboardShouldPersistTaps="handled"
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                colors={[colors.primary]}
+                tintColor={colors.primary}
+              />
+            }
             ListEmptyComponent={
               search.trim() ? (
                 <Text style={styles.emptyText}>No teams match "{search}"</Text>
+              ) : index.length === 0 && !loading ? (
+                <View style={styles.noTeamsContainer}>
+                  <Text style={styles.noTeamsIcon}>{'\u{1F3D0}'}</Text>
+                  <Text style={styles.noTeamsTitle}>Teams Not Yet Available</Text>
+                  <Text style={styles.noTeamsMessage}>
+                    Team assignments haven't been published for this event yet.
+                    Check back closer to the tournament start date.
+                  </Text>
+                  <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton} activeOpacity={0.7}>
+                    {refreshing ? (
+                      <ActivityIndicator size="small" color={colors.textOnPrimary} />
+                    ) : (
+                      <Text style={styles.refreshButtonText}>Check for Updates</Text>
+                    )}
+                  </TouchableOpacity>
+                  <Text style={styles.pullHint}>or pull down to refresh</Text>
+                </View>
               ) : (
                 <Text style={styles.emptyText}>
                   Start typing to search all {index.length} teams
@@ -307,11 +394,54 @@ function makeStyles(colors: ThemeColors) {
     marginBottom: spacing.md,
   },
   retryText: { fontSize: fontSize.md, color: colors.primary, fontWeight: '600' },
+  retryButton: { marginTop: spacing.lg, padding: spacing.md },
   emptyText: {
     fontSize: fontSize.md,
     color: colors.textSecondary,
     textAlign: 'center',
     padding: spacing.xxl,
+  },
+  noTeamsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xxxl,
+  },
+  noTeamsIcon: {
+    fontSize: 48,
+    marginBottom: spacing.md,
+  },
+  noTeamsTitle: {
+    fontSize: fontSize.xl,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: spacing.sm,
+    textAlign: 'center',
+  },
+  noTeamsMessage: {
+    fontSize: fontSize.md,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: spacing.lg,
+  },
+  refreshButton: {
+    backgroundColor: colors.primary,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    marginBottom: spacing.sm,
+    minWidth: 180,
+    alignItems: 'center' as const,
+  },
+  refreshButtonText: {
+    color: colors.textOnPrimary,
+    fontSize: fontSize.md,
+    fontWeight: '700',
+  },
+  pullHint: {
+    fontSize: fontSize.xs,
+    color: colors.textLight,
+    marginTop: spacing.xs,
   },
 });
 }
