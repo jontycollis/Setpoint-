@@ -908,6 +908,17 @@ const CA_NAME_PATTERNS = [
   /\bnova.?scotia\b/i,
   /\bnew.?brunswick\b/i,
   /\bvolleyball.?canada\b/i,
+  // Canadian city names commonly used in Nationals event names
+  /\bmoncton\b/i,
+  /\bcalgary\b/i,
+  /\bedmonton\b/i,
+  /\bottawa\b/i,
+  /\bmississauga\b/i,
+  /\bwinnipeg\b/i,
+  /\bfredericton\b/i,
+  /\bvancouver\b/i,
+  /\bmontreal\b/i,
+  /\btoronto\b/i,
 ];
 
 /** Check whether an event looks Canadian */
@@ -948,18 +959,27 @@ export async function fetchCanadianEvents(
   // Server-side filter is required — the AES landing endpoint has 23k+ events
   // globally, so an unfiltered $top=200 page never reaches Canadian content.
   // Match by name keyword since address.state is null on Canadian events.
+  // Broad keyword set: 'canada' catches "Volleyball Canada Nationals",
+  // 'national' catches "14U Nationals Moncton" naming variants,
+  // 'ontario'/'ova' catch OVA/OC events.
   const caNameFilter = [
     "contains(tolower(name),'canada')",
+    "contains(tolower(name),'national')",
     "contains(tolower(name),'ontario')",
     "contains(tolower(name),'ova')",
   ].join(' or ');
-  // Default callers (TournamentSelect dynamic discovery) only want events
-  // that haven't ended yet — they're picking a tournament to register for.
-  // Auto-discovery for season history needs the opposite: every Canadian
-  // event ever, so we can index a team's full multi-year history.
+  // We intentionally do NOT use isPastEvent for the default call.
+  // AES marks events as "past" once their start date has passed, even if the
+  // event is still underway — this caused ongoing Nationals to be invisible.
+  // Instead, we use a date-based cutoff: include any event whose end date is
+  // within the last 30 days or in the future. This captures ongoing + upcoming
+  // events without pulling in years of history.
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - 30);
+  const cutoffStr = cutoffDate.toISOString().split('T')[0];
   const filter = options.includePast
     ? `(${caNameFilter})`
-    : `isPastEvent eq false and (${caNameFilter})`;
+    : `endDate ge ${cutoffStr} and (${caNameFilter})`;
   const params = new URLSearchParams({
     $count: 'true',
     $format: 'json',
@@ -1025,7 +1045,12 @@ const TOURNAMENT_PATTERNS: {
     name: 'Canadian National Championships',
     shortName: 'Nationals',
     icon: '🏆',
-    pattern: /(?:volleyball.?canada|canadian).{0,10}national|national.{0,10}(?:volleyball.?canada|canadian)/i,
+    // Match various AES naming patterns for Canadian Nationals:
+    // - "2026 Volleyball Canada Nationals - 14UB & 15UB"
+    // - "2026 Volleyball Canada 14U Nationals Moncton"
+    // - "Canadian National Championships"
+    // - "2026 14U Nationals Calgary" (with 'canada' in server filter)
+    pattern: /(?:volleyball.?canada|canadian).{0,20}national|national.{0,20}(?:volleyball.?canada|canadian)|\b\d{2,3}U\w?\s+Nationals?\b/i,
   },
   {
     id: 'new-year-classic',
@@ -1059,13 +1084,33 @@ function formatDateRange(startDate: string, endDate: string): string {
 
 /** Simplify a long AES event name into a readable label + subtitle */
 function parseEventLabel(name: string): { label: string; subtitle: string } {
-  // Common pattern: "2025 Volleyball Canada Nationals - 15UG & 17UB"
+  // Pattern: "2026 Volleyball Canada 14U Nationals Moncton"
+  // → label: "Moncton — 14U", subtitle: "14U (Moncton)"
+  const nationalsMatch = name.match(
+    /(\d{2,3}U[BG]?)\s+Nationals?\s+([A-Z][a-zA-Z\s]+?)$/i
+  );
+  if (nationalsMatch) {
+    const ageGroup = nationalsMatch[1].toUpperCase();
+    const city = nationalsMatch[2].trim();
+    return { label: `${city} — ${ageGroup}`, subtitle: `${ageGroup} (${city})` };
+  }
+
+  // Pattern: "2025 Volleyball Canada Nationals - 15UG & 17UB"
   const dashIdx = name.lastIndexOf(' - ');
   if (dashIdx >= 0) {
     const after = name.substring(dashIdx + 3).trim();
+    // If the part after dash contains age groups, extract city from before
+    // e.g., "Mississauga - 14UB & 15UB"
     return { label: after, subtitle: after };
   }
-  // Try "__ " separator from decoded base64 names
+
+  // Pattern: "2026 Volleyball Canada Nationals 14UB 15UB" (underscore-separated)
+  const ageGroupMatch = name.match(/Nationals?\s+.*?(\d{2,3}U[BG]?\b(?:\s*(?:&|,|and)\s*\d{2,3}U[BG]?\b)*)/i);
+  if (ageGroupMatch) {
+    return { label: ageGroupMatch[1], subtitle: ageGroupMatch[1] };
+  }
+
+  // Try generic separator
   const parts = name.split(/\s*[-–—]\s*/);
   if (parts.length > 1) {
     const last = parts[parts.length - 1].trim();
