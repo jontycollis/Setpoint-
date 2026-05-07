@@ -48,6 +48,9 @@ import type {
   MatchEvent,
   Side,
   PointEvent,
+  StatEvent,
+  StatCategory,
+  CourtSnapshot,
   SetEndEvent,
   MatchEndEvent,
   MatchAbandonedEvent,
@@ -71,6 +74,7 @@ import {
 import { saveMatch } from '../utils/scoredMatchStore';
 import { CourtDiagram } from '../components/CourtDiagram';
 import { WinProbabilityBar } from '../components/WinProbabilityBar';
+import { snapshotFromState } from '../utils/statAggregator';
 
 interface Props {
   initialMatch: Match;
@@ -117,6 +121,16 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
   } | null>(null);
   const [abandonOpen, setAbandonOpen] = useState(false);
   const [abandonReason, setAbandonReason] = useState('');
+
+  // ── Stat tagging ────────────────────────────────────────────────────────
+  // When a player cell is tapped on the court diagram, we enter "stat mode"
+  // instead of opening the lineup editor. The selected player's shirt # and
+  // team are stored here; a floating stat bar appears with action buttons.
+  const [statSelection, setStatSelection] = useState<{
+    team: Side;
+    shirt: number;
+    posIdx: number;
+  } | null>(null);
 
   // Persist on every mutation. Synchronous-looking from the UI's POV
   // but actually fire-and-forget to AsyncStorage.
@@ -230,6 +244,80 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
       if (!last) return m;
       return removeEventById(m, last.id);
     });
+  }
+
+  // ── Stat tagging mutators ──────────────────────────────────────────────
+  /**
+   * Fire a stat event for the currently selected player. For point-scoring
+   * stats (kill, block, ace), also fire a PointEvent so the score updates.
+   */
+  function fireStat(category: StatCategory) {
+    if (!statSelection || !state.currentSet) return;
+    const { team, shirt } = statSelection;
+
+    const snapshot = snapshotFromState(state);
+    if (!snapshot) return;
+
+    const statEv: StatEvent = {
+      id: makeEventId(),
+      ts: Date.now(),
+      setIndex: state.currentSetIndex,
+      type: 'stat',
+      team,
+      shirt,
+      category,
+      courtSnapshot: snapshot,
+    };
+    fire(statEv);
+
+    // Point-scoring stats also award the point
+    if (category === 'kill' || category === 'block' || category === 'ace') {
+      const pointEv: PointEvent = {
+        id: makeEventId(),
+        ts: Date.now(),
+        setIndex: state.currentSetIndex,
+        type: 'point',
+        scoringTeam: team,
+        reason: category === 'kill' ? 'kill' : category === 'block' ? 'block' : 'ace',
+        shirt,
+        courtSnapshot: snapshot,
+      };
+      fire(pointEv);
+    }
+
+    // Clear the stat selection after firing
+    setStatSelection(null);
+  }
+
+  /**
+   * Fire a pass stat with a quality grade (0-3).
+   */
+  function firePassStat(quality: 0 | 1 | 2 | 3) {
+    if (!statSelection || !state.currentSet) return;
+    const { team, shirt } = statSelection;
+    const snapshot = snapshotFromState(state);
+    if (!snapshot) return;
+
+    const statEv: StatEvent = {
+      id: makeEventId(),
+      ts: Date.now(),
+      setIndex: state.currentSetIndex,
+      type: 'stat',
+      team,
+      shirt,
+      category: 'pass',
+      quality,
+      courtSnapshot: snapshot,
+    };
+    fire(statEv);
+    setStatSelection(null);
+  }
+
+  /** Look up a player name from the roster by shirt # and side. */
+  function playerName(team: Side, shirt: number): string {
+    const roster = team === 'home' ? match.rosters.home : match.rosters.away;
+    const p = roster.find((r) => r.shirt === shirt);
+    return p?.name ?? `#${shirt}`;
   }
 
   function confirmSetEnd() {
@@ -838,14 +926,47 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
             server={state.currentSet.server}
             homeServerShirt={state.currentSet.server === 'home' ? state.currentSet.serverShirt : null}
             awayServerShirt={state.currentSet.server === 'away' ? state.currentSet.serverShirt : null}
+            selectedCell={statSelection ? { team: statSelection.team, posIdx: statSelection.posIdx } : undefined}
             onCellPress={(team, posIdx) => {
-              setEditLineupSelected({ team, posIdx });
-              setActiveAction('edit-lineup');
+              // Determine the shirt # at this position
+              const rot = team === 'home'
+                ? state.currentSet!.rotation.home
+                : state.currentSet!.rotation.away;
+              const shirt = rot.positions[posIdx];
+              if (shirt == null || shirt === 0) return;
+              // Toggle stat selection: if already selected, deselect;
+              // if a different player, switch to them.
+              if (statSelection && statSelection.team === team && statSelection.posIdx === posIdx) {
+                setStatSelection(null);
+              } else {
+                setStatSelection({ team, shirt, posIdx });
+              }
             }}
             colors={colors}
             styles={styles}
           />
         </View>
+      ) : null}
+
+      {/* ── Stat bar — appears when a player cell is tapped ─────────── */}
+      {statSelection && state.currentSet && !matchOver ? (
+        <StatBar
+          team={statSelection.team}
+          shirt={statSelection.shirt}
+          playerName={playerName(statSelection.team, statSelection.shirt)}
+          teamLabel={statSelection.team === 'home' ? homeMeta.label : awayMeta.label}
+          teamColor={statSelection.team === 'home' ? homeColor : awayColor}
+          onStat={fireStat}
+          onPassWithQuality={firePassStat}
+          onDismiss={() => setStatSelection(null)}
+          onEditLineup={() => {
+            setEditLineupSelected({ team: statSelection.team, posIdx: statSelection.posIdx });
+            setStatSelection(null);
+            setActiveAction('edit-lineup');
+          }}
+          colors={colors}
+          styles={styles}
+        />
       ) : null}
 
       {/* Past-sets strip */}
@@ -1255,6 +1376,124 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
   );
 }
 
+// ─── StatBar ──────────────────────────────────────────────────────────────
+// Floating bar that appears when a player cell is tapped on the court
+// diagram. Shows stat action buttons (Kill, Block, Ace, Assist, Dig, Pass,
+// Error). Point-scoring stats (Kill/Block/Ace) also fire a PointEvent.
+
+function StatBar({
+  team,
+  shirt,
+  playerName: pName,
+  teamLabel,
+  teamColor,
+  onStat,
+  onPassWithQuality,
+  onDismiss,
+  onEditLineup,
+  colors,
+  styles,
+}: {
+  team: Side;
+  shirt: number;
+  playerName: string;
+  teamLabel: string;
+  teamColor: string;
+  onStat: (category: StatCategory) => void;
+  onPassWithQuality: (quality: 0 | 1 | 2 | 3) => void;
+  onDismiss: () => void;
+  onEditLineup: () => void;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const [showPassGrades, setShowPassGrades] = useState(false);
+
+  if (showPassGrades) {
+    return (
+      <View style={[styles.statBarContainer, { borderColor: teamColor }]}>
+        <View style={styles.statBarHeader}>
+          <Text style={styles.statBarPlayerText}>
+            <Text style={{ color: teamColor, fontWeight: '800' }}>#{shirt}</Text>
+            {' '}{pName} · Pass Quality
+          </Text>
+          <TouchableOpacity onPress={() => setShowPassGrades(false)} activeOpacity={0.6}>
+            <Text style={styles.statBarDismiss}>‹ Back</Text>
+          </TouchableOpacity>
+        </View>
+        <View style={styles.statBarButtons}>
+          <TouchableOpacity style={[styles.statBtn, { backgroundColor: '#dc2626' }]} onPress={() => onPassWithQuality(0)} activeOpacity={0.7}>
+            <Text style={styles.statBtnEmoji}>0</Text>
+            <Text style={styles.statBtnLabel}>Bad</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.statBtn, { backgroundColor: '#f59e0b' }]} onPress={() => onPassWithQuality(1)} activeOpacity={0.7}>
+            <Text style={styles.statBtnEmoji}>1</Text>
+            <Text style={styles.statBtnLabel}>OK</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.statBtn, { backgroundColor: '#3b82f6' }]} onPress={() => onPassWithQuality(2)} activeOpacity={0.7}>
+            <Text style={styles.statBtnEmoji}>2</Text>
+            <Text style={styles.statBtnLabel}>Good</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.statBtn, { backgroundColor: '#16a34a' }]} onPress={() => onPassWithQuality(3)} activeOpacity={0.7}>
+            <Text style={styles.statBtnEmoji}>3</Text>
+            <Text style={styles.statBtnLabel}>Perfect</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.statBarContainer, { borderColor: teamColor }]}>
+      <View style={styles.statBarHeader}>
+        <Text style={styles.statBarPlayerText}>
+          <Text style={{ color: teamColor, fontWeight: '800' }}>#{shirt}</Text>
+          {' '}{pName} · {teamLabel}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 12 }}>
+          <TouchableOpacity onPress={onEditLineup} activeOpacity={0.6}>
+            <Text style={styles.statBarEditLineup}>Edit ✎</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={onDismiss} activeOpacity={0.6}>
+            <Text style={styles.statBarDismiss}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <View style={styles.statBarButtons}>
+        {/* Point-scoring stats — highlighted with team color */}
+        <TouchableOpacity style={[styles.statBtn, styles.statBtnPoint, { backgroundColor: teamColor }]} onPress={() => onStat('kill')} activeOpacity={0.7}>
+          <Text style={styles.statBtnEmoji}>⚡</Text>
+          <Text style={[styles.statBtnLabel, { color: '#fff' }]}>Kill</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.statBtn, styles.statBtnPoint, { backgroundColor: teamColor }]} onPress={() => onStat('block')} activeOpacity={0.7}>
+          <Text style={styles.statBtnEmoji}>🛡</Text>
+          <Text style={[styles.statBtnLabel, { color: '#fff' }]}>Block</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.statBtn, styles.statBtnPoint, { backgroundColor: teamColor }]} onPress={() => onStat('ace')} activeOpacity={0.7}>
+          <Text style={styles.statBtnEmoji}>🎯</Text>
+          <Text style={[styles.statBtnLabel, { color: '#fff' }]}>Ace</Text>
+        </TouchableOpacity>
+        {/* Non-scoring stats */}
+        <TouchableOpacity style={styles.statBtn} onPress={() => onStat('assist')} activeOpacity={0.7}>
+          <Text style={styles.statBtnEmoji}>🤝</Text>
+          <Text style={styles.statBtnLabel}>Assist</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.statBtn} onPress={() => onStat('dig')} activeOpacity={0.7}>
+          <Text style={styles.statBtnEmoji}>🏊</Text>
+          <Text style={styles.statBtnLabel}>Dig</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.statBtn} onPress={() => setShowPassGrades(true)} activeOpacity={0.7}>
+          <Text style={styles.statBtnEmoji}>🏐</Text>
+          <Text style={styles.statBtnLabel}>Pass</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.statBtn, { backgroundColor: colors.error + '22' }]} onPress={() => onStat('error')} activeOpacity={0.7}>
+          <Text style={styles.statBtnEmoji}>✕</Text>
+          <Text style={styles.statBtnLabel}>Error</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
 // ─── ScorePanel ────────────────────────────────────────────────────────────
 
 function ScorePanel(props: {
@@ -1333,6 +1572,7 @@ function CourtRotationView({
   homeLabel, awayLabel, homeColor, awayColor,
   homeRot, awayRot,
   server, homeServerShirt, awayServerShirt,
+  selectedCell,
   onCellPress,
   colors, styles,
 }: {
@@ -1345,6 +1585,8 @@ function CourtRotationView({
   server: Side | null;
   homeServerShirt: number | null;
   awayServerShirt: number | null;
+  /** Currently selected cell for stat tagging (highlighted). */
+  selectedCell?: { team: Side; posIdx: number };
   /** When provided, each position cell is a tappable button that
    *  receives the team and lineup-tuple index that was tapped. */
   onCellPress?: (team: Side, posIdx: number) => void;
@@ -1395,6 +1637,7 @@ function CourtRotationView({
           const isLib = rot.liberoOnFloor != null && c.shirt === rot.liberoOnFloor;
           const display = c.shirt;
           const isServerCell = isServingTeam && serverShirt === display;
+          const isStatSelected = selectedCell != null && selectedCell.team === team && selectedCell.posIdx === c.idx;
           const cellStyle = [
             styles.courtCell,
             isFrontRow && styles.courtCellFront,
@@ -1404,6 +1647,9 @@ function CourtRotationView({
             // before the next rally).
             isServerCell && { borderColor: teamColor, borderWidth: 2 },
             isLib && { backgroundColor: colors.accent + '66', borderColor: colors.accent, borderWidth: 2 },
+            // Stat selection highlight — bright yellow ring so the user
+            // sees which player they're about to tag.
+            isStatSelected && { backgroundColor: '#fef08a', borderColor: '#ca8a04', borderWidth: 2.5 },
           ];
           const inner = (
             <>
@@ -2703,7 +2949,9 @@ function summarizeEvent(e: MatchEvent): string {
     case 'lineup':
       return `${e.team} set ${e.setIndex + 1}: ${e.positions.map((s) => '#' + s).join(' / ')}${e.liberos.length ? ` (L: ${e.liberos.map((s) => '#' + s).join(',')})` : ''}`;
     case 'point':
-      return `${e.scoringTeam} +1 (set ${e.setIndex + 1})`;
+      return `${e.scoringTeam} +1 (set ${e.setIndex + 1})${e.reason ? ` · ${e.reason}` : ''}${e.shirt ? ` #${e.shirt}` : ''}`;
+    case 'stat':
+      return `${e.team} #${e.shirt} ${e.category}${e.quality != null ? ` (${e.quality})` : ''}`;
     case 'sub':
       return `${e.team} #${e.out} → #${e.in}`;
     case 'libero-on':
@@ -3365,5 +3613,74 @@ function makeStyles(colors: ThemeColors) {
     },
     serveBadgeText: { color: '#ffffff', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
     serveRunText: { color: colors.text, fontSize: fontSize.sm, flex: 1 },
+
+    // ── Stat bar ──────────────────────────────────────────────────────
+    statBarContainer: {
+      backgroundColor: colors.surface,
+      borderWidth: 2,
+      borderRadius: borderRadius.lg,
+      marginHorizontal: spacing.sm,
+      marginVertical: spacing.xs,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: spacing.sm,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.12,
+      shadowRadius: 6,
+      elevation: 4,
+    },
+    statBarHeader: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+      paddingHorizontal: 2,
+    },
+    statBarPlayerText: {
+      fontSize: fontSize.md,
+      fontWeight: '700',
+      color: colors.text,
+      flex: 1,
+    },
+    statBarDismiss: {
+      fontSize: fontSize.lg,
+      color: colors.textLight,
+      fontWeight: '700',
+      paddingHorizontal: spacing.xs,
+    },
+    statBarEditLineup: {
+      fontSize: fontSize.sm,
+      color: colors.primary,
+      fontWeight: '600',
+    },
+    statBarButtons: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    statBtn: {
+      backgroundColor: colors.background,
+      borderRadius: borderRadius.md,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      alignItems: 'center',
+      minWidth: 44,
+      flex: 1,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    statBtnPoint: {
+      borderWidth: 0,
+    },
+    statBtnEmoji: {
+      fontSize: 16,
+      marginBottom: 1,
+    },
+    statBtnLabel: {
+      fontSize: 10,
+      fontWeight: '700',
+      color: colors.text,
+      textAlign: 'center',
+    },
   });
 }

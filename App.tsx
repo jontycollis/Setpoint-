@@ -50,6 +50,7 @@ import { TimuOpponentScoutScreen } from './src/screens/TimuOpponentScoutScreen';
 import { AddTournamentsScreen } from './src/screens/AddTournamentsScreen';
 import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
 import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
+import { StatsScreen } from './src/screens/StatsScreen';
 import { ToolsScreen } from './src/screens/ToolsScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
 import type { GlobalSearchResult } from './src/screens/GlobalSearchScreen';
@@ -150,6 +151,7 @@ type Screen =
   | 'MatchList'
   | 'MatchSetup'
   | 'MatchScoring'
+  | 'Stats'
   | 'Tools'
   | 'GlobalSearch';
 
@@ -293,6 +295,9 @@ export default function App() {
   // is AsyncStorage via scoredMatchStore). Set when MatchSetup hands
   // off a freshly-built Match, or when MatchList resumes one.
   const [activeScoredMatch, setActiveScoredMatch] = useState<ScoredMatch | null>(null);
+  // Stats screen navigation — carries the team profile ID and name.
+  const [statsTeamProfileId, setStatsTeamProfileId] = useState<string>('');
+  const [statsTeamName, setStatsTeamName] = useState<string>('');
   // When a team dashboard's "+ Add a tournament" button routes the user
   // to AddTournamentsScreen, this carries the dashboard's source so the
   // matching paste-card scrolls into view + flashes a highlight on
@@ -1969,6 +1974,12 @@ export default function App() {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('MatchScoring');
             }}
+            onOpenStats={(profileId, name) => {
+              setStatsTeamProfileId(profileId);
+              setStatsTeamName(name);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('Stats');
+            }}
           />
         );
       case 'MatchSetup':
@@ -1995,6 +2006,14 @@ export default function App() {
               setScreenHistory([]);
               setScreen('MatchList');
             }}
+          />
+        );
+      case 'Stats':
+        return (
+          <StatsScreen
+            teamProfileId={statsTeamProfileId}
+            teamName={statsTeamName}
+            onBack={goBack}
           />
         );
       case 'TeamNotes':

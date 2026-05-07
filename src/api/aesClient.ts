@@ -9,7 +9,6 @@ import type {
 } from '../types/aes';
 import { cachedFetch } from '../utils/apiCache';
 import type { CacheFetchOptions } from '../utils/apiCache';
-import type { Country } from '../config/tournaments';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1189,62 +1188,4 @@ export function groupIntoTournaments(
   }
 
   return Array.from(groupMap.values());
-}
-
-/**
- * Merge API-discovered tournaments into a static registry, adding any
- * events that aren't already present (matched by key). Returns a new
- * registry array — does NOT mutate the input.
- */
-export function mergeDiscoveredEvents(
-  staticRegistry: Country[],
-  discovered: DiscoveredTournament[]
-): Country[] {
-  const registry: Country[] = JSON.parse(JSON.stringify(staticRegistry));
-  const canada = registry.find((c) => c.id === 'canada');
-  if (!canada) return registry;
-
-  for (const disc of discovered) {
-    let tournament = canada.tournaments.find((t) => t.id === disc.tournamentId);
-    if (!tournament) {
-      tournament = {
-        id: disc.tournamentId,
-        name: disc.tournamentName,
-        shortName: disc.shortName,
-        icon: disc.icon,
-        years: [],
-      };
-      canada.tournaments.push(tournament);
-    }
-
-    let yearEntry = tournament.years.find((y) => y.year === disc.year);
-    if (!yearEntry) {
-      yearEntry = { year: disc.year, events: [] };
-      if (disc.tournamentId === 'ontario-championships') {
-        yearEntry.infoPageUrl = 'https://www.ontariovolleyball.org/ocs-venue';
-      } else if (disc.tournamentId === 'canadian-nationals') {
-        yearEntry.infoPageUrl = `https://volleyball.ca/en/competitions/${disc.year}-youth-nationals`;
-      }
-      tournament.years.push(yearEntry);
-    }
-
-    const existingKeys = new Set(yearEntry.events.map((e) => e.key));
-    for (const de of disc.events) {
-      if (!existingKeys.has(de.key)) {
-        yearEntry.events.push({
-          key: de.key,
-          label: de.label,
-          subtitle: de.subtitle,
-          dates: de.dates,
-          venue: de.venue,
-        });
-      }
-    }
-
-    yearEntry.events.sort((a, b) =>
-      a.label.localeCompare(b.label, undefined, { numeric: true })
-    );
-  }
-
-  return registry;
 }

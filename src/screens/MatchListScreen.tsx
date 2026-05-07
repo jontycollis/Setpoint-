@@ -30,9 +30,10 @@ interface Props {
   onBack: () => void;
   onNewMatch: () => void;
   onOpenMatch: (match: Match) => void;
+  onOpenStats?: (teamProfileId: string, teamName: string) => void;
 }
 
-export function MatchListScreen({ onBack, onNewMatch, onOpenMatch }: Props) {
+export function MatchListScreen({ onBack, onNewMatch, onOpenMatch, onOpenStats }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -97,9 +98,26 @@ export function MatchListScreen({ onBack, onNewMatch, onOpenMatch }: Props) {
         contentContainerStyle={styles.body}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onPull} tintColor={colors.primary} />}
       >
-        <TouchableOpacity style={styles.newBtn} onPress={onNewMatch} activeOpacity={0.7}>
-          <Text style={styles.newBtnText}>+ New Match</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <TouchableOpacity style={[styles.newBtn, { flex: 1 }]} onPress={onNewMatch} activeOpacity={0.7}>
+            <Text style={styles.newBtnText}>+ New Match</Text>
+          </TouchableOpacity>
+          {onOpenStats && matches.length > 0 ? (
+            <TouchableOpacity
+              style={[styles.newBtn, { flex: 1, backgroundColor: colors.accent }]}
+              onPress={() => {
+                // Find the first team profile in scored matches
+                const m = matches[0];
+                const profileId = m.meta.home.teamProfileId || m.meta.away.teamProfileId || m.id;
+                const name = m.meta.home.teamProfileId ? m.meta.home.label : m.meta.away.label;
+                onOpenStats(profileId, name);
+              }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.newBtnText}>📊 Team Stats</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         {loading ? null : matches.length === 0 ? (
           <View style={styles.emptyCard}>

@@ -23,8 +23,8 @@ import type {
 import {
   fetchCanadianEvents,
   groupIntoTournaments,
-  mergeDiscoveredEvents,
 } from '../api/aesClient';
+import type { DiscoveredTournament } from '../api/aesClient';
 
 const APP_LOGO = require('../../assets/setpoint-logo.png');
 
@@ -36,34 +36,86 @@ interface Props {
     tournament: Tournament,
     tournamentYear: TournamentYear
   ) => void;
-  /** When supplied, skips the on-mount discovery fetch and uses this
-   *  pre-enriched registry instead. App.tsx runs discovery at boot so the
-   *  data is ready before the user reaches this screen. */
-  initialRegistry?: Country[] | null;
 }
 
-export function TournamentSelectScreen({ onTournamentSelected, initialRegistry }: Props) {
+/**
+ * Merge API-discovered tournaments into the static registry, adding any
+ * events that aren't already present (matched by eventSchedulerKey).
+ */
+function mergeDiscoveredEvents(
+  staticRegistry: Country[],
+  discovered: DiscoveredTournament[]
+): Country[] {
+  // Deep-clone the registry so we don't mutate the import
+  const registry: Country[] = JSON.parse(JSON.stringify(staticRegistry));
+
+  const canada = registry.find((c) => c.id === 'canada');
+  if (!canada) return registry;
+
+  for (const disc of discovered) {
+    // Find or create the tournament entry
+    let tournament = canada.tournaments.find(
+      (t) => t.id === disc.tournamentId
+    );
+    if (!tournament) {
+      tournament = {
+        id: disc.tournamentId,
+        name: disc.tournamentName,
+        shortName: disc.shortName,
+        icon: disc.icon,
+        years: [],
+      };
+      canada.tournaments.push(tournament);
+    }
+
+    // Find or create the year entry
+    let yearEntry = tournament.years.find((y) => y.year === disc.year);
+    if (!yearEntry) {
+      yearEntry = { year: disc.year, events: [] };
+      // Auto-generate infoPageUrl for known tournaments
+      if (disc.tournamentId === 'ontario-championships') {
+        yearEntry.infoPageUrl = 'https://www.ontariovolleyball.org/ocs-venue';
+      } else if (disc.tournamentId === 'canadian-nationals') {
+        yearEntry.infoPageUrl = `https://volleyball.ca/en/competitions/${disc.year}-youth-nationals`;
+      }
+      tournament.years.push(yearEntry);
+    }
+
+    // Merge events — only add if key not already present
+    const existingKeys = new Set(yearEntry.events.map((e) => e.key));
+    for (const de of disc.events) {
+      if (!existingKeys.has(de.key)) {
+        yearEntry.events.push({
+          key: de.key,
+          label: de.label,
+          subtitle: de.subtitle,
+          dates: de.dates,
+          venue: de.venue,
+        });
+      }
+    }
+
+    // Sort events by label so numbering stays sequential
+    // "Event 1" < "Event 2" < "Event 3" etc., then alphabetical for the rest
+    yearEntry.events.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+  }
+
+  return registry;
+}
+
+export function TournamentSelectScreen({ onTournamentSelected }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [step, setStep] = useState<Step>('country');
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [selectedTournament, setSelectedTournament] =
     useState<Tournament | null>(null);
-  const [registry, setRegistry] = useState<Country[]>(initialRegistry ?? TOURNAMENT_REGISTRY);
-  const [discoveryLoading, setDiscoveryLoading] = useState(!initialRegistry);
+  const [registry, setRegistry] = useState<Country[]>(TOURNAMENT_REGISTRY);
+  const [discoveryLoading, setDiscoveryLoading] = useState(true);
   const [discoveryError, setDiscoveryError] = useState(false);
 
-  // Sync from parent when it finishes boot-time discovery
+  // Fetch and merge dynamic events on mount
   useEffect(() => {
-    if (initialRegistry) {
-      setRegistry(initialRegistry);
-      setDiscoveryLoading(false);
-    }
-  }, [initialRegistry]);
-
-  // Fetch and merge dynamic events on mount (only if no pre-fetched data)
-  useEffect(() => {
-    if (initialRegistry) return; // App.tsx already ran discovery
     let cancelled = false;
     (async () => {
       try {
@@ -81,7 +133,7 @@ export function TournamentSelectScreen({ onTournamentSelected, initialRegistry }
       }
     })();
     return () => { cancelled = true; };
-  }, [initialRegistry]);
+  }, []);
 
   function handleCountrySelect(country: Country) {
     // Always use the latest version from registry (may have been enriched)

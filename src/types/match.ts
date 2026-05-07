@@ -259,6 +259,7 @@ export interface MatchMeta {
 export type EventType =
   | 'lineup'
   | 'point'
+  | 'stat'
   | 'sub'
   | 'libero-on'
   | 'libero-off'
@@ -307,6 +308,27 @@ export interface LineupEvent extends BaseEvent {
   firstServer?: Side;
 }
 
+/**
+ * Snapshot of who's on the floor at the moment a stat or point is logged.
+ * Stored on stat events (and optionally on enriched point events) so
+ * post-match aggregation can reconstruct full context — who set the ball,
+ * who was in what rotation slot, whether the libero was playing, who was
+ * serving, etc. Keeping this denormalised in each event avoids replaying
+ * the entire event log just to figure out the lineup at rally N.
+ */
+export interface CourtSnapshot {
+  /** Shirt numbers in positions I..VI for each team at the moment of
+   *  the stat. Mirrors RotationState.positions. */
+  homePositions: Lineup;
+  awayPositions: Lineup;
+  /** Libero shirt currently on the floor for each team (null if none). */
+  homeLiberosOnFloor: number | null;
+  awayLiberosOnFloor: number | null;
+  /** Which team is serving and the server's shirt number. */
+  server: Side;
+  serverShirt: number;
+}
+
 export interface PointEvent extends BaseEvent {
   type: 'point';
   scoringTeam: Side;
@@ -314,6 +336,68 @@ export interface PointEvent extends BaseEvent {
   /** Optional shirt # of the player credited with the point (kill, ace,
    *  block). Stored for stats only — doesn't affect rotation/scoring. */
   shirt?: number;
+  /** Shirt # of the player credited with the assist (set) on this point.
+   *  Only meaningful for kills; the setter gets an assist when a hitter
+   *  gets a kill. */
+  assistShirt?: number;
+  /** Court snapshot at the moment of the point — who was on the floor,
+   *  libero status, server. Populated when the user tags stats during
+   *  live scoring; omitted for quick-tap scoring without stat enrichment. */
+  courtSnapshot?: CourtSnapshot;
+}
+
+// ── Stat events (non-point actions) ───────────────────────────────────────
+
+/**
+ * Categories of individual player actions that can be logged during a
+ * rally. Point-scoring actions (kill, block, ace) are ALSO recorded as
+ * the `reason` on a `PointEvent`; a `StatEvent` with these categories
+ * duplicates the information but adds richer context (court snapshot,
+ * assist chain). Non-scoring actions (dig, pass, set, error) can ONLY
+ * be captured via StatEvent since they don't result in a point.
+ *
+ * Sideline HD-inspired model:
+ *   • kill   — attack that directly wins the rally
+ *   • block  — block touch that wins the rally (solo or assist)
+ *   • ace    — serve that wins the rally without the opponent touching
+ *   • assist — the set/pass that enabled a kill (usually the setter)
+ *   • dig    — defensive contact that keeps the ball alive (usually
+ *              the first touch on an opponent's attack)
+ *   • pass   — serve-receive contact (the first touch after the serve)
+ *   • error  — unforced error (service error, attack out, net touch, etc.)
+ */
+export type StatCategory =
+  | 'kill'
+  | 'block'
+  | 'ace'
+  | 'assist'
+  | 'dig'
+  | 'pass'
+  | 'error';
+
+/**
+ * Quality grade for pass (serve-receive) and dig. The 0–3 scale is the
+ * standard used in Sideline HD and most volleyball stat software:
+ *   3 = perfect pass (setter has all options)
+ *   2 = good pass (setter has most options)
+ *   1 = ok pass (setter has limited options)
+ *   0 = bad pass / shanked / aced
+ */
+export type PassQuality = 0 | 1 | 2 | 3;
+
+export interface StatEvent extends BaseEvent {
+  type: 'stat';
+  /** Which team the player belongs to. */
+  team: Side;
+  /** Shirt # of the player being credited with this stat. */
+  shirt: number;
+  /** What the player did. */
+  category: StatCategory;
+  /** For pass/dig: quality grade 0–3. Optional for other categories. */
+  quality?: PassQuality;
+  /** Court snapshot at the moment of the stat — positions, liberos,
+   *  server. Always populated so post-match aggregation has full context. */
+  courtSnapshot: CourtSnapshot;
 }
 
 export interface SubEvent extends BaseEvent {
@@ -533,6 +617,7 @@ export interface MatchAbandonedEvent extends BaseEvent {
 export type MatchEvent =
   | LineupEvent
   | PointEvent
+  | StatEvent
   | SubEvent
   | LiberoOnEvent
   | LiberoOffEvent
