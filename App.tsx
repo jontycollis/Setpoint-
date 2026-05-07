@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   Modal,
   TouchableOpacity,
+  AppState,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -61,7 +62,7 @@ import {
   pushRecentlyViewedAndNotify,
   type RecentItem,
 } from './src/utils/recentlyViewed';
-import { getEvent, getTeamAssignments } from './src/api/aesClient';
+import { getEvent, getTeamAssignments, fetchCanadianEvents, groupIntoTournaments, mergeDiscoveredEvents } from './src/api/aesClient';
 import {
   loadSavedEvents,
   saveSavedEvents,
@@ -108,6 +109,9 @@ import type {
   FavoriteTeam,
   SavedEvent,
 } from './src/types/aes';
+import {
+  TOURNAMENT_REGISTRY,
+} from './src/config/tournaments';
 import type {
   Country,
   Tournament,
@@ -325,6 +329,12 @@ export default function App() {
     resolve: (v: boolean) => void;
   } | null>(null);
   const [navigatingToFav, setNavigatingToFav] = useState(false);
+  // Boot-time tournament registry enriched with AES discovery data.
+  // Passed to TournamentSelectScreen so it doesn't repeat the fetch.
+  const [discoveredRegistry, setDiscoveredRegistry] = useState<Country[] | null>(null);
+  // Timestamp of last successful tournament discovery — used to throttle
+  // re-runs when returning from background.
+  const [lastRegistryRefreshAt, setLastRegistryRefreshAt] = useState(0);
 
   // Timu state — independent of AES event/division/team context.
   const [savedTimuTournaments, setSavedTimuTournaments] = useState<SavedTimuTournament[]>([]);
@@ -415,6 +425,44 @@ export default function App() {
     })();
     return () => { cancelled = true; };
   }, [hydrated]);
+
+  // ── Boot-time tournament registry refresh ──────────────────────────────
+  // Fetch AES events once after hydration and merge them into the static
+  // registry. This means the TournamentSelectScreen has fresh data the
+  // instant the user opens it, and newly-published events (like Nationals
+  // cities) appear without a manual refresh.
+  const refreshTournamentRegistry = useCallback(async () => {
+    try {
+      const caEvents = await fetchCanadianEvents();
+      const grouped = groupIntoTournaments(caEvents);
+      const merged = mergeDiscoveredEvents(TOURNAMENT_REGISTRY, grouped);
+      setDiscoveredRegistry(merged);
+      setLastRegistryRefreshAt(Date.now());
+    } catch (err) {
+      console.warn('Boot-time tournament discovery failed:', err);
+      // Non-fatal — the static registry still works
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    refreshTournamentRegistry();
+  }, [hydrated, refreshTournamentRegistry]);
+
+  // Re-run discovery when the app returns from background, throttled to
+  // at most once every 15 minutes. This catches schedule updates (e.g.
+  // teams published, new events added) without hammering the API.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        const THROTTLE_MS = 15 * 60 * 1000; // 15 minutes
+        if (Date.now() - lastRegistryRefreshAt > THROTTLE_MS) {
+          refreshTournamentRegistry();
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [lastRegistryRefreshAt, refreshTournamentRegistry]);
 
   /**
    * Kick off a background AES + Timu scan for any tournaments where this
@@ -1583,6 +1631,7 @@ export default function App() {
           return (
             <TournamentSelectScreen
               onTournamentSelected={onTournamentSelected}
+              initialRegistry={discoveredRegistry}
             />
           );
         }
