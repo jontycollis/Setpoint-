@@ -107,6 +107,14 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
     home: number;
     away: number;
   } | null>(null);
+  /** Score at which the user last dismissed the "End Set?" prompt.
+   *  Prevents the auto-detect useEffect from re-opening the modal
+   *  for the same score after the user tapped "Not yet". Resets when
+   *  the score changes (i.e. another point is scored). */
+  const [dismissedEndAt, setDismissedEndAt] = useState<{
+    home: number;
+    away: number;
+  } | null>(null);
   const [abandonOpen, setAbandonOpen] = useState(false);
   const [abandonReason, setAbandonReason] = useState('');
 
@@ -135,12 +143,18 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
     if (!state.currentSet) return;
     if (state.matchComplete) return;
     if (confirmSetEndAt) return;
+    // Don't re-prompt if the user already dismissed for this exact score
+    if (
+      dismissedEndAt &&
+      dismissedEndAt.home === score.home &&
+      dismissedEndAt.away === score.away
+    ) return;
     const max = Math.max(score.home, score.away);
     const diff = Math.abs(score.home - score.away);
     if (max >= target && diff >= winBy) {
       setConfirmSetEndAt({ home: score.home, away: score.away });
     }
-  }, [state.currentSet, score.home, score.away, target, winBy, state.matchComplete, confirmSetEndAt]);
+  }, [state.currentSet, score.home, score.away, target, winBy, state.matchComplete, confirmSetEndAt, dismissedEndAt]);
 
   // Auto-suggest: bring the libero back on for the new server after a
   // side-out. Triggered when (a) we just had a rotation (server changed
@@ -257,6 +271,12 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
   }
 
   function dismissSetEnd() {
+    // Remember the score so the auto-detect effect won't re-open the
+    // modal immediately. The guard resets once another point is scored
+    // (score changes), so the prompt will reappear at a new score.
+    if (confirmSetEndAt) {
+      setDismissedEndAt({ home: confirmSetEndAt.home, away: confirmSetEndAt.away });
+    }
     setConfirmSetEndAt(null);
   }
 

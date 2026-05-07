@@ -48,6 +48,7 @@ import {
   DiscoveryProgressBanner,
   DiscoveryResultBanner,
 } from '../components/DiscoveryBanners';
+import { UpcomingTournamentsSection } from '../components/UpcomingTournamentsSection';
 import type { AutoDiscoverProgress } from '../utils/teamAutoDiscover';
 
 interface Props {
@@ -274,6 +275,39 @@ export function SeasonHistoryScreen({
                 </Text>
               </View>
             )}
+
+            {/* Upcoming tournaments — always visible, even when empty */}
+            <UpcomingTournamentsSection
+              aliases={[primaryName, ...(aliasesProp ?? [])]}
+              debugLabel={primaryName}
+            />
+
+            {/* Action buttons: scan + manual add */}
+            {onFindMoreTournaments && (
+              <TouchableOpacity
+                style={styles.findMoreBtn}
+                onPress={onFindMoreTournaments}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.findMoreBtnText}>
+                  Scan for Tournaments
+                </Text>
+                <Text style={styles.findMoreBtnHint}>
+                  Re-runs the AES + Timu search for {primaryName}
+                </Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.manualAddBtn}
+              onPress={onManageSeason}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.manualAddBtnText}>
+                Manually Add a Tournament
+              </Text>
+            </TouchableOpacity>
+
+            {/* Year-on-year comparison */}
             <YearComparisonCard
               history={history}
               focusedSeasonId={focusedSeasonId}
@@ -289,20 +323,6 @@ export function SeasonHistoryScreen({
               >
                 <Text style={styles.clearFilterText}>
                   Showing one season · Show all seasons
-                </Text>
-              </TouchableOpacity>
-            )}
-            {onFindMoreTournaments && (
-              <TouchableOpacity
-                style={styles.findMoreBtn}
-                onPress={onFindMoreTournaments}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.findMoreBtnText}>
-                  ↻ Find more tournaments for {primaryName}
-                </Text>
-                <Text style={styles.findMoreBtnHint}>
-                  Re-runs the AES + Timu search. Up to ~50 MB on Wi-Fi.
                 </Text>
               </TouchableOpacity>
             )}
@@ -355,15 +375,6 @@ export function SeasonHistoryScreen({
                 />
               ));
             })()}
-            <TouchableOpacity
-              style={styles.footerBtn}
-              onPress={onManageSeason}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.footerBtnText}>
-                Manage Season ({history.length} indexed)
-              </Text>
-            </TouchableOpacity>
           </>
         )}
       </ScrollView>
@@ -396,7 +407,7 @@ function Hero({
           Last synced {formatRelative(lastDiscoveryAt)}
         </Text>
       ) : (
-        <Text style={styles.heroSyncedAt}>Never synced — tap "Find more tournaments" below</Text>
+        <Text style={styles.heroSyncedAt}>Never synced — tap "Scan for Tournaments" below</Text>
       )}
     </View>
   );
@@ -435,10 +446,10 @@ function EmptyState({
       <Text style={styles.emptyBody}>
         We haven't indexed any tournament where {teamName} appears. As you open AES events
         and Timu tournaments, they'll be snapshotted here with every match and final placing.
-        You can also add prior events manually in Manage Season.
+        You can also add prior events using "Manually Add a Tournament".
       </Text>
       <TouchableOpacity style={styles.primaryBtn} onPress={onManageSeason} activeOpacity={0.7}>
-        <Text style={styles.primaryBtnText}>Manage Season</Text>
+        <Text style={styles.primaryBtnText}>Manually Add a Tournament</Text>
       </TouchableOpacity>
     </Card>
   );
@@ -1223,6 +1234,21 @@ function makeStyles(colors: ThemeColors) {
     color: colors.textSecondary,
     fontSize: fontSize.xs,
     marginTop: 2,
+  },
+  manualAddBtn: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.lg,
+    alignItems: 'center' as const,
+  },
+  manualAddBtnText: {
+    color: colors.primary,
+    fontSize: fontSize.md,
+    fontWeight: '600',
   },
   yoyHeader: {
     flexDirection: 'row',
