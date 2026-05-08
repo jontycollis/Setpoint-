@@ -63,6 +63,14 @@ export interface RosterPlayer {
    * from default lineup pickers.
    */
   active: boolean;
+  /**
+   * How this player landed on the roster. 'manual' for hand-entered, and
+   * reserved 'mrs-api' so a future OVA MRS roster importer can flag the
+   * provenance distinctly. Optional — undefined is treated as 'manual'.
+   * TODO: when MRS integration ships, the importer populates roster +
+   * rosterUpdatedAt on TeamProfile and tags incoming entries 'mrs-api'.
+   */
+  source?: 'manual' | 'mrs-api';
 }
 
 // ── Header ─────────────────────────────────────────────────────────────────

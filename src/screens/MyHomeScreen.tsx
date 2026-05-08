@@ -87,8 +87,8 @@ interface Props {
   } | null;
   onDismissDiscoveryResult?: () => void;
   onViewDiscoveryResult?: () => void;
-  /** Long-press a team card → confirm removal. */
-  onRemoveTeam?: (team: TeamProfile) => void;
+  /** Long-press a team card → action sheet (Manage roster / Remove). */
+  onLongPressTeam?: (team: TeamProfile) => void;
   /** Tap a recently-viewed entry — App routes by kind. */
   onOpenRecent?: (item: RecentItem) => void;
 }
@@ -108,7 +108,7 @@ export function MyHomeScreen({
   discoveryResult = null,
   onDismissDiscoveryResult,
   onViewDiscoveryResult,
-  onRemoveTeam,
+  onLongPressTeam,
   onOpenRecent,
 }: Props) {
   const { colors } = useTheme();
@@ -207,7 +207,7 @@ export function MyHomeScreen({
           indicesLoaded={indices != null}
           onOpenTeam={onOpenTeam}
           onAddTeam={onAddTeam}
-          onRemoveTeam={onRemoveTeam}
+          onLongPressTeam={onLongPressTeam}
         />
 
         {watchingTeams.length > 0 ? (
@@ -216,7 +216,7 @@ export function MyHomeScreen({
             upcomingByTeamId={upcomingByTeamId}
             indicesLoaded={indices != null}
             onOpenTeam={onOpenTeam}
-            onRemoveTeam={onRemoveTeam}
+            onLongPressTeam={onLongPressTeam}
           />
         ) : null}
 
@@ -332,14 +332,14 @@ function MyTeamsSection({
   indicesLoaded,
   onOpenTeam,
   onAddTeam,
-  onRemoveTeam,
+  onLongPressTeam,
 }: {
   teams: TeamProfile[];
   upcomingByTeamId: Map<string, UnifiedTournamentEntry | null>;
   indicesLoaded: boolean;
   onOpenTeam: (team: TeamProfile) => void;
   onAddTeam: () => void;
-  onRemoveTeam?: (team: TeamProfile) => void;
+  onLongPressTeam?: (team: TeamProfile) => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -368,7 +368,7 @@ function MyTeamsSection({
             upcoming={upcomingByTeamId.get(team.id) ?? null}
             indicesLoaded={indicesLoaded}
             onOpen={() => onOpenTeam(team)}
-            onLongPress={onRemoveTeam ? () => onRemoveTeam(team) : undefined}
+            onLongPress={onLongPressTeam ? () => onLongPressTeam(team) : undefined}
           />
         ))
       )}
@@ -392,13 +392,13 @@ function WatchingSection({
   upcomingByTeamId,
   indicesLoaded,
   onOpenTeam,
-  onRemoveTeam,
+  onLongPressTeam,
 }: {
   teams: TeamProfile[];
   upcomingByTeamId: Map<string, UnifiedTournamentEntry | null>;
   indicesLoaded: boolean;
   onOpenTeam: (team: TeamProfile) => void;
-  onRemoveTeam?: (team: TeamProfile) => void;
+  onLongPressTeam?: (team: TeamProfile) => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -418,7 +418,7 @@ function WatchingSection({
           upcoming={upcomingByTeamId.get(team.id) ?? null}
           indicesLoaded={indicesLoaded}
           onOpen={() => onOpenTeam(team)}
-          onLongPress={onRemoveTeam ? () => onRemoveTeam(team) : undefined}
+          onLongPress={onLongPressTeam ? () => onLongPressTeam(team) : undefined}
           compact
         />
       ))}

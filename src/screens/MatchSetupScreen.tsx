@@ -40,6 +40,7 @@ import type {
   Lineup,
   Position,
 } from '../types/match';
+import type { TeamProfile } from '../types/profile';
 import {
   createMatch,
   appendEvent,
@@ -96,9 +97,26 @@ interface Props {
    *  the user taps "Start Match" and validation passes. The caller is
    *  expected to navigate to MatchScoring with this match. */
   onStart: (match: Match) => void;
+  /**
+   * The user's active TeamProfile, when one exists. Used to pre-fill the
+   * Home team's label and surface a roster picker so the scorer doesn't
+   * have to retype every shirt # they've already entered for their own
+   * team. Away team is always manual entry in v1 (no opponent rosters).
+   * The picker is a hint, not a constraint — users can still type any
+   * shirt # not in the roster, and ad-hoc shirts are NOT written back to
+   * the persistent TeamProfile (this match only).
+   */
+  homeTeamProfile?: TeamProfile | null;
+  /** Tap the inline "Add players to your team" link → open roster editor. */
+  onOpenRosterEditor?: (team: TeamProfile) => void;
 }
 
-export function MatchSetupScreen({ onCancel, onStart }: Props) {
+export function MatchSetupScreen({
+  onCancel,
+  onStart,
+  homeTeamProfile = null,
+  onOpenRosterEditor,
+}: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
@@ -118,12 +136,22 @@ export function MatchSetupScreen({ onCancel, onStart }: Props) {
   const [tossSide, setTossSide] = useState<'home-left' | 'home-right'>('home-left');
 
   // ── Teams ───────────────────────────────────────────────────────────────
-  const [home, setHome] = useState<DraftTeam>(
-    emptyDraftTeam('Home', COLOR_PALETTE[0])
-  );
+  const [home, setHome] = useState<DraftTeam>(() => {
+    const base = emptyDraftTeam('Home', COLOR_PALETTE[0]);
+    if (homeTeamProfile?.label) base.label = homeTeamProfile.label;
+    return base;
+  });
   const [away, setAway] = useState<DraftTeam>(
     emptyDraftTeam('Away', COLOR_PALETTE[1])
   );
+
+  // Active players from the user's TeamProfile, if any. Used to surface
+  // a roster picker on the Home team's player section so common shirts
+  // can be added with one tap rather than retyped every match.
+  const homeRosterHints = useMemo<RosterPlayer[]>(() => {
+    if (!homeTeamProfile?.roster) return [];
+    return homeTeamProfile.roster.filter((p) => p.active);
+  }, [homeTeamProfile]);
 
   const [colorTarget, setColorTarget] = useState<Side | null>(null);
 
@@ -137,6 +165,31 @@ export function MatchSetupScreen({ onCancel, onStart }: Props) {
     const t = side === 'home' ? home : away;
     patchTeam(side, {
       roster: [...t.roster, { shirt: '', name: '', isLibero: false }],
+    });
+  }
+  /**
+   * Add a roster row pre-filled from a TeamProfile hint. No-op if the
+   * shirt is already in the home draft (we don't want one tap to silently
+   * duplicate). The hint is a snapshot — this match's roster is decoupled
+   * from the persistent TeamProfile, so subsequent edits in either place
+   * don't echo back.
+   */
+  function addRosterPlayerFromHint(hint: RosterPlayer) {
+    setHome((t) => {
+      const shirtStr = String(hint.shirt);
+      const exists = t.roster.some((p) => p.shirt.trim() === shirtStr);
+      if (exists) return t;
+      return {
+        ...t,
+        roster: [
+          ...t.roster,
+          {
+            shirt: shirtStr,
+            name: hint.name,
+            isLibero: hint.isLibero,
+          },
+        ],
+      };
     });
   }
   function removeRosterPlayer(side: Side, index: number) {
@@ -503,6 +556,16 @@ export function MatchSetupScreen({ onCancel, onStart }: Props) {
           onAddLibero={() => addLiberoSlot('home')}
           onRemoveLibero={(i) => removeLiberoSlot('home', i)}
           onServePosChange={(v) => patchTeam('home', { serveLiberoFromPosition: v })}
+          rosterHints={homeRosterHints}
+          onAddRosterPlayerFromHint={addRosterPlayerFromHint}
+          rosterHintEmptyLink={
+            homeTeamProfile && homeRosterHints.length === 0 && onOpenRosterEditor
+              ? {
+                  label: 'Add players to your team →',
+                  onPress: () => onOpenRosterEditor(homeTeamProfile),
+                }
+              : null
+          }
           styles={styles}
           colors={colors}
         />
@@ -619,6 +682,13 @@ function TeamSection(props: {
   onAddLibero: () => void;
   onRemoveLibero: (i: number) => void;
   onServePosChange: (v: string) => void;
+  /** Shirt-numbers from the user's TeamProfile.roster (active only).
+   *  Renders as a chip strip above the bench-rows so the scorer can
+   *  one-tap add their own players instead of retyping shirts. */
+  rosterHints?: RosterPlayer[];
+  onAddRosterPlayerFromHint?: (hint: RosterPlayer) => void;
+  /** Link rendered when the user has a TeamProfile but no roster yet. */
+  rosterHintEmptyLink?: { label: string; onPress: () => void } | null;
   styles: ReturnType<typeof makeStyles>;
   colors: ThemeColors;
 }) {
@@ -637,9 +707,17 @@ function TeamSection(props: {
     onAddLibero,
     onRemoveLibero,
     onServePosChange,
+    rosterHints,
+    onAddRosterPlayerFromHint,
+    rosterHintEmptyLink,
     styles,
     colors,
   } = props;
+  // Shirt #s already added to the draft — these hint chips render dim so
+  // the scorer doesn't tap-add a duplicate.
+  const draftShirts = new Set(
+    team.roster.map((p) => p.shirt.trim()).filter((s) => s.length > 0)
+  );
   return (
     <View style={styles.section}>
       <Text style={styles.sectionLabel}>{side === 'home' ? 'HOME TEAM' : 'AWAY TEAM'}</Text>
@@ -674,6 +752,48 @@ function TeamSection(props: {
             ? 'Shirt # required, name optional. The first player added serves first.'
             : 'Optional. The 6 starters auto-build the roster from the lineup below — only use this section if you want to register bench players for subs. Names always optional and will sync from MRS later.'}
         </Text>
+        {rosterHints && rosterHints.length > 0 && onAddRosterPlayerFromHint ? (
+          <View style={{ marginTop: spacing.xs, marginBottom: spacing.xs }}>
+            <Text style={[styles.fieldLabel, { marginBottom: 4 }]}>
+              FROM YOUR TEAM ROSTER
+            </Text>
+            <View style={styles.pillRow}>
+              {rosterHints.map((hint) => {
+                const already = draftShirts.has(String(hint.shirt));
+                return (
+                  <TouchableOpacity
+                    key={hint.shirt}
+                    onPress={() => onAddRosterPlayerFromHint(hint)}
+                    activeOpacity={0.7}
+                    disabled={already}
+                    style={[styles.pill, already && { opacity: 0.4 }]}
+                  >
+                    <Text style={styles.pillText}>
+                      #{hint.shirt}
+                      {hint.name ? ` ${hint.name}` : ''}
+                      {hint.isLibero ? ' (L)' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={[styles.fieldHint, { marginTop: 4 }]}>
+              Tap to add. Edits here only affect this match — to update
+              your team's persistent roster, open Manage roster from the
+              home screen.
+            </Text>
+          </View>
+        ) : rosterHintEmptyLink ? (
+          <TouchableOpacity
+            onPress={rosterHintEmptyLink.onPress}
+            activeOpacity={0.7}
+            style={{ marginTop: spacing.xs, marginBottom: spacing.xs }}
+          >
+            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: fontSize.sm }}>
+              {rosterHintEmptyLink.label}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
         {team.roster.length === 0 ? (
           <Text style={styles.fieldHint}>
             {isBeach
