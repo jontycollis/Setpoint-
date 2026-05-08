@@ -14,11 +14,43 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { Match } from '../types/match';
+import type { Match, MatchKind, MatchSource } from '../types/match';
 
 const STORAGE_KEY = 'scored.matches.v1';
 
 type StoredBlob = Record<string, Match>;
+
+/**
+ * Normalise on read. Older stored matches predate the analytics
+ * fields on `MatchMeta` — fill them in with defaults so every
+ * downstream consumer sees a uniformly-shaped record.
+ *
+ * Defaults:
+ *   • `matchKind`      → `'standalone'`
+ *   • `source`         → `'tier2-live'`  (legacy = live-scored)
+ *   • `includeInStats` → `false`         (default for `'standalone'`)
+ *
+ * Mirrors `normaliseMatchMeta` in `matchMeta.ts`. Duplicated here so
+ * the storage layer doesn't import the helper module (avoids a
+ * potential cycle: matchMeta.ts → scoredMatchStore.ts → matchMeta.ts).
+ */
+function normaliseOnRead(match: Match): Match {
+  const meta = match.meta;
+  const hasKind = (meta as { matchKind?: MatchKind }).matchKind != null;
+  const hasSource = (meta as { source?: MatchSource }).source != null;
+  const hasInclude =
+    (meta as { includeInStats?: boolean }).includeInStats != null;
+  if (hasKind && hasSource && hasInclude) return match;
+  return {
+    ...match,
+    meta: {
+      ...meta,
+      matchKind: meta.matchKind ?? 'standalone',
+      source: meta.source ?? 'tier2-live',
+      includeInStats: meta.includeInStats ?? false,
+    },
+  };
+}
 
 async function readBlob(): Promise<StoredBlob> {
   try {
@@ -43,13 +75,16 @@ async function writeBlob(blob: StoredBlob): Promise<void> {
 /** All matches sorted by createdAt desc (newest first). */
 export async function loadMatches(): Promise<Match[]> {
   const blob = await readBlob();
-  return Object.values(blob).sort((a, b) => b.createdAt - a.createdAt);
+  return Object.values(blob)
+    .map(normaliseOnRead)
+    .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** Single match by id, or null if not found. */
 export async function loadMatchById(id: string): Promise<Match | null> {
   const blob = await readBlob();
-  return blob[id] ?? null;
+  const m = blob[id];
+  return m ? normaliseOnRead(m) : null;
 }
 
 /** Persist a match, overwriting any prior version with the same id. */

@@ -212,6 +212,64 @@ export type MatchAgeCategory =
   | 'junior'    // FIVB Junior bucket (when not broken down further)
   | 'youth';    // FIVB Youth bucket
 
+/**
+ * Semantic classification of a match for analytics splits — what kind
+ * of competition it counts as. Distinct from `MatchSource` (how the
+ * data got here). See `src/utils/matchMeta.ts` for the helpers that
+ * default + flip these.
+ *
+ *   • `'aes'`        — match played as part of an AES-tracked event
+ *                       (typically links to an `AesTournamentSnapshot`)
+ *   • `'timu'`       — match played in a Timu tournament
+ *   • `'standalone'` — scrimmage, practice, friendly, ad-hoc match
+ *   • `'imported'`   — fallback for workbook rows whose category cell
+ *                       didn't map to a known kind. Rare in practice.
+ */
+export type MatchKind = 'aes' | 'timu' | 'standalone' | 'imported';
+
+/**
+ * How the match data entered storage. Distinct from `MatchKind`:
+ * a `matchKind: 'aes'` match could have been `'tier2-live'` (scored
+ * at the gym) or `'sideline-hd-import'` (post-tournament workbook
+ * import).
+ *
+ *   • `'tier2-live'`         — produced by the live-scoring engine
+ *   • `'sideline-hd-import'` — parsed out of a Sideline HD workbook
+ *   • `'manual-entry'`       — typed in after the fact (reserved; not
+ *                               written by anything in v1)
+ */
+export type MatchSource = 'tier2-live' | 'sideline-hd-import' | 'manual-entry';
+
+/**
+ * Cross-reference back to an indexed AES tournament snapshot. Mirrors
+ * `UnifiedTournamentEntry` keys exactly so an analytics view can hop
+ * from a Tier 2 match into the AES tournament dashboard.
+ */
+export interface AesEventLink {
+  /** AES event key, e.g. "PVA-2024-PROVINCIALS". */
+  eventId: string;
+  /** Optional division id within the event. */
+  divisionId?: string;
+  /** Optional best-effort match label / id (AES per-match ids
+   *  aren't always exposed). */
+  matchId?: string;
+  /** Cached human-readable tournament name for offline display. */
+  tournamentName?: string;
+}
+
+/**
+ * Cross-reference back to a Timu tournament snapshot.
+ */
+export interface TimuTournamentLink {
+  /** Timu tournament id (numeric, but stored as string here for
+   *  storage uniformity with AES). */
+  tid: string;
+  /** Optional best-effort match label / id within the tournament. */
+  matchId?: string;
+  /** Cached human-readable tournament name for offline display. */
+  tournamentName?: string;
+}
+
 export interface MatchMeta {
   eventName: string;
   division: string;
@@ -260,6 +318,43 @@ export interface MatchMeta {
   officials: Officials;
   notes?: string;
   coinToss?: CoinToss;
+  /**
+   * Semantic classification — AES / Timu / standalone / imported.
+   * Drives analytics splits and determines the default for
+   * `includeInStats`. Older stored matches without this field are
+   * normalised to `'standalone'` on read; new writes always include it.
+   */
+  matchKind?: MatchKind;
+  /**
+   * AES tournament link. Populated when the user picks an AES
+   * tournament in the post-match save sheet (or when the Tier 2 entry
+   * point pre-fills it from a tournament-context navigation). Absent
+   * for standalone matches and for AES-kind matches the user hasn't
+   * linked yet.
+   */
+  linkedAesEvent?: AesEventLink;
+  /**
+   * Timu tournament link. Populated when the user picks a Timu
+   * tournament in the post-match save sheet.
+   */
+  linkedTimuTournament?: TimuTournamentLink;
+  /**
+   * Per-match opt-in for season analytics rollups. The flag is read
+   * at aggregation time only — the match itself stays in storage
+   * either way. Default rules (see `defaultIncludeInStats`):
+   *   • `'aes'` / `'timu'` / `'imported'` → `true`
+   *   • `'standalone'`                    → `false`
+   * The user can flip this on any match later from anywhere it's
+   * visible (Season History row, per-player roll-up row, etc.).
+   */
+  includeInStats?: boolean;
+  /**
+   * How the match entered storage. Distinct from `matchKind`. New
+   * Tier 2 matches always write `'tier2-live'`; the importer writes
+   * `'sideline-hd-import'`. Older stored matches without this field
+   * are normalised to `'tier2-live'` on read.
+   */
+  source?: MatchSource;
 }
 
 // ── Event log (append-only) ────────────────────────────────────────────────

@@ -18,7 +18,7 @@
 // busiest match).
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -64,6 +64,7 @@ import type {
   SanctionEvent,
   RosterPlayer,
   RotationState,
+  MatchKind,
 } from '../types/match';
 import {
   appendEvent,
@@ -71,10 +72,16 @@ import {
   deriveMatchState,
   makeEventId,
 } from '../utils/matchEngine';
-import { saveMatch } from '../utils/scoredMatchStore';
+import { saveMatch, deleteMatch } from '../utils/scoredMatchStore';
 import { CourtDiagram } from '../components/CourtDiagram';
 import { WinProbabilityBar } from '../components/WinProbabilityBar';
 import { snapshotFromState } from '../utils/statAggregator';
+import {
+  defaultIncludeInStats,
+  getRecentTournamentsForLinking,
+  getOpposingTeamsForTournament,
+  type TournamentPickerEntry,
+} from '../utils/matchMeta';
 
 interface Props {
   initialMatch: Match;
@@ -122,6 +129,18 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
   const [abandonOpen, setAbandonOpen] = useState(false);
   const [abandonReason, setAbandonReason] = useState('');
 
+  // Post-match save sheet — fires once when match-end is recognised
+  // during this scoring session. We track "matchComplete on initial
+  // load" via a ref so resuming a previously-completed match doesn't
+  // re-pop the sheet. The sheet is purely opt-in metadata: until the
+  // user picks Save / Don't save, the match remains in storage as it
+  // was during scoring (Tier 2 saves on every mutation).
+  const matchAlreadyCompleteOnLoadRef = useRef(
+    initialMatch.status === 'complete' || initialMatch.status === 'abandoned'
+  );
+  const [postMatchSaveOpen, setPostMatchSaveOpen] = useState(false);
+  const [postMatchSaveShown, setPostMatchSaveShown] = useState(false);
+
   // ── Stat tagging ────────────────────────────────────────────────────────
   // When a player cell is tapped on the court diagram, we enter "stat mode"
   // instead of opening the lineup editor. The selected player's shirt # and
@@ -137,6 +156,71 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
   useEffect(() => {
     saveMatch(match).catch(() => {});
   }, [match]);
+
+  // Open the post-match save sheet on the *first* match-end recognised
+  // this session. Resumed-already-complete matches don't re-prompt.
+  useEffect(() => {
+    if (matchAlreadyCompleteOnLoadRef.current) return;
+    if (postMatchSaveShown) return;
+    if (state.matchComplete) {
+      setPostMatchSaveOpen(true);
+      setPostMatchSaveShown(true);
+    }
+  }, [state.matchComplete, postMatchSaveShown]);
+
+  /**
+   * Save the match with the user's chosen classification metadata.
+   * Mutates `match.meta` in place; the auto-save useEffect picks it
+   * up on the next render.
+   */
+  function applyPostMatchSave(args: {
+    matchKind: MatchKind;
+    tournamentPick: TournamentPickerEntry | null;
+    opponentName: string | null;
+    matchLabel: string;
+    includeInStats: boolean;
+  }) {
+    setMatch((m) => {
+      const nextAway = args.opponentName
+        ? { ...m.meta.away, label: args.opponentName }
+        : m.meta.away;
+      return {
+        ...m,
+        meta: {
+          ...m.meta,
+          matchKind: args.matchKind,
+          includeInStats: args.includeInStats,
+          matchLabel: args.matchLabel.trim() || m.meta.matchLabel,
+          away: nextAway,
+          linkedAesEvent:
+            args.tournamentPick?.source === 'aes'
+              ? args.tournamentPick.aes
+              : undefined,
+          linkedTimuTournament:
+            args.tournamentPick?.source === 'timu'
+              ? args.tournamentPick.timu
+              : undefined,
+        },
+        updatedAt: Date.now(),
+      };
+    });
+    setPostMatchSaveOpen(false);
+  }
+
+  /**
+   * "Don't save": purge this match from `scored.matches.v1` and bounce
+   * back to the prior screen. Tier 2 has been auto-saving the match
+   * the whole time, so we have to actively delete it.
+   */
+  async function discardMatchAndExit() {
+    setPostMatchSaveOpen(false);
+    try {
+      await deleteMatch(match.id);
+    } catch {
+      /* best effort */
+    }
+    onBack();
+  }
 
   // ── Derived UI shape ────────────────────────────────────────────────────
   const homeMeta = match.meta.home;
@@ -1372,6 +1456,24 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
           </View>
         </View>
       </Modal>
+
+      {/* Post-match save sheet — fires once when match-end is recognised
+          this session. Lets the user classify the match (AES / Timu /
+          Standalone), optionally link it to an indexed tournament, set
+          the include-in-stats flag, and edit the match label. "Save"
+          stamps the chosen meta onto the match record (Tier 2's
+          auto-save useEffect persists it). "Don't save" deletes the
+          match from `scored.matches.v1` entirely. */}
+      <PostMatchSaveSheet
+        visible={postMatchSaveOpen}
+        meta={match.meta}
+        homeLabel={homeMeta.label}
+        awayLabel={awayMeta.label}
+        onSave={applyPostMatchSave}
+        onDontSave={discardMatchAndExit}
+        colors={colors}
+        styles={styles}
+      />
     </View>
   );
 }
@@ -2936,6 +3038,344 @@ function PointsByServerModal({
           <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
             <Text style={styles.closeBtnText}>Close</Text>
           </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── PostMatchSaveSheet ───────────────────────────────────────────────────
+//
+// Placeholder/minimal modal — fancier UX comes in Session γ. Lets the
+// user pick `matchKind`, optionally link a tournament + opposing team,
+// edit the match label, and toggle `includeInStats` before persisting
+// the match metadata. The brief calls this "functional but minimal"
+// for Session α.
+//
+// All async lookups (tournament list, opposing-team list) are kicked
+// off lazily when the segmented control switches to AES / Timu so we
+// don't pay the AsyncStorage cost just to dismiss the sheet.
+
+function PostMatchSaveSheet({
+  visible,
+  meta,
+  homeLabel,
+  awayLabel,
+  onSave,
+  onDontSave,
+  colors,
+  styles,
+}: {
+  visible: boolean;
+  meta: import('../types/match').MatchMeta;
+  homeLabel: string;
+  awayLabel: string;
+  onSave: (args: {
+    matchKind: MatchKind;
+    tournamentPick: TournamentPickerEntry | null;
+    opponentName: string | null;
+    matchLabel: string;
+    includeInStats: boolean;
+  }) => void;
+  onDontSave: () => void;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  // Initial kind: prefer whatever Tier 2 set (tournament-context entry
+  // would have already pre-filled this); else infer from existing
+  // links; else 'standalone'.
+  const initialKind: MatchKind = useMemo(() => {
+    if (meta.matchKind && meta.matchKind !== 'imported') return meta.matchKind;
+    if (meta.linkedAesEvent) return 'aes';
+    if (meta.linkedTimuTournament) return 'timu';
+    return 'standalone';
+  }, [meta]);
+  const [kind, setKind] = useState<MatchKind>(initialKind);
+  const [pick, setPick] = useState<TournamentPickerEntry | null>(null);
+  const [opponentName, setOpponentName] = useState<string | null>(null);
+  const [matchLabel, setMatchLabel] = useState(meta.matchLabel);
+  const [include, setInclude] = useState<boolean>(
+    meta.includeInStats ?? defaultIncludeInStats(initialKind)
+  );
+
+  const [tournaments, setTournaments] = useState<TournamentPickerEntry[]>([]);
+  const [tournamentsLoaded, setTournamentsLoaded] = useState(false);
+  const [opponentList, setOpponentList] = useState<string[]>([]);
+
+  // Reset local state every time the sheet opens.
+  useEffect(() => {
+    if (!visible) return;
+    setKind(initialKind);
+    setPick(null);
+    setOpponentName(null);
+    setMatchLabel(meta.matchLabel);
+    setInclude(meta.includeInStats ?? defaultIncludeInStats(initialKind));
+    setTournaments([]);
+    setTournamentsLoaded(false);
+    setOpponentList([]);
+  }, [visible, initialKind, meta.matchLabel, meta.includeInStats]);
+
+  // Load tournament list on first switch to AES/Timu.
+  useEffect(() => {
+    if (!visible) return;
+    if (kind !== 'aes' && kind !== 'timu') return;
+    if (tournamentsLoaded) return;
+    let cancelled = false;
+    getRecentTournamentsForLinking()
+      .then((list) => {
+        if (cancelled) return;
+        setTournaments(list);
+        setTournamentsLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setTournaments([]);
+        setTournamentsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, kind, tournamentsLoaded]);
+
+  // When a tournament is picked, fetch its team list for the opposition picker.
+  useEffect(() => {
+    if (!pick) {
+      setOpponentList([]);
+      return;
+    }
+    let cancelled = false;
+    const ref =
+      pick.source === 'aes' && pick.aes
+        ? ({ source: 'aes' as const, aes: pick.aes })
+        : pick.source === 'timu' && pick.timu
+        ? ({ source: 'timu' as const, timu: pick.timu })
+        : null;
+    if (!ref) return;
+    getOpposingTeamsForTournament(ref)
+      .then((names) => {
+        if (cancelled) return;
+        setOpponentList(names);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setOpponentList([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pick]);
+
+  // When the kind changes, recompute the include-in-stats default if
+  // the user hasn't manually flipped it (we only auto-update if the
+  // current value still equals the prior kind's default — heuristic
+  // good enough for v1).
+  function pickKind(next: MatchKind) {
+    setKind(next);
+    setInclude(defaultIncludeInStats(next));
+    if (next === 'standalone') {
+      setPick(null);
+      setOpponentName(null);
+    }
+  }
+
+  const filteredTournaments = useMemo(
+    () => tournaments.filter((t) => t.source === kind),
+    [tournaments, kind]
+  );
+
+  function commit() {
+    onSave({
+      matchKind: kind,
+      tournamentPick: pick,
+      opponentName,
+      matchLabel,
+      includeInStats: include,
+    });
+  }
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => {
+        /* dismissing requires an explicit Save / Don't save tap */
+      }}
+    >
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCardLg}>
+          <Text style={styles.modalTitle}>Save match to season stats</Text>
+          <ScrollView style={{ maxHeight: 480 }}>
+            <Text style={[styles.fieldHint, { marginTop: spacing.sm }]}>
+              Match kind
+            </Text>
+            <View style={styles.pillRow}>
+              {(['aes', 'timu', 'standalone'] as MatchKind[]).map((k) => (
+                <TouchableOpacity
+                  key={k}
+                  style={[styles.pill, kind === k && styles.pillActive]}
+                  onPress={() => pickKind(k)}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.pillText,
+                      kind === k && styles.pillTextActive,
+                    ]}
+                  >
+                    {k === 'aes'
+                      ? 'AES'
+                      : k === 'timu'
+                      ? 'Timu'
+                      : 'Standalone'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {kind === 'aes' || kind === 'timu' ? (
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.fieldHint}>
+                  Tournament ({kind === 'aes' ? 'AES' : 'Timu'} indexed)
+                </Text>
+                {!tournamentsLoaded ? (
+                  <Text style={styles.fieldHint}>Loading…</Text>
+                ) : filteredTournaments.length === 0 ? (
+                  <Text style={styles.fieldHint}>
+                    No indexed {kind === 'aes' ? 'AES' : 'Timu'} tournaments
+                    yet. You can link this match later from Season History.
+                  </Text>
+                ) : (
+                  <ScrollView
+                    style={{ maxHeight: 160 }}
+                    nestedScrollEnabled
+                  >
+                    {filteredTournaments.map((t) => {
+                      const key =
+                        t.source === 'aes'
+                          ? `aes:${t.aes?.eventId}:${t.aes?.divisionId ?? ''}`
+                          : `timu:${t.timu?.tid}`;
+                      const isPicked =
+                        pick != null &&
+                        pick.source === t.source &&
+                        ((t.source === 'aes' &&
+                          pick.aes?.eventId === t.aes?.eventId &&
+                          pick.aes?.divisionId === t.aes?.divisionId) ||
+                          (t.source === 'timu' &&
+                            pick.timu?.tid === t.timu?.tid));
+                      return (
+                        <TouchableOpacity
+                          key={key}
+                          style={[
+                            styles.pill,
+                            { marginBottom: spacing.xs },
+                            isPicked && styles.pillActive,
+                          ]}
+                          onPress={() => {
+                            setPick(isPicked ? null : t);
+                            setOpponentName(null);
+                          }}
+                          activeOpacity={0.7}
+                        >
+                          <Text
+                            style={[
+                              styles.pillText,
+                              isPicked && styles.pillTextActive,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {t.tournamentName}
+                            {t.subtitle ? ` · ${t.subtitle}` : ''}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </View>
+            ) : null}
+
+            {pick && opponentList.length > 0 ? (
+              <View style={{ marginTop: spacing.md }}>
+                <Text style={styles.fieldHint}>Opposition</Text>
+                <ScrollView style={{ maxHeight: 140 }} nestedScrollEnabled>
+                  {opponentList.map((name) => {
+                    const isPicked = opponentName === name;
+                    return (
+                      <TouchableOpacity
+                        key={name}
+                        style={[
+                          styles.pill,
+                          { marginBottom: spacing.xs },
+                          isPicked && styles.pillActive,
+                        ]}
+                        onPress={() =>
+                          setOpponentName(isPicked ? null : name)
+                        }
+                        activeOpacity={0.7}
+                      >
+                        <Text
+                          style={[
+                            styles.pillText,
+                            isPicked && styles.pillTextActive,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {name}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </View>
+            ) : null}
+
+            <Text style={[styles.fieldHint, { marginTop: spacing.md }]}>
+              Match label
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={matchLabel}
+              onChangeText={setMatchLabel}
+              placeholder={`${homeLabel} vs ${awayLabel}`}
+              placeholderTextColor={colors.textLight}
+            />
+
+            <TouchableOpacity
+              onPress={() => setInclude(!include)}
+              style={[
+                styles.pill,
+                { marginTop: spacing.md, alignSelf: 'flex-start' },
+                include && styles.pillActive,
+              ]}
+              activeOpacity={0.7}
+            >
+              <Text
+                style={[styles.pillText, include && styles.pillTextActive]}
+              >
+                {include ? '✓ ' : ''}Include in season stats
+              </Text>
+            </TouchableOpacity>
+            <Text style={[styles.fieldHint, { marginTop: spacing.xs }]}>
+              Counts toward season totals for per-player roll-ups. Default:
+              on for AES / Timu, off for standalone.
+            </Text>
+          </ScrollView>
+
+          <View style={styles.modalButtonsRow}>
+            <TouchableOpacity
+              onPress={onDontSave}
+              style={[styles.modalBtn, styles.modalBtnCancel]}
+            >
+              <Text style={styles.modalBtnTextCancel}>Don't save</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={commit}
+              style={[styles.modalBtn, styles.modalBtnPrimary]}
+            >
+              <Text style={styles.modalBtnTextPrimary}>Save</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>

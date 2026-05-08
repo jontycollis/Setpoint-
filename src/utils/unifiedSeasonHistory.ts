@@ -19,11 +19,24 @@ import {
   type AesSeasonIndex,
 } from './aesSeasonIndex';
 import { matchesAnyAlias, normalizeName } from './seasonTeamIdentity';
+import { loadNormalisedMatches } from './matchMeta';
+import { deriveMatchState } from './matchEngine';
+import type { Match, Side } from '../types/match';
 
 // ── Unified tournament entry (renderable by SeasonHistoryScreen) ──────────
 
 export interface UnifiedTournamentEntry {
-  source: 'aes' | 'timu';
+  /**
+   * Where this entry came from.
+   *
+   *   • `'aes'`    — indexed AES tournament snapshot
+   *   • `'timu'`   — indexed Timu tournament snapshot
+   *   • `'scored'` — match scored locally via Tier 2 (or imported via
+   *                   the Sideline HD pipeline). Each scored match
+   *                   becomes one entry here, regardless of whether
+   *                   it's linked to an AES / Timu tournament.
+   */
+  source: 'aes' | 'timu' | 'scored';
   /** Stable tournament key — used for routing and dedup. */
   sourceKey: string;
   // AES-specific
@@ -31,6 +44,15 @@ export interface UnifiedTournamentEntry {
   divisionId?: number;
   // Timu-specific
   tid?: number;
+  // Scored-specific
+  /** The local Match.id for `source: 'scored'` entries. */
+  matchId?: string;
+  /** Per-match `includeInStats` flag (only set for scored entries). */
+  includeInStats?: boolean;
+  /** `matchKind` for scored entries — lets analytics readers split by
+   *  AES vs Timu vs Standalone vs Imported even when the match isn't
+   *  linked to a snapshot. */
+  matchKind?: 'aes' | 'timu' | 'standalone' | 'imported';
 
   tournamentName: string;
   /** Division / subtitle — "18U Girls G" (AES) or "Trillium White C" (Timu). */
@@ -89,25 +111,55 @@ export interface UnifiedMatchEntry {
 export interface LoadedIndices {
   timu: TimuSeasonIndex;
   aes: AesSeasonIndex;
+  /**
+   * Locally-scored matches. Pulled from `scored.matches.v1` and
+   * normalised so the new analytics fields (`matchKind`, `source`,
+   * `includeInStats`) are guaranteed to be present.
+   */
+  scored: Match[];
 }
 
-/** Read both indices once. Callers that need fresh data should call this. */
+/** Read all sources once. Callers that need fresh data should call this. */
 export async function loadAllSeasonIndices(): Promise<LoadedIndices> {
-  const [timu, aes] = await Promise.all([
+  const [timu, aes, scored] = await Promise.all([
     loadTimuIndex(),
     loadAesSeasonIndex(),
+    loadNormalisedMatches(),
   ]);
-  return { timu, aes };
+  return { timu, aes, scored };
 }
 
 /**
- * Build a unified history for the user's team across both sources. Matches
- * snapshots whose "my team" identity equals any of the supplied aliases
- * (case + whitespace insensitive, age-group marker tolerant).
+ * Options for shaping the unified history result.
+ */
+export interface BuildHistoryOpts {
+  /**
+   * When `true`, scored matches with `includeInStats === false` are
+   * dropped. Analytics readers (per-player roll-ups, "Season at a
+   * glance") should pass `true`. Default `false` so Career-card-style
+   * readers see every match the user has played.
+   *
+   * Has no effect on AES / Timu indexed entries — those don't carry
+   * an inclusion flag.
+   */
+  respectIncludeInStats?: boolean;
+}
+
+/**
+ * Build a unified history for the user's team across all sources
+ * (AES indexed snapshots, Timu indexed snapshots, locally scored
+ * matches). Matches snapshots whose "my team" identity equals any of
+ * the supplied aliases (case + whitespace insensitive, age-group
+ * marker tolerant).
+ *
+ * Scored matches whose home / away label doesn't match any alias are
+ * dropped. The `respectIncludeInStats` flag (in `opts`) gates whether
+ * `includeInStats === false` scored matches are filtered out.
  */
 export function buildMySeasonHistory(
   indices: LoadedIndices,
-  aliases: string[]
+  aliases: string[],
+  opts: BuildHistoryOpts = {}
 ): UnifiedTournamentEntry[] {
   if (aliases.length === 0) return [];
   const out: UnifiedTournamentEntry[] = [];
@@ -131,6 +183,14 @@ export function buildMySeasonHistory(
     // match filter can fall back to alias matching when results.php has a
     // slightly different spelling than the pool table.
     out.push(timuSnapshotToUnified(snap, myRow.teamName, aliases));
+  }
+
+  // Scored / imported matches — one UnifiedTournamentEntry per match.
+  for (const m of indices.scored) {
+    const entry = scoredMatchToUnified(m, aliases);
+    if (!entry) continue;
+    if (opts.respectIncludeInStats && entry.includeInStats === false) continue;
+    out.push(entry);
   }
 
   // Sort unified list newest → oldest.
@@ -355,6 +415,142 @@ function timuSnapshotToUnified(
     totalMatchesInSnapshot: snap.results.length,
     indexedAt: snap.indexedAt,
   };
+}
+
+/**
+ * Project a locally-scored match onto the unified entry shape. Returns
+ * `null` when the match's home / away label doesn't match any alias
+ * (i.e. this match isn't the user's team). Each scored match becomes
+ * one entry; pool/playoff context is derived from `tournamentContext`
+ * if present, otherwise the match shows up under its own label.
+ */
+function scoredMatchToUnified(
+  match: Match,
+  aliases: string[]
+): UnifiedTournamentEntry | null {
+  const meta = match.meta;
+  const isHome = matchesAnyAlias(meta.home.label, aliases);
+  const isAway = !isHome && matchesAnyAlias(meta.away.label, aliases);
+  if (!isHome && !isAway) return null;
+
+  const state = deriveMatchState(match);
+  const myFromSide: Side = isHome ? 'home' : 'away';
+  const oppFromSide: Side = isHome ? 'away' : 'home';
+  const opponentName = isHome ? meta.away.label : meta.home.label;
+
+  // Per-set scores: read setHistory (if the match is complete) or the
+  // current set's running score (if still in progress — we still want
+  // to surface mid-match data for UI consistency).
+  const myScores: number[] = [];
+  const oppScores: number[] = [];
+  for (const s of state.setHistory) {
+    if (myFromSide === 'home') {
+      myScores.push(s.homeFinal);
+      oppScores.push(s.awayFinal);
+    } else {
+      myScores.push(s.awayFinal);
+      oppScores.push(s.homeFinal);
+    }
+  }
+
+  const mySetsWon =
+    myFromSide === 'home' ? state.setsWon.home : state.setsWon.away;
+  const oppSetsWon =
+    oppFromSide === 'home' ? state.setsWon.home : state.setsWon.away;
+  const decided = mySetsWon !== oppSetsWon;
+  const iWon = mySetsWon > oppSetsWon;
+
+  // Pool/playoff hint from the tournament context, if set.
+  const ctx = meta.tournamentContext;
+  const isPool =
+    ctx?.phase === 'pool' || (ctx?.poolPhase ?? '').toLowerCase().startsWith('pool');
+  const roundLabel =
+    ctx?.poolPhase || (ctx?.phase ? prettyPhase(ctx.phase) : '') || meta.matchLabel;
+
+  // Tournament name preference: linked snapshot name → meta.eventName →
+  // fallback "Match" so the row has *something* visible.
+  const tournamentName =
+    meta.linkedAesEvent?.tournamentName ||
+    meta.linkedTimuTournament?.tournamentName ||
+    meta.eventName ||
+    'Scored match';
+
+  // Stable per-match key.
+  const sourceKey = `scored:${match.id}`;
+
+  const entry: UnifiedTournamentEntry = {
+    source: 'scored',
+    sourceKey,
+    matchId: match.id,
+    includeInStats: meta.includeInStats,
+    matchKind: meta.matchKind,
+    eventKey: meta.linkedAesEvent?.eventId,
+    divisionId: meta.linkedAesEvent?.divisionId
+      ? Number(meta.linkedAesEvent.divisionId) || undefined
+      : undefined,
+    tid: meta.linkedTimuTournament?.tid
+      ? Number(meta.linkedTimuTournament.tid) || undefined
+      : undefined,
+    tournamentName,
+    subtitle: meta.division || ctx?.poolPhase,
+    dateText: undefined,
+    dateMs: meta.dateMs,
+    venueName: meta.venue?.hallName || meta.venue?.city,
+    myTeamAsSeen: isHome ? meta.home.label : meta.away.label,
+    poolId: undefined,
+    poolRank: null,
+    finalRank: null,
+    finalRankLabel: null,
+    matchesFor: decided && iWon ? 1 : 0,
+    matchesAgainst: decided && !iWon ? 1 : 0,
+    setsFor: mySetsWon,
+    setsAgainst: oppSetsWon,
+    totalMatchesInSnapshot: 1,
+    indexedAt: match.updatedAt,
+    matches: [
+      {
+        dateText: '',
+        time: '',
+        court: meta.courtName || '',
+        roundLabel,
+        isPool,
+        opponentName,
+        mySetsWon,
+        oppSetsWon,
+        myScores,
+        oppScores,
+        iWon,
+      },
+    ],
+  };
+  return entry;
+}
+
+function prettyPhase(phase: NonNullable<Match['meta']['tournamentContext']>['phase']): string {
+  switch (phase) {
+    case 'pool':
+      return 'Pool';
+    case 'eliminatory':
+      return 'Eliminatory';
+    case 'qualification':
+      return 'Qualification';
+    case 'play-off':
+      return 'Play-off';
+    case 'seeding':
+      return 'Seeding';
+    case 'final':
+      return 'Final';
+    case 'main-draw':
+      return 'Main Draw';
+    case 'classification':
+      return 'Classification';
+    case 'semi-final':
+      return 'Semi-final';
+    case 'finals':
+      return 'Finals';
+    default:
+      return '';
+  }
 }
 
 function parseRound(label: string): { isPool: boolean; roundLabel: string } {

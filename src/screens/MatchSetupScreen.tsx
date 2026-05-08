@@ -414,6 +414,14 @@ export function MatchSetupScreen({
       },
       officials: {},
       coinToss: { serve: tossServe, side: tossSide },
+      // Default classification — `'standalone'` until the post-match
+      // save sheet asks the user. `source: 'tier2-live'` because this
+      // screen is the live-scoring entry point. `includeInStats`
+      // defaults `false` to match the standalone default; the save
+      // sheet will flip it on if the user picks AES / Timu.
+      matchKind: 'standalone',
+      source: 'tier2-live',
+      includeInStats: false,
     };
     const rosters = { home: toRoster(home), away: toRoster(away) };
     let m = createMatch(meta, rosters);
