@@ -41,6 +41,7 @@ import { TeamNotesScreen } from './src/screens/TeamNotesScreen';
 import { ScoreboardScreen } from './src/screens/ScoreboardScreen';
 import { MatchListScreen } from './src/screens/MatchListScreen';
 import { MatchSetupScreen } from './src/screens/MatchSetupScreen';
+import { TeamRosterScreen } from './src/screens/TeamRosterScreen';
 import { MatchScoringScreen } from './src/screens/MatchScoringScreen';
 import type { Match as ScoredMatch } from './src/types/match';
 import { saveMatch as saveScoredMatch } from './src/utils/scoredMatchStore';
@@ -151,6 +152,7 @@ type Screen =
   | 'MatchList'
   | 'MatchSetup'
   | 'MatchScoring'
+  | 'TeamRoster'
   | 'Stats'
   | 'Tools'
   | 'GlobalSearch';
@@ -205,6 +207,8 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'Scoreboard',
   'MatchSetup',
   'MatchScoring',
+  // Roster editor — the team being edited is in its own header.
+  'TeamRoster',
 ]);
 
 // Screens where the bottom tab bar is hidden (focused full-screen flows).
@@ -298,6 +302,8 @@ export default function App() {
   // Stats screen navigation — carries the team profile ID and name.
   const [statsTeamProfileId, setStatsTeamProfileId] = useState<string>('');
   const [statsTeamName, setStatsTeamName] = useState<string>('');
+  // TeamRoster screen — which TeamProfile.id is being edited.
+  const [rosterEditTeamId, setRosterEditTeamId] = useState<string | null>(null);
   // When a team dashboard's "+ Add a tournament" button routes the user
   // to AddTournamentsScreen, this carries the dashboard's source so the
   // matching paste-card scrolls into view + flashes a highlight on
@@ -585,6 +591,34 @@ export default function App() {
     handleAutoDiscoverTeam(match, { force: true });
   }, [userProfile, currentHistoryAliases, currentHistoryTeamName, handleAutoDiscoverTeam]);
 
+  // Open the per-team roster editor for a given TeamProfile.
+  const handleOpenRosterEditor = useCallback((team: TeamProfile) => {
+    setRosterEditTeamId(team.id);
+    setScreenHistory((prev) => [...prev, screen]);
+    setScreen('TeamRoster');
+  }, [screen]);
+
+  // Persist the next roster on the active TeamProfile.
+  const handleSaveRoster = useCallback(
+    (teamId: string, next: { roster: TeamProfile['roster']; rosterUpdatedAt: number }) => {
+      setUserProfile((prev) => {
+        if (!prev) return prev;
+        const teams = prev.teams.map((t) =>
+          t.id === teamId
+            ? {
+                ...t,
+                roster: next.roster,
+                rosterUpdatedAt: next.rosterUpdatedAt,
+                updatedAt: Date.now(),
+              }
+            : t
+        );
+        return { ...prev, teams, updatedAt: Date.now() };
+      });
+    },
+    []
+  );
+
   // Remove a TeamProfile entirely from MyTeams + watching list, plus any
   // matching FavoriteTeam entries. Confirms via Alert.
   const handleRemoveTeam = useCallback(
@@ -654,6 +688,31 @@ export default function App() {
       );
     },
     []
+  );
+
+  // Long-press on a TeamProfile card → surface an action sheet with the
+  // available per-team actions. Replaces the prior "long-press = remove"
+  // shortcut now that there's more than one thing to do per team.
+  const handleLongPressTeam = useCallback(
+    (team: TeamProfile) => {
+      Alert.alert(
+        team.label,
+        undefined,
+        [
+          {
+            text: 'Manage roster',
+            onPress: () => handleOpenRosterEditor(team),
+          },
+          {
+            text: 'Remove team',
+            style: 'destructive',
+            onPress: () => handleRemoveTeam(team),
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+    },
+    [handleOpenRosterEditor, handleRemoveTeam]
   );
 
   /**
@@ -1665,7 +1724,7 @@ export default function App() {
                 openTeamSeasonHistory({ fallbackName: r.teamLabel });
               }
             }}
-            onRemoveTeam={handleRemoveTeam}
+            onLongPressTeam={handleLongPressTeam}
             onAddTeam={() => {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('AddTeamChooser');
@@ -1982,7 +2041,13 @@ export default function App() {
             }}
           />
         );
-      case 'MatchSetup':
+      case 'MatchSetup': {
+        // Home team pre-fill: the user's currently-active TeamProfile
+        // (if they have one). Roster picker hints + inline "Add players"
+        // link both key off this. Away stays manual entry in v1.
+        const activeTeam = userProfile?.activeTeamId
+          ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
+          : null;
         return (
           <MatchSetupScreen
             onCancel={goBack}
@@ -1994,8 +2059,36 @@ export default function App() {
               setScreenHistory((prev) => [...prev, 'MatchList']);
               setScreen('MatchScoring');
             }}
+            homeTeamProfile={activeTeam}
+            onOpenRosterEditor={handleOpenRosterEditor}
           />
         );
+      }
+      case 'TeamRoster': {
+        const team = rosterEditTeamId
+          ? userProfile?.teams.find((t) => t.id === rosterEditTeamId) ?? null
+          : null;
+        if (!team) {
+          // Defensive: profile may have been reset out from under us.
+          // Bounce back rather than render an empty editor.
+          goBack();
+          return null;
+        }
+        return (
+          <TeamRosterScreen
+            team={team}
+            onCancel={() => {
+              setRosterEditTeamId(null);
+              goBack();
+            }}
+            onSave={(next) => {
+              handleSaveRoster(team.id, next);
+              setRosterEditTeamId(null);
+              goBack();
+            }}
+          />
+        );
+      }
       case 'MatchScoring':
         if (!activeScoredMatch) return null;
         return (
