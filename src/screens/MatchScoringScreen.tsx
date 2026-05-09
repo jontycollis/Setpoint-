@@ -3204,7 +3204,7 @@ function PostMatchSaveSheet({
     >
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCardLg}>
-          <Text style={styles.modalTitle}>Save match to season stats</Text>
+          <Text style={styles.modalTitle}>Save match to analytics</Text>
           <ScrollView style={{ maxHeight: 480 }}>
             <Text style={[styles.fieldHint, { marginTop: spacing.sm }]}>
               Match kind
@@ -3353,7 +3353,7 @@ function PostMatchSaveSheet({
               <Text
                 style={[styles.pillText, include && styles.pillTextActive]}
               >
-                {include ? '✓ ' : ''}Include in season stats
+                {include ? '✓ ' : ''}Include in analytics
               </Text>
             </TouchableOpacity>
             <Text style={[styles.fieldHint, { marginTop: spacing.xs }]}>

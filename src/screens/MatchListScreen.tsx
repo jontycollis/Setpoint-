@@ -23,8 +23,13 @@ import {
 } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import type { Match } from '../types/match';
-import { loadMatches, deleteMatch } from '../utils/scoredMatchStore';
+import { deleteMatch } from '../utils/scoredMatchStore';
 import { deriveMatchState } from '../utils/matchEngine';
+// Use the normalising loader so legacy matches missing the new
+// classification fields (matchKind / includeInStats / source) still
+// render with sensible defaults. The "In analytics" chip relies on
+// `meta.includeInStats` being populated.
+import { loadNormalisedMatches, setMatchInclusion } from '../utils/matchMeta';
 
 interface Props {
   onBack: () => void;
@@ -43,12 +48,35 @@ export function MatchListScreen({ onBack, onNewMatch, onOpenMatch, onOpenStats }
 
   const refresh = useCallback(async () => {
     try {
-      const list = await loadMatches();
+      const list = await loadNormalisedMatches();
       setMatches(list);
     } catch {
       /* ignore */
     }
   }, []);
+
+  // Flip the per-match `includeInStats` flag without leaving the list.
+  // Optimistic local update so the chip animates immediately; the
+  // store write happens in the background and a failure rolls back via
+  // the next refresh.
+  const onToggleInclude = useCallback(
+    async (match: Match) => {
+      const next = !match.meta.includeInStats;
+      setMatches((prev) =>
+        prev.map((m) =>
+          m.id === match.id
+            ? { ...m, meta: { ...m.meta, includeInStats: next } }
+            : m
+        )
+      );
+      try {
+        await setMatchInclusion(match.id, next);
+      } catch {
+        await refresh();
+      }
+    },
+    [refresh]
+  );
 
   useEffect(() => {
     (async () => {
@@ -114,7 +142,7 @@ export function MatchListScreen({ onBack, onNewMatch, onOpenMatch, onOpenStats }
               }}
               activeOpacity={0.7}
             >
-              <Text style={styles.newBtnText}>📊 Team Stats</Text>
+              <Text style={styles.newBtnText}>📊 Team Analytics</Text>
             </TouchableOpacity>
           ) : null}
         </View>
@@ -128,7 +156,17 @@ export function MatchListScreen({ onBack, onNewMatch, onOpenMatch, onOpenStats }
             </Text>
           </View>
         ) : (
-          matches.map((m) => <MatchRow key={m.id} match={m} onOpen={() => onOpenMatch(m)} onLongPress={() => onLongPress(m)} colors={colors} styles={styles} />)
+          matches.map((m) => (
+            <MatchRow
+              key={m.id}
+              match={m}
+              onOpen={() => onOpenMatch(m)}
+              onLongPress={() => onLongPress(m)}
+              onToggleInclude={() => onToggleInclude(m)}
+              colors={colors}
+              styles={styles}
+            />
+          ))
         )}
       </ScrollView>
     </View>
@@ -139,12 +177,14 @@ function MatchRow({
   match,
   onOpen,
   onLongPress,
+  onToggleInclude,
   colors,
   styles,
 }: {
   match: Match;
   onOpen: () => void;
   onLongPress: () => void;
+  onToggleInclude: () => void;
   colors: ThemeColors;
   styles: ReturnType<typeof makeStyles>;
 }) {
@@ -153,6 +193,7 @@ function MatchRow({
   const home = match.meta.home.label || 'Home';
   const away = match.meta.away.label || 'Away';
   const dateLabel = new Date(match.meta.dateMs).toLocaleDateString();
+  const include = !!match.meta.includeInStats;
 
   let scoreLine: string;
   if (state.matchComplete && !state.abandoned) {
@@ -163,31 +204,52 @@ function MatchRow({
     scoreLine = `${home} vs ${away}`;
   }
 
+  // Card is a plain View so the open/long-press touchable and the
+  // include-toggle touchable can sit as siblings without nesting. The
+  // include chip lives bottom-right under the meta line so it never
+  // overlaps the status chip up top.
   return (
-    <TouchableOpacity
-      style={styles.matchCard}
-      onPress={onOpen}
-      onLongPress={onLongPress}
-      delayLongPress={500}
-      activeOpacity={0.7}
-    >
-      <View style={styles.matchCardTop}>
-        <Text style={styles.matchLabel} numberOfLines={1}>
-          {match.meta.matchLabel || match.meta.eventName || 'Match'}
-        </Text>
-        <View style={[styles.statusChip, status === 'in-progress' ? styles.statusInProgress : status === 'complete' ? styles.statusComplete : styles.statusAbandoned]}>
-          <Text style={styles.statusChipText}>{status}</Text>
+    <View style={styles.matchCard}>
+      <TouchableOpacity
+        style={styles.matchCardMain}
+        onPress={onOpen}
+        onLongPress={onLongPress}
+        delayLongPress={500}
+        activeOpacity={0.7}
+      >
+        <View style={styles.matchCardTop}>
+          <Text style={styles.matchLabel} numberOfLines={1}>
+            {match.meta.matchLabel || match.meta.eventName || 'Match'}
+          </Text>
+          <View style={[styles.statusChip, status === 'in-progress' ? styles.statusInProgress : status === 'complete' ? styles.statusComplete : styles.statusAbandoned]}>
+            <Text style={styles.statusChipText}>{status}</Text>
+          </View>
         </View>
+        <Text style={styles.matchScore} numberOfLines={1}>
+          {scoreLine}
+        </Text>
+        <Text style={styles.matchMeta} numberOfLines={1}>
+          {match.meta.eventName ? match.meta.eventName + ' · ' : ''}
+          {match.meta.division ? match.meta.division + ' · ' : ''}
+          {dateLabel}
+        </Text>
+      </TouchableOpacity>
+      <View style={styles.matchCardActions}>
+        <TouchableOpacity
+          style={[styles.includeChip, include && styles.includeChipOn]}
+          onPress={onToggleInclude}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          activeOpacity={0.7}
+          accessibilityRole="switch"
+          accessibilityLabel={include ? 'Included in analytics' : 'Excluded from analytics'}
+          accessibilityState={{ checked: include }}
+        >
+          <Text style={[styles.includeChipText, include && styles.includeChipTextOn]}>
+            {include ? '✓ In analytics' : 'Excluded'}
+          </Text>
+        </TouchableOpacity>
       </View>
-      <Text style={styles.matchScore} numberOfLines={1}>
-        {scoreLine}
-      </Text>
-      <Text style={styles.matchMeta} numberOfLines={1}>
-        {match.meta.eventName ? match.meta.eventName + ' · ' : ''}
-        {match.meta.division ? match.meta.division + ' · ' : ''}
-        {dateLabel}
-      </Text>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -234,6 +296,9 @@ function makeStyles(colors: ThemeColors) {
       borderLeftWidth: 3,
       borderLeftColor: colors.primary,
     },
+    // Wraps the open/long-press touchable inside the card so the
+    // include-toggle chip can be a sibling without nesting touchables.
+    matchCardMain: {},
     matchCardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
     matchLabel: { color: colors.text, fontSize: fontSize.md, fontWeight: '700', flex: 1 },
     matchScore: { color: colors.text, fontSize: fontSize.sm, marginTop: 4, fontWeight: '600' },
@@ -249,5 +314,32 @@ function makeStyles(colors: ThemeColors) {
     statusInProgress: { backgroundColor: colors.primary },
     statusComplete: { backgroundColor: colors.success },
     statusAbandoned: { backgroundColor: colors.error },
+
+    // Bottom row inside each card. Right-aligns the include chip
+    // beneath the meta line so it never sits next to the status chip.
+    matchCardActions: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      marginTop: spacing.sm,
+    },
+    includeChip: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.background,
+    },
+    includeChipOn: {
+      backgroundColor: colors.success,
+      borderColor: colors.success,
+    },
+    includeChipText: {
+      fontSize: fontSize.xs,
+      fontWeight: '700',
+      color: colors.textSecondary,
+      letterSpacing: 0.3,
+    },
+    includeChipTextOn: { color: '#ffffff' },
   });
 }
