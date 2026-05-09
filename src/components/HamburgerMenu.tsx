@@ -416,23 +416,28 @@ export function HamburgerMenu({
 
               {/* ── TOOLS — visible from every screen, every context.
                   Generic utilities + portal links the user might want
-                  no matter where they currently are. */}
+                  no matter where they currently are. The Tools bottom
+                  tab was removed; these rows are how a user reaches
+                  Scoreboard / Score a Match / OVA Rankings / Browse
+                  from anywhere. */}
               <View style={styles.section}>
                 <Text style={styles.sectionLabel}>TOOLS</Text>
                 <MenuRow
                   icon={'\u{1F4CA}'}
-                  label="Simple Scoreboard"
+                  label="Scoreboard"
                   subtitle="Hold-up flipboard — tap to score"
                   available={true}
                   isCurrent={isCurrentScreen('Scoreboard')}
                   onPress={() => handleSelect('Scoreboard')}
                 />
-                {/* Advanced scoring (full scoresheet engine) — gated by
-                    the toggle in SETTINGS below. Hidden until enabled. */}
+                {/* Score a match — full scoresheet engine. Top-level so
+                    scorers can reach it from anywhere; gated on the
+                    Advanced Scoring toggle below so it stays invisible
+                    for non-scorer users by default. */}
                 {userProfile?.scorerMode ? (
                   <MenuRow
                     icon={'\u{1F4DD}'}
-                    label="Advanced Scoring"
+                    label="Score a match"
                     subtitle="Full scoresheet — rotations, subs, sanctions"
                     available={true}
                     isCurrent={isCurrentScreen('MatchList')}
@@ -455,6 +460,15 @@ export function HamburgerMenu({
                   isCurrent={isCurrentScreen('Home')}
                   onPress={() => handleSelect('Home')}
                 />
+              </View>
+
+              {/* ── CONNECTIONS & SETTINGS — quiet utility group near the
+                  bottom of the menu. MRS + CAC moved off MyHome (they
+                  were being promoted as a third major section there
+                  despite being a tiny audience slice); they live here
+                  alongside the theme + scorer-mode toggles. */}
+              <View style={styles.section}>
+                <Text style={styles.sectionLabel}>CONNECTIONS & SETTINGS</Text>
                 <MenuRow
                   icon={'\u{1F517}'}
                   label="OVA MRS"
@@ -479,11 +493,6 @@ export function HamburgerMenu({
                   isCurrent={isCurrentScreen('CacConnection')}
                   onPress={() => handleSelect('CacConnection')}
                 />
-              </View>
-
-              {/* Settings */}
-              <View style={styles.section}>
-                <Text style={styles.sectionLabel}>SETTINGS</Text>
                 <TouchableOpacity
                   style={styles.menuItem}
                   onPress={() => theme.toggle()}
@@ -498,7 +507,7 @@ export function HamburgerMenu({
                     </Text>
                   </View>
                 </TouchableOpacity>
-                {/* Tier 2 scorer-mode toggle — gates the "Score a Match"
+                {/* Tier 2 scorer-mode toggle — gates the "Score a match"
                     Tools entry above. When off (default), Tier 2 is
                     invisible. When on, the entry appears immediately
                     on next render. */}
@@ -524,8 +533,8 @@ export function HamburgerMenu({
                         }}
                       >
                         {userProfile?.scorerMode
-                          ? 'ON · Full scoresheet enabled'
-                          : 'OFF · Tap to enable in Tools'}
+                          ? 'ON · Score a match enabled'
+                          : 'OFF · Tap to enable scorer mode'}
                       </Text>
                     </View>
                   </TouchableOpacity>

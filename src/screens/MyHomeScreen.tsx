@@ -4,21 +4,18 @@
 // button comes back here.
 //
 // Layout, top-to-bottom:
-//   - Hero (optional display name + role kicker, generic fallback)
-//   - "Recently viewed" horizontal strip (skipped when empty)
-//   - "My Teams" section (TeamProfiles with kind === 'me')
-//       Each team is a tappable card → enters that team's context.
-//       Card carries a forward-looking "next tournament" line beneath the
-//       meta — "No upcoming tournaments" placeholder when empty.
-//       "+ Add team" CTA after the last me-team card.
-//   - "Watching" section (kind === 'watching') — skipped if empty. Same
-//     per-team "next tournament" treatment as My Teams.
-//   - Connections section (OVA MRS + CAC Locker tiles).
-//   - Career totals card (only when at least one me-team has indexed
-//     tournaments matching its aliases).
+//   - Slim status / sync row (sync banner / discovery banners only when
+//     active — no tall blue hero anymore; the lead card carries the
+//     orientation job)
+//   - "Right Now" lead card (single primary card that infers the user's
+//     current focus from data — see RightNowCard for the priority order)
+//   - Quieter supporting cast: Recently-viewed strip → MY TEAMS list →
+//     WATCHING list → Career totals card
 //
-// Note: the prior "Browse tournaments →" link was removed because Browse
-// is now a bottom tab — the link became redundant.
+// Connections (OVA MRS / CAC Locker) are no longer rendered here —
+// reachable from the hamburger's Connections & settings group. They were
+// promoted as a third large section before; for the role-agnostic Home
+// they're a quiet utility, not the headline.
 // ────────────────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -53,6 +50,37 @@ import {
   useRecentlyViewed,
   type RecentItem,
 } from '../utils/recentlyViewed';
+import { loadMatches } from '../utils/scoredMatchStore';
+import type { Match } from '../types/match';
+
+// ── Right Now state model ─────────────────────────────────────────────────
+//
+// First-match-wins priority order. Each branch returns the data needed by
+// the lead card; the renderer just picks layout based on `kind`.
+type RightNowState =
+  | {
+      kind: 'live-match';
+      match: Match;
+      /** "Court 5 · Set 2 · 18-15" derived from match state. */
+      headline: string;
+      subhead: string;
+    }
+  | {
+      kind: 'today';
+      tournament: UnifiedTournamentEntry;
+      todaysMatchCount: number;
+    }
+  | {
+      kind: 'this-week';
+      tournament: UnifiedTournamentEntry;
+      daysUntil: number;
+    }
+  | {
+      kind: 'has-teams-no-events';
+    }
+  | {
+      kind: 'no-teams';
+    };
 
 interface Props {
   profile: UserProfile;
@@ -60,14 +88,14 @@ interface Props {
   onOpenTeam: (team: TeamProfile) => void;
   /** Tap "+ Add team" CTA. */
   onAddTeam: () => void;
-  /** Tap the OVA MRS connection tile. */
-  onOpenMrsConnection: () => void;
-  /** Tap the CAC Locker connection tile. */
-  onOpenCacConnection: () => void;
-  /** Low-emphasis "Browse tournaments" entry. Optional now that Browse is
-   *  a bottom tab — kept on the prop list for backwards compat with
-   *  callers that still pass it. */
+  /** Browse tournaments — used by lead-card secondary CTA and as a
+   *  fallback when no team has any upcoming event. */
   onBrowseTournaments?: () => void;
+  /** Open the Tier 2 / Score-a-match flow (gated on scorerMode at the
+   *  caller). When undefined the secondary CTA hides. */
+  onScoreAMatch?: () => void;
+  /** Resume a live in-progress scored match. Caller routes to MatchScoring. */
+  onResumeMatch?: (match: Match) => void;
   /** True while the boot refresh or a manual sync is running. */
   syncing?: boolean;
   /** {done, total} counts for the in-flight sync, or null when idle. */
@@ -97,9 +125,9 @@ export function MyHomeScreen({
   profile,
   onOpenTeam,
   onAddTeam,
-  onOpenMrsConnection,
-  onOpenCacConnection,
   onBrowseTournaments,
+  onScoreAMatch,
+  onResumeMatch,
   syncing = false,
   syncProgress = null,
   onSyncSeason,
@@ -115,22 +143,16 @@ export function MyHomeScreen({
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const meTeams = profile.teams.filter((t) => t.kind === 'me');
   const watchingTeams = profile.teams.filter((t) => t.kind === 'watching');
-  const heroLabel = profile.displayName
-    ? `${profile.displayName}'s home`
-    : 'My home';
-  const heroKicker =
-    profile.role === 'parent'
-      ? 'PARENT'
-      : profile.role === 'coach'
-      ? 'COACH'
-      : profile.role === 'athlete'
-      ? 'ATHLETE'
-      : '';
 
-  // ── Upcoming-tournament map ────────────────────────────────────────────
-  // Read both indices once and compute the earliest future entry per team.
-  // Reuses the existing `buildMySeasonHistory` adapter — no new fetchers.
+  // ── Indices + scored matches ───────────────────────────────────────────
+  // Both feed the Right Now inference. We re-load scored matches on a
+  // 30s tick so an in-progress match that just ticked over the freshness
+  // window flips off (or a freshly-started one flips on) without the
+  // user pulling-to-refresh.
   const [indices, setIndices] = useState<LoadedIndices | null>(null);
+  const [scoredMatches, setScoredMatches] = useState<Match[] | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -146,15 +168,32 @@ export function MyHomeScreen({
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const ms = await loadMatches();
+        if (!cancelled) setScoredMatches(ms);
+      } catch {
+        if (!cancelled) setScoredMatches([]);
+      }
+    };
+    refresh();
+    const tick = setInterval(() => {
+      setNow(Date.now());
+      refresh();
+    }, 30_000);
+    return () => {
+      cancelled = true;
+      clearInterval(tick);
+    };
+  }, []);
+
+  // ── Per-team upcoming tournament map (used by team cards' next-line) ──
   const upcomingByTeamId = useMemo(() => {
     const out = new Map<string, UnifiedTournamentEntry | null>();
     if (!indices) return out;
     for (const team of profile.teams) {
-      // Fall back to [team.label] when no aliases exist — same behaviour
-      // as before. Strict matcher means even a slight spelling drift
-      // between the alias and the indexed team-name will produce zero
-      // matches; the DEV diagnostic in `getNextUpcomingTournament`
-      // logs the gap so we can spot it without a debugger.
       const aliases = team.aliases.length ? team.aliases : [team.label];
       out.set(
         team.id,
@@ -166,18 +205,16 @@ export function MyHomeScreen({
     return out;
   }, [indices, profile.teams]);
 
+  // ── Right Now state inference ─────────────────────────────────────────
+  const rightNow = useMemo<RightNowState>(
+    () => inferRightNow(profile, indices, scoredMatches, now),
+    [profile, indices, scoredMatches, now]
+  );
+
   const recents = useRecentlyViewed(5);
 
   return (
     <View style={styles.container}>
-      <View style={styles.hero}>
-        {heroKicker ? (
-          <Text style={styles.heroKicker}>{heroKicker}</Text>
-        ) : null}
-        <Text style={styles.heroTitle} numberOfLines={2}>
-          {heroLabel}
-        </Text>
-      </View>
       <ScrollView contentContainerStyle={styles.body}>
         {discoveringTeamLabel ? (
           <DiscoveryProgressBanner
@@ -197,18 +234,37 @@ export function MyHomeScreen({
             onSync={onSyncSeason}
           />
         )}
+
+        <RightNowCard
+          state={rightNow}
+          displayName={profile.displayName}
+          onOpenTeam={onOpenTeam}
+          onResumeMatch={onResumeMatch}
+          onAddTeam={onAddTeam}
+          onBrowseTournaments={onBrowseTournaments}
+          onScoreAMatch={onScoreAMatch}
+          scorerMode={profile.scorerMode === true}
+          profile={profile}
+        />
+
         {recents.length > 0 && onOpenRecent ? (
           <RecentlyViewedStrip recents={recents} onOpen={onOpenRecent} />
         ) : null}
 
-        <MyTeamsSection
-          teams={meTeams}
-          upcomingByTeamId={upcomingByTeamId}
-          indicesLoaded={indices != null}
-          onOpenTeam={onOpenTeam}
-          onAddTeam={onAddTeam}
-          onLongPressTeam={onLongPressTeam}
-        />
+        {meTeams.length > 0 ? (
+          <MyTeamsSection
+            teams={meTeams}
+            upcomingByTeamId={upcomingByTeamId}
+            indicesLoaded={indices != null}
+            onOpenTeam={onOpenTeam}
+            onAddTeam={onAddTeam}
+            onLongPressTeam={onLongPressTeam}
+          />
+        ) : (
+          // No me-teams yet — still surface the "+ Add team" affordance
+          // here as a quiet secondary so the lead card stays the headline.
+          <AddTeamRow onAddTeam={onAddTeam} />
+        )}
 
         {watchingTeams.length > 0 ? (
           <WatchingSection
@@ -220,17 +276,414 @@ export function MyHomeScreen({
           />
         ) : null}
 
-        <ConnectionsSection
-          mrsLinked={profile.mrsLinked}
-          cacLinked={profile.cacLinked}
-          onOpenMrsConnection={onOpenMrsConnection}
-          onOpenCacConnection={onOpenCacConnection}
-        />
-
         {meTeams.length > 0 ? <CareerCard profile={profile} /> : null}
       </ScrollView>
     </View>
   );
+}
+
+// ── Right Now inference ───────────────────────────────────────────────────
+
+const LIVE_MATCH_FRESHNESS_MS = 30 * 60 * 1000; // 30 min
+
+function inferRightNow(
+  profile: UserProfile,
+  indices: LoadedIndices | null,
+  scoredMatches: Match[] | null,
+  now: number
+): RightNowState {
+  // 1) Live match in progress — any in-progress scored match whose last
+  //    event timestamp is within the freshness window. If multiple, pick
+  //    the most recently-active one (tightest "really happening now" signal).
+  if (scoredMatches && scoredMatches.length > 0) {
+    const live = scoredMatches
+      .filter((m) => m.status === 'in-progress')
+      .map((m) => {
+        const lastEventTs =
+          m.events.length > 0
+            ? m.events[m.events.length - 1].ts
+            : m.updatedAt;
+        return { match: m, lastEventTs };
+      })
+      .filter((x) => now - x.lastEventTs < LIVE_MATCH_FRESHNESS_MS)
+      .sort((a, b) => b.lastEventTs - a.lastEventTs);
+    if (live.length > 0) {
+      const m = live[0].match;
+      const headline = liveMatchHeadline(m);
+      const subhead = liveMatchSubhead(m);
+      return { kind: 'live-match', match: m, headline, subhead };
+    }
+  }
+
+  // Build a per-team aliased list for upcoming/active lookups.
+  const followedTeams = profile.teams.filter((t) => t.kind === 'me' || t.kind === 'watching');
+  if (followedTeams.length === 0) return { kind: 'no-teams' };
+
+  // Without indices we can't tell what's active or upcoming — fall back
+  // to the "has teams" copy until indices land.
+  if (!indices) return { kind: 'has-teams-no-events' };
+
+  // 2) Active tournament happening today — any followed team's tournament
+  //    where today is within [start, end]. We approximate by treating each
+  //    indexed entry with `dateMs` as a single-day event unless its name /
+  //    snapshot includes multi-day metadata. Most tournaments span a
+  //    weekend; we extend the active window to ±2 days around dateMs to
+  //    cover the typical Sat-Sun shape without needing a full end-date.
+  //    Multiple candidates → pick the one with the most matches today,
+  //    breaking ties by earliest dateMs.
+  const todayStart = startOfDay(now);
+  const todayEnd = todayStart + 24 * 60 * 60 * 1000;
+  type Candidate = {
+    tournament: UnifiedTournamentEntry;
+    matchesToday: number;
+  };
+  const todayCandidates: Candidate[] = [];
+  const upcomingCandidates: { tournament: UnifiedTournamentEntry; daysUntil: number }[] = [];
+
+  // Mon-Sun bracket of today (week ends Sunday inclusive).
+  const weekEnd = startOfWeekEnd(now);
+
+  for (const team of followedTeams) {
+    const aliases = team.aliases.length ? team.aliases : [team.label];
+    // One history pass per team — derive both "today" and "this week"
+    // candidates from the same list so we don't pay the matcher cost
+    // twice. (The earlier draft also called getUpcomingTournaments,
+    // which itself calls buildMySeasonHistory — double work for the
+    // same answer.)
+    const history = buildMySeasonHistory(indices, aliases);
+    for (const entry of history) {
+      if (entry.dateMs == null) continue;
+      const start = startOfDay(entry.dateMs);
+      // Treat each indexed entry as covering its nominal date plus the
+      // two days that follow — most tournaments span Sat-Sun-(Mon),
+      // and the snapshot's `dateMs` is typically the first day. This
+      // means a Saturday tournament is still "TODAY" on Sunday and
+      // Monday morning without us needing an explicit endDate field.
+      const end = start + 3 * 24 * 60 * 60 * 1000;
+      if (todayStart < end && todayEnd > start) {
+        // Active today. We don't have per-match scheduled dates that
+        // are reliably stamped, so the count below is an approximation
+        // of "matches the user might watch today" rather than a
+        // calendar filter.
+        const matchesToday = entry.matches.length;
+        todayCandidates.push({ tournament: entry, matchesToday });
+      } else if (entry.dateMs > now && entry.dateMs <= weekEnd) {
+        const days = Math.max(0, Math.ceil((entry.dateMs - now) / 86_400_000));
+        upcomingCandidates.push({ tournament: entry, daysUntil: days });
+      }
+    }
+  }
+
+  if (todayCandidates.length > 0) {
+    todayCandidates.sort((a, b) => {
+      if (b.matchesToday !== a.matchesToday) return b.matchesToday - a.matchesToday;
+      return (a.tournament.dateMs ?? 0) - (b.tournament.dateMs ?? 0);
+    });
+    const top = todayCandidates[0];
+    return {
+      kind: 'today',
+      tournament: top.tournament,
+      todaysMatchCount: top.matchesToday,
+    };
+  }
+
+  if (upcomingCandidates.length > 0) {
+    upcomingCandidates.sort((a, b) => a.daysUntil - b.daysUntil);
+    const top = upcomingCandidates[0];
+    return {
+      kind: 'this-week',
+      tournament: top.tournament,
+      daysUntil: top.daysUntil,
+    };
+  }
+
+  return { kind: 'has-teams-no-events' };
+}
+
+function liveMatchHeadline(m: Match): string {
+  const court = m.meta.courtName ? `${m.meta.courtName}` : 'Live match';
+  // Compute the current set + score from setHistory + final scores would
+  // require deriveMatchState. Cheaper proxy: look at point events for
+  // the current set. The exact score isn't critical — the call to action
+  // is "open the scoring console", not "decide based on the score".
+  const points = m.events.filter(
+    (e): e is Extract<typeof e, { type: 'point' }> => e.type === 'point'
+  );
+  if (points.length === 0) return `${court} · Live`;
+  // Last point's setIndex tells us which set we're in.
+  const lastSet = points[points.length - 1].setIndex;
+  const setLabel = `Set ${lastSet + 1}`;
+  let home = 0;
+  let away = 0;
+  for (const p of points) {
+    if (p.setIndex !== lastSet) continue;
+    if (p.scoringTeam === 'home') home++;
+    else away++;
+  }
+  return `${court} · ${setLabel} · ${home}-${away}`;
+}
+
+function liveMatchSubhead(m: Match): string {
+  const home = m.meta.home.label;
+  const away = m.meta.away.label;
+  if (home && away) return `${home} vs ${away}`;
+  return m.meta.matchLabel || 'Match in progress';
+}
+
+function startOfDay(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** End of the current week (Sunday 23:59:59.999 ms). Mon-Sun bracket. */
+function startOfWeekEnd(ms: number): number {
+  const d = new Date(ms);
+  d.setHours(23, 59, 59, 999);
+  // JS day-of-week: 0=Sun, 1=Mon, ..., 6=Sat. We want to land on this
+  // week's Sunday; if today IS Sunday, that's today.
+  const dayOfWeek = d.getDay();
+  const daysToSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
+  d.setDate(d.getDate() + daysToSunday);
+  return d.getTime();
+}
+
+// ── Right Now lead card ──────────────────────────────────────────────────
+
+function RightNowCard({
+  state,
+  displayName,
+  onOpenTeam,
+  onResumeMatch,
+  onAddTeam,
+  onBrowseTournaments,
+  onScoreAMatch,
+  scorerMode,
+  profile,
+}: {
+  state: RightNowState;
+  displayName?: string;
+  onOpenTeam: (team: TeamProfile) => void;
+  onResumeMatch?: (match: Match) => void;
+  onAddTeam: () => void;
+  onBrowseTournaments?: () => void;
+  onScoreAMatch?: () => void;
+  scorerMode: boolean;
+  profile: UserProfile;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
+  const kicker = kickerFor(state);
+  const kickerColor = kickerColorFor(state);
+  const { headline, subhead, primary, secondary } = renderableFor(state, {
+    displayName,
+    onOpenTeam,
+    onResumeMatch,
+    onAddTeam,
+    onBrowseTournaments,
+    onScoreAMatch,
+    scorerMode,
+    profile,
+  });
+
+  return (
+    <View
+      style={[
+        styles.leadCard,
+        {
+          backgroundColor: colors.primary,
+        },
+      ]}
+    >
+      <Text style={[styles.leadKicker, { color: kickerColor }]}>{kicker}</Text>
+      <Text style={styles.leadHeadline} numberOfLines={2}>
+        {headline}
+      </Text>
+      {subhead ? (
+        <Text style={styles.leadSubhead} numberOfLines={2}>
+          {subhead}
+        </Text>
+      ) : null}
+      <View style={styles.leadCtaRow}>
+        {secondary ? (
+          <TouchableOpacity
+            style={styles.leadCtaSecondary}
+            onPress={secondary.onPress}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.leadCtaSecondaryText}>{secondary.label}</Text>
+          </TouchableOpacity>
+        ) : (
+          <View />
+        )}
+        {primary ? (
+          <TouchableOpacity
+            style={[styles.leadCtaPrimary, { backgroundColor: '#fff' }]}
+            onPress={primary.onPress}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.leadCtaPrimaryText, { color: colors.primary }]}>
+              {primary.label}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function kickerFor(state: RightNowState): string {
+  switch (state.kind) {
+    case 'live-match':
+      return 'LIVE NOW';
+    case 'today':
+      return 'TODAY';
+    case 'this-week':
+      return 'THIS WEEK';
+    case 'has-teams-no-events':
+      return 'WELCOME BACK';
+    case 'no-teams':
+      return 'GET STARTED';
+  }
+}
+
+function kickerColorFor(state: RightNowState): string {
+  if (state.kind === 'live-match') return '#ffd54f';
+  return 'rgba(255,255,255,0.85)';
+}
+
+interface RenderableArgs {
+  displayName?: string;
+  onOpenTeam: (team: TeamProfile) => void;
+  onResumeMatch?: (match: Match) => void;
+  onAddTeam: () => void;
+  onBrowseTournaments?: () => void;
+  onScoreAMatch?: () => void;
+  scorerMode: boolean;
+  profile: UserProfile;
+}
+
+interface Renderable {
+  headline: string;
+  subhead: string | null;
+  primary: { label: string; onPress: () => void } | null;
+  secondary: { label: string; onPress: () => void } | null;
+}
+
+function renderableFor(state: RightNowState, args: RenderableArgs): Renderable {
+  switch (state.kind) {
+    case 'live-match': {
+      return {
+        headline: state.headline,
+        subhead: state.subhead,
+        primary: args.onResumeMatch
+          ? { label: 'Open scoring', onPress: () => args.onResumeMatch!(state.match) }
+          : null,
+        secondary: null,
+      };
+    }
+    case 'today': {
+      const t = state.tournament;
+      const headline = t.tournamentName;
+      const todayStr = formatDayLabel(Date.now());
+      const subParts = [todayStr];
+      if (state.todaysMatchCount > 0) {
+        subParts.push(
+          `${state.todaysMatchCount} match${state.todaysMatchCount === 1 ? '' : 'es'}`
+        );
+      }
+      if (t.venueName) subParts.push(t.venueName);
+      return {
+        headline,
+        subhead: subParts.join(' · '),
+        primary: {
+          label: 'Open tournament',
+          onPress: () => openTournamentEntry(t, args),
+        },
+        secondary: null,
+      };
+    }
+    case 'this-week': {
+      const t = state.tournament;
+      const startsIn =
+        state.daysUntil <= 0
+          ? 'Starting soon'
+          : state.daysUntil === 1
+          ? 'Starts tomorrow'
+          : `Starts in ${state.daysUntil} days`;
+      const subParts = [startsIn];
+      if (t.venueName) subParts.push(t.venueName);
+      return {
+        headline: t.tournamentName,
+        subhead: subParts.join(' · '),
+        primary: {
+          label: 'Open tournament',
+          onPress: () => openTournamentEntry(t, args),
+        },
+        secondary: null,
+      };
+    }
+    case 'has-teams-no-events': {
+      const greet = args.displayName
+        ? `Welcome back, ${args.displayName}`
+        : 'Welcome back';
+      return {
+        headline: greet,
+        subhead: 'No tournaments scheduled this week.',
+        primary: args.onBrowseTournaments
+          ? { label: 'Browse tournaments', onPress: args.onBrowseTournaments }
+          : null,
+        secondary:
+          args.scorerMode && args.onScoreAMatch
+            ? { label: 'Score a match', onPress: args.onScoreAMatch }
+            : null,
+      };
+    }
+    case 'no-teams': {
+      return {
+        headline: 'Welcome to Setpoint',
+        subhead: 'Add a team to follow tournaments, score matches, and track stats.',
+        primary: { label: 'Add a team', onPress: args.onAddTeam },
+        secondary: args.onBrowseTournaments
+          ? { label: 'Browse tournaments', onPress: args.onBrowseTournaments }
+          : null,
+      };
+    }
+  }
+}
+
+/**
+ * Route a Right Now tournament entry back to the right place. We try to
+ * match the entry's source/key against the user's TeamProfile list so we
+ * land on the team's dashboard for that tournament. If no profile matches
+ * (rare — Right Now only surfaces entries that came from a followed
+ * team), fall back to opening the user's first me-team.
+ */
+function openTournamentEntry(
+  entry: UnifiedTournamentEntry,
+  args: RenderableArgs
+) {
+  const teams = args.profile.teams;
+  // Find the team profile this entry belongs to via alias overlap.
+  const myTeamAsSeen = (entry.myTeamAsSeen || '').toLowerCase().trim();
+  let team =
+    teams.find((t) =>
+      t.aliases.some((a) => a.toLowerCase().trim() === myTeamAsSeen)
+    ) ?? null;
+  if (!team) {
+    team = teams.find((t) => t.kind === 'me') ?? teams[0] ?? null;
+  }
+  if (team) args.onOpenTeam(team);
+}
+
+function formatDayLabel(ms: number): string {
+  const d = new Date(ms);
+  return d.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
 }
 
 // ── Recently viewed ───────────────────────────────────────────────────────
@@ -247,7 +700,7 @@ function RecentlyViewedStrip({
   return (
     <View style={styles.section}>
       <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
-        RECENTLY VIEWED
+        Recently viewed
       </Text>
       <FlatList
         horizontal
@@ -346,38 +799,46 @@ function MyTeamsSection({
   return (
     <View style={styles.section}>
       <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
-        MY TEAMS
+        My teams
       </Text>
-      {teams.length === 0 ? (
-        <Card variant="outlined" style={styles.emptyCard}>
-          <Text style={[styles.emptyTitle, { color: colors.text }]}>
-            No teams yet
-          </Text>
-          <Text
-            style={[styles.emptyBody, { color: colors.textSecondary }]}
-          >
-            Find a tournament you're playing in and add the team you (or
-            your child) play for. Past tournaments build career history.
-          </Text>
-        </Card>
-      ) : (
-        teams.map((team) => (
-          <TeamCard
-            key={team.id}
-            team={team}
-            upcoming={upcomingByTeamId.get(team.id) ?? null}
-            indicesLoaded={indicesLoaded}
-            onOpen={() => onOpenTeam(team)}
-            onLongPress={onLongPressTeam ? () => onLongPressTeam(team) : undefined}
-          />
-        ))
-      )}
+      {teams.map((team) => (
+        <TeamCard
+          key={team.id}
+          team={team}
+          upcoming={upcomingByTeamId.get(team.id) ?? null}
+          indicesLoaded={indicesLoaded}
+          onOpen={() => onOpenTeam(team)}
+          onLongPress={onLongPressTeam ? () => onLongPressTeam(team) : undefined}
+          compact
+        />
+      ))}
       <TouchableOpacity
-        style={[styles.addTeamBtn, { backgroundColor: colors.primary }]}
+        style={[styles.addTeamLink]}
         onPress={onAddTeam}
-        activeOpacity={0.7}
+        activeOpacity={0.6}
       >
-        <Text style={[styles.addTeamBtnText, { color: colors.textOnPrimary }]}>
+        <Text style={[styles.addTeamLinkText, { color: colors.primary }]}>
+          + Add team
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function AddTeamRow({ onAddTeam }: { onAddTeam: () => void }) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.section}>
+      <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
+        My teams
+      </Text>
+      <TouchableOpacity
+        style={[styles.addTeamLink]}
+        onPress={onAddTeam}
+        activeOpacity={0.6}
+      >
+        <Text style={[styles.addTeamLinkText, { color: colors.primary }]}>
           + Add team
         </Text>
       </TouchableOpacity>
@@ -405,11 +866,7 @@ function WatchingSection({
   return (
     <View style={styles.section}>
       <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
-        WATCHING
-      </Text>
-      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Teams you're tracking inside a tournament. Doesn't count toward
-        your Career rollup.
+        Watching
       </Text>
       {teams.map((team) => (
         <TeamCard
@@ -438,7 +895,6 @@ function TeamCard({
 }: {
   team: TeamProfile;
   upcoming: UnifiedTournamentEntry | null;
-  /** Have we attempted to read indices yet? Guards the empty placeholder. */
   indicesLoaded: boolean;
   onOpen: () => void;
   onLongPress?: () => void;
@@ -559,118 +1015,6 @@ function daysUntil(dateMs?: number): number | null {
   return Math.ceil(ms / 86_400_000);
 }
 
-// ── Connections ───────────────────────────────────────────────────────────
-
-function ConnectionsSection({
-  mrsLinked,
-  cacLinked,
-  onOpenMrsConnection,
-  onOpenCacConnection,
-}: {
-  mrsLinked: boolean;
-  cacLinked: boolean;
-  onOpenMrsConnection: () => void;
-  onOpenCacConnection: () => void;
-}) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
-  return (
-    <View style={styles.section}>
-      <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
-        CONNECTIONS
-      </Text>
-      <Text style={[styles.sectionHint, { color: colors.textSecondary }]}>
-        Sign in to OVA and CAC inside Setpoint to view your data without
-        switching apps.
-      </Text>
-      <ConnectionRow
-        title="OVA MRS"
-        subtitle={
-          mrsLinked
-            ? 'Connected — view your account'
-            : 'Connect to view team affiliations'
-        }
-        connected={mrsLinked}
-        onPress={onOpenMrsConnection}
-        icon={'\u{1F517}'}
-      />
-      <ConnectionRow
-        title="CAC Locker"
-        subtitle={
-          cacLinked
-            ? 'Connected — view your transcript'
-            : 'Connect to view NCCP certifications'
-        }
-        connected={cacLinked}
-        onPress={onOpenCacConnection}
-        icon={'\u{1F3CB}'}
-      />
-    </View>
-  );
-}
-
-function ConnectionRow({
-  title,
-  subtitle,
-  connected,
-  onPress,
-  icon,
-}: {
-  title: string;
-  subtitle: string;
-  connected: boolean;
-  onPress: () => void;
-  icon: string;
-}) {
-  const { colors } = useTheme();
-  const styles = useMemo(() => makeStyles(colors), [colors]);
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.7}
-      style={[
-        styles.connectionRow,
-        {
-          backgroundColor: colors.surface,
-          borderColor: colors.divider,
-        },
-      ]}
-    >
-      <Text style={styles.connectionIcon}>{icon}</Text>
-      <View style={{ flex: 1 }}>
-        <Text style={[styles.connectionTitle, { color: colors.text }]} numberOfLines={1}>
-          {title}
-        </Text>
-        <Text
-          style={[styles.connectionSubtitle, { color: colors.textSecondary }]}
-          numberOfLines={1}
-        >
-          {subtitle}
-        </Text>
-      </View>
-      <View
-        style={[
-          styles.connectionStatus,
-          connected
-            ? { backgroundColor: colors.primaryLight }
-            : { backgroundColor: colors.primary },
-        ]}
-      >
-        <Text
-          style={[
-            styles.connectionStatusText,
-            connected
-              ? { color: colors.primary }
-              : { color: '#fff' },
-          ]}
-        >
-          {connected ? 'Connected' : 'Connect'}
-        </Text>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 // ── Career card ───────────────────────────────────────────────────────────
 
 function CareerCard({ profile }: { profile: UserProfile }) {
@@ -716,7 +1060,7 @@ function CareerCard({ profile }: { profile: UserProfile }) {
   return (
     <Card style={styles.careerCard}>
       <Text style={[styles.careerKicker, { color: colors.textLight }]}>
-        {meCount > 1 ? 'CAREER TOTALS' : 'SEASON TOTALS'}
+        {meCount > 1 ? 'Career totals' : 'Season totals'}
       </Text>
       {loading ? (
         <Text style={[styles.careerLoading, { color: colors.textSecondary }]}>
@@ -838,22 +1182,54 @@ function SyncStatusRow({
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  hero: {
-    padding: spacing.xxl,
-    paddingBottom: spacing.lg,
+  body: { padding: spacing.lg, paddingTop: spacing.lg, paddingBottom: spacing.xxxl },
+
+  // ── Right Now lead card ────────────────────────────────────────────────
+  leadCard: {
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.lg,
+    minHeight: 160,
+    justifyContent: 'space-between',
   },
-  heroKicker: {
-    color: 'rgba(255,255,255,0.85)',
+  leadKicker: {
     fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1,
+    fontWeight: '800',
+    letterSpacing: 1.2,
     marginBottom: spacing.xs,
   },
-  heroTitle: {
+  leadHeadline: {
     fontSize: fontSize.xxl,
     fontWeight: '800',
+    color: '#ffffff',
+    marginBottom: spacing.xs,
   },
-  body: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+  leadSubhead: {
+    fontSize: fontSize.md,
+    color: 'rgba(255,255,255,0.92)',
+    marginBottom: spacing.md,
+  },
+  leadCtaRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing.sm,
+  },
+  leadCtaPrimary: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: borderRadius.full,
+  },
+  leadCtaPrimaryText: { fontWeight: '800', fontSize: fontSize.md },
+  leadCtaSecondary: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+  },
+  leadCtaSecondaryText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontWeight: '700',
+    fontSize: fontSize.sm,
+  },
 
   syncRow: {
     flexDirection: 'row',
@@ -934,12 +1310,13 @@ function makeStyles(colors: ThemeColors) {
     fontWeight: '700',
   },
 
-  section: { marginBottom: spacing.lg },
+  section: { marginBottom: spacing.md },
   sectionLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1,
     marginBottom: spacing.xs,
+    textTransform: 'uppercase',
   },
   sectionHint: {
     fontSize: fontSize.xs,
@@ -993,15 +1370,14 @@ function makeStyles(colors: ThemeColors) {
     fontWeight: '600',
   },
 
-  addTeamBtn: {
-    paddingVertical: spacing.md,
-    borderRadius: borderRadius.md,
-    alignItems: 'center',
-    marginTop: spacing.xs,
+  addTeamLink: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs,
+    alignItems: 'flex-start',
   },
-  addTeamBtnText: {
+  addTeamLinkText: {
     fontWeight: '700',
-    fontSize: fontSize.md,
+    fontSize: fontSize.sm,
   },
 
   sourceBadge: {
@@ -1048,39 +1424,13 @@ function makeStyles(colors: ThemeColors) {
     marginTop: 2,
   },
 
-  connectionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    marginBottom: spacing.xs,
-    borderWidth: 1,
-  },
-  connectionIcon: { fontSize: 22 },
-  connectionTitle: { fontSize: fontSize.md, fontWeight: '700' },
-  connectionSubtitle: {
-    fontSize: fontSize.xs,
-    marginTop: 2,
-  },
-  connectionStatus: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: borderRadius.sm,
-  },
-  connectionStatusText: {
-    fontSize: 11,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-
   careerCard: { marginTop: spacing.xs },
   careerKicker: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     letterSpacing: 1,
     marginBottom: spacing.sm,
+    textTransform: 'uppercase',
   },
   careerLoading: {
     fontSize: fontSize.sm,

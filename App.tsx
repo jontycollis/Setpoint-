@@ -52,7 +52,6 @@ import { AddTournamentsScreen } from './src/screens/AddTournamentsScreen';
 import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
 import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
-import { ToolsScreen } from './src/screens/ToolsScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
 import type { GlobalSearchResult } from './src/screens/GlobalSearchScreen';
 import { HamburgerMenu } from './src/components/HamburgerMenu';
@@ -154,19 +153,21 @@ type Screen =
   | 'MatchScoring'
   | 'TeamRoster'
   | 'Stats'
-  | 'Tools'
   | 'GlobalSearch';
 
 // ── Bottom tab routing ─────────────────────────────────────────────────────
 //
-// Three "home destinations" map onto the bottom tab bar. A tab tap is a
+// Two "home destinations" map onto the bottom tab bar. A tab tap is a
 // destination switch — caller clears screenHistory and sets `screen` to the
 // destination. When the user is "deep" inside a flow (TeamDashboard etc.)
-// no tab is highlighted but all three remain reachable.
+// no tab is highlighted but both tabs remain reachable.
+//
+// The earlier Tools tab was removed: it was empty for default users and
+// duplicated MyHome's Connections section. Its contents (Score a Match,
+// MRS, CAC Locker) live in the hamburger now.
 function tabForScreen(screen: Screen): TabKey | null {
   if (screen === 'MyHome') return 'home';
   if (screen === 'TournamentSelect') return 'browse';
-  if (screen === 'Tools') return 'tools';
   return null;
 }
 
@@ -187,7 +188,6 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'MrsConnection',
   'CacConnection',
   'TournamentSelect',
-  'Tools',
   'GlobalSearch',
   // Team-detail screens (team name in their own header)
   'TeamDashboard',
@@ -235,13 +235,27 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'TournamentSelect':
     case 'EventEntry':
     case 'OvaRankings':
-    case 'Tools':
     case 'GlobalSearch':
       return 'home';
     default:
       return 'team';
   }
 }
+
+// ── Search visibility ──────────────────────────────────────────────────────
+//
+// The magnifying-glass icon used to live on MyHome only. Promoted to a
+// permanent slot on every screen *except* the focused full-screen flows
+// where it would compete for space with the score panels:
+//   • MatchSetup / MatchScoring — top-of-screen tools shelves
+//   • Scoreboard — Tier 1 hold-up; the team identity is the headline
+//   • GlobalSearch — already IS the search screen
+const SEARCH_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
+  'MatchSetup',
+  'MatchScoring',
+  'Scoreboard',
+  'GlobalSearch',
+]);
 
 export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('light');
@@ -1520,7 +1534,6 @@ export default function App() {
     setSelectedTournamentYear(null);
     if (tab === 'home') setScreen('MyHome');
     else if (tab === 'browse') setScreen('TournamentSelect');
-    else if (tab === 'tools') setScreen('Tools');
   }, []);
 
   // ── Recently-viewed open ──────────────────────────────────────────────
@@ -1696,6 +1709,8 @@ export default function App() {
             <TournamentSelectScreen
               onTournamentSelected={onTournamentSelected}
               initialRegistry={discoveredRegistry}
+              profile={userProfile}
+              onSearchSelect={handleGlobalSearchSelect}
             />
           );
         }
@@ -1729,13 +1744,22 @@ export default function App() {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('AddTeamChooser');
             }}
-            onOpenMrsConnection={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('MrsConnection');
+            onBrowseTournaments={() => {
+              setScreenHistory([]);
+              setScreen('TournamentSelect');
             }}
-            onOpenCacConnection={() => {
+            onScoreAMatch={
+              userProfile?.scorerMode
+                ? () => {
+                    setScreenHistory((prev) => [...prev, screen]);
+                    setScreen('MatchList');
+                  }
+                : undefined
+            }
+            onResumeMatch={(m) => {
+              setActiveScoredMatch(m);
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('CacConnection');
+              setScreen('MatchScoring');
             }}
             onOpenRecent={handleOpenRecent}
           />
@@ -1815,6 +1839,9 @@ export default function App() {
         return (
           <TournamentSelectScreen
             onTournamentSelected={onTournamentSelected}
+            initialRegistry={discoveredRegistry}
+            profile={userProfile}
+            onSearchSelect={handleGlobalSearchSelect}
           />
         );
       case 'EventEntry':
@@ -1911,6 +1938,24 @@ export default function App() {
                 openTeamSeasonHistory({ fallbackName: fallback });
               }
             }}
+            meTeamCount={
+              userProfile?.teams.filter((t) => t.kind === 'me').length ?? 0
+            }
+            onManageRoster={(() => {
+              // Surface the per-team roster editor when this team has a
+              // matching me-kind TeamProfile. Resolves the profile via
+              // alias overlap on TeamText/TeamName so a freshly-followed
+              // team is reachable on the same render.
+              if (!userProfile || !currentTeam) return undefined;
+              const lower = (currentTeam.TeamText || currentTeam.TeamName || '')
+                .toLowerCase()
+                .trim();
+              const profileMatch = userProfile.teams.find((t) =>
+                t.aliases.some((a) => a.toLowerCase().trim() === lower)
+              );
+              if (!profileMatch || profileMatch.kind !== 'me') return undefined;
+              return () => handleOpenRosterEditor(profileMatch);
+            })()}
           />
         );
       case 'MyTeams':
@@ -2196,6 +2241,18 @@ export default function App() {
             }
             onClearMyTeam={() => setMyTeamAndProfile(null)}
             onInfoLoaded={onTimuInfoLoaded}
+            meTeamCount={
+              userProfile?.teams.filter((t) => t.kind === 'me').length ?? 0
+            }
+            onManageRoster={(() => {
+              if (!userProfile) return undefined;
+              const lower = currentTimuTeamName.toLowerCase().trim();
+              const profileMatch = userProfile.teams.find((t) =>
+                t.aliases.some((a) => a.toLowerCase().trim() === lower)
+              );
+              if (!profileMatch || profileMatch.kind !== 'me') return undefined;
+              return () => handleOpenRosterEditor(profileMatch);
+            })()}
           />
         );
       case 'TimuOpponentScout':
@@ -2341,30 +2398,6 @@ export default function App() {
               } else {
                 openTeamSeasonHistory({ fallbackName: r.teamLabel });
               }
-            }}
-          />
-        );
-      case 'Tools':
-        return (
-          <ToolsScreen
-            profile={userProfile}
-            onOpenMrsConnection={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('MrsConnection');
-            }}
-            onOpenCacConnection={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('CacConnection');
-            }}
-            onOpenScoreAMatch={() => {
-              // Score-a-Match screen ships with the parallel Tier 2 work.
-              // The row is gated on userProfile.scorerMode so this handler
-              // only runs once that toggle is on. Until the screen lands,
-              // surface a placeholder so the tap isn't silent.
-              Alert.alert(
-                'Score a Match',
-                'The scoring console ships with the Tier 2 update.'
-              );
             }}
           />
         );
@@ -2588,7 +2621,7 @@ function AppContent({
   const showTabBar = !TAB_BAR_HIDDEN_SCREENS.has(screen);
   const showPill =
     !PILL_SUPPRESSED_SCREENS.has(screen) && !!userProfile?.activeTeamId;
-  const showSearch = screen === 'MyHome';
+  const showSearch = !SEARCH_SUPPRESSED_SCREENS.has(screen);
   // Reserve space at the bottom for the tab bar so screens don't render
   // under it. Tab bar height is fixed; the safe-area bottom is added inside
   // the bar component itself.

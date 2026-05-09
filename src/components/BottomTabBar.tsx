@@ -1,14 +1,19 @@
 // ── BottomTabBar ──────────────────────────────────────────────────────────
 //
-// Three-tab bottom bar: Home / Browse / Tools. Renders at the bottom of the
-// viewport with `useSafeAreaInsets().bottom` clearance so it sits above
-// Android gesture nav.
+// Two-tab bottom bar: Home / Browse. Renders at the bottom of the viewport
+// with `useSafeAreaInsets().bottom` clearance so it sits above Android
+// gesture nav.
 //
 // Behaviour: a tab tap is a destination switch — the caller clears
-// screenHistory and sets `screen` to one of the three home destinations.
+// screenHistory and sets `screen` to one of the two home destinations.
 // Tabs are highlighted only when the current screen IS that destination;
 // when the user is "deep" inside a flow (TeamDashboard, Standings, etc.)
-// no tab is highlighted but all three remain reachable.
+// no tab is highlighted but both remain reachable.
+//
+// The earlier Tools tab was removed: it was empty for default users and
+// duplicated MyHome's Connections section. Score-a-Match, MRS, and CAC
+// Locker live in the hamburger now; "Score a match" can also surface as
+// a Right Now CTA on MyHome when the user is in scorer mode.
 //
 // Theme via useTheme() so light/dark both look right.
 // ────────────────────────────────────────────────────────────────────────────
@@ -18,7 +23,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { spacing, fontSize, useTheme } from '../utils/theme';
 
-export type TabKey = 'home' | 'browse' | 'tools';
+export type TabKey = 'home' | 'browse';
 
 export const BOTTOM_TAB_BAR_HEIGHT = 56;
 
@@ -54,12 +59,6 @@ export function BottomTabBar({ activeTab, onSelect }: Props) {
         icon={'\u{1F4C5}'}
         active={activeTab === 'browse'}
         onPress={() => onSelect('browse')}
-      />
-      <Tab
-        label="Tools"
-        icon={'\u{1F527}'}
-        active={activeTab === 'tools'}
-        onPress={() => onSelect('tools')}
       />
     </View>
   );
