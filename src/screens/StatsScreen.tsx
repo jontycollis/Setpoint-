@@ -176,12 +176,12 @@ export function StatsScreen({ teamProfileId, teamName, onBack }: Props) {
           <TouchableOpacity onPress={onBack}>
             <Text style={styles.backBtn}>‹ Back</Text>
           </TouchableOpacity>
-          <Text style={styles.title}>Stats</Text>
+          <Text style={styles.title}>Analytics</Text>
           <View style={{ width: 50 }} />
         </View>
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading stats…</Text>
+          <Text style={styles.loadingText}>Loading analytics…</Text>
         </View>
       </View>
     );
@@ -197,7 +197,7 @@ export function StatsScreen({ teamProfileId, teamName, onBack }: Props) {
         <TouchableOpacity onPress={onBack}>
           <Text style={styles.backBtn}>‹ Back</Text>
         </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{teamName} Stats</Text>
+        <Text style={styles.title} numberOfLines={1}>{teamName} Analytics</Text>
         <View style={{ width: 50 }} />
       </View>
 
@@ -229,7 +229,7 @@ export function StatsScreen({ teamProfileId, teamName, onBack }: Props) {
         {/* Player stat table */}
         {hasStats ? (
           <View style={styles.tableCard}>
-            <Text style={styles.tableTitle}>Player Stats</Text>
+            <Text style={styles.tableTitle}>Player Analytics</Text>
 
             {/* Sort buttons */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sortRow}>
@@ -362,7 +362,7 @@ export function StatsScreen({ teamProfileId, teamName, onBack }: Props) {
                     {ms.players.every(
                       (p) => p.kills === 0 && p.blocks === 0 && p.aces === 0 && p.assists === 0 && p.digs === 0 && p.passAttempts === 0 && p.errors === 0
                     ) ? (
-                      <Text style={styles.noStatsText}>No stats recorded for this match.</Text>
+                      <Text style={styles.noStatsText}>No analytics recorded for this match.</Text>
                     ) : null}
                   </View>
                 ) : null}
@@ -375,7 +375,7 @@ export function StatsScreen({ teamProfileId, teamName, onBack }: Props) {
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyTitle}>No Scored Matches</Text>
             <Text style={styles.emptyBody}>
-              Score a match using the live scorer to start building your team stats dashboard. Stats are recorded when you tap a player on the court diagram during scoring.
+              Score a match using the live scorer to start building your team analytics dashboard. Analytics are recorded when you tap a player on the court diagram during scoring.
             </Text>
           </View>
         ) : null}

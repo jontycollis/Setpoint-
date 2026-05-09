@@ -419,7 +419,11 @@ function makeStyles(colors: ThemeColors) {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingHorizontal: spacing.lg,
+      paddingLeft: spacing.lg,
+      // Right padding clears the absolute-positioned hamburger overlay
+      // (App.tsx menuOverlay lives at right:8 and is ~56px wide). Same
+      // 64px buffer used by MatchListScreen / ScoreboardScreen.
+      paddingRight: 64,
       paddingTop: spacing.lg,
       paddingBottom: spacing.sm,
     },

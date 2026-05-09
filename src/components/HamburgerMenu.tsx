@@ -89,6 +89,19 @@ interface Props {
   /** Tier 2: toggles the official-scorer flow on/off. When undefined,
    *  the toggle row hides entirely. */
   onToggleScorerMode?: (next: boolean) => void;
+  /**
+   * Open the roster editor for a TeamProfile. Powers both the
+   * per-team ⋯ overflow → "Manage roster" and the top-level
+   * "Manage rosters" picker entry. Optional: when undefined, both
+   * affordances hide.
+   */
+  onOpenRosterEditor?: (team: TeamProfile) => void;
+  /**
+   * Per-team ⋯ overflow tap. Caller surfaces an action sheet
+   * mirroring the MyHome long-press (Manage roster / Remove). When
+   * undefined, the overflow icon hides.
+   */
+  onTeamMenu?: (team: TeamProfile) => void;
   // ── Phase 4: context-aware menu ───────────────────────────────────────
   /**
    * Which mode to render the menu in. Caller computes from screen +
@@ -118,12 +131,23 @@ export function HamburgerMenu({
   userProfile,
   onSwitchTeam,
   onToggleScorerMode,
+  onOpenRosterEditor,
+  onTeamMenu,
   menuContext = 'home',
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [visible, setVisible] = useState(false);
+  // Picker mode swaps the menu body for a "Pick a team to manage"
+  // list. Reset whenever the modal closes so re-open lands on the
+  // main menu.
+  const [rosterPickerVisible, setRosterPickerVisible] = useState(false);
   const theme = useTheme();
+
+  function closeMenu() {
+    setVisible(false);
+    setRosterPickerVisible(false);
+  }
 
   function handleSelect(dest: MenuDestination) {
     setVisible(false);
@@ -167,24 +191,67 @@ export function HamburgerMenu({
         visible={visible}
         transparent
         animationType="fade"
-        onRequestClose={() => setVisible(false)}
+        onRequestClose={closeMenu}
       >
-        <Pressable style={styles.overlay} onPress={() => setVisible(false)}>
+        <Pressable style={styles.overlay} onPress={closeMenu}>
           <Pressable
             style={styles.menuPanel}
             onPress={(e) => e.stopPropagation()}
           >
             <ScrollView bounces={false}>
-              {/* Menu Header */}
+              {/* Menu Header — swaps to a back-arrow + "Pick a team"
+                  title when the roster picker is active. */}
               <View style={styles.menuHeader}>
-                <Text style={styles.menuTitle}>Menu</Text>
+                {rosterPickerVisible ? (
+                  <TouchableOpacity
+                    onPress={() => setRosterPickerVisible(false)}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  >
+                    <Text style={styles.closeButton}>{'←'}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <Text style={styles.menuTitle}>
+                  {rosterPickerVisible ? 'Pick a team' : 'Menu'}
+                </Text>
                 <TouchableOpacity
-                  onPress={() => setVisible(false)}
+                  onPress={closeMenu}
                   hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                 >
                   <Text style={styles.closeButton}>X</Text>
                 </TouchableOpacity>
               </View>
+
+              {/* ── Roster picker — replaces the main menu body when
+                    the user hits "Manage rosters". Lists every team in
+                    the profile (both 'me' and 'watching' kinds) so the
+                    picker matches the per-row ⋯ overflow scope. */}
+              {rosterPickerVisible && userProfile && (
+                <View style={styles.section}>
+                  <Text style={styles.sectionLabel}>YOUR TEAMS</Text>
+                  {sortedTeamsForDisplay(userProfile).map((team) => (
+                    <RosterPickerRow
+                      key={team.id}
+                      team={team}
+                      onPress={() => {
+                        if (!onOpenRosterEditor) return;
+                        closeMenu();
+                        onOpenRosterEditor(team);
+                      }}
+                    />
+                  ))}
+                  {userProfile.teams.length === 0 && (
+                    <Text style={styles.pickerEmpty}>
+                      Add a team first, then come back here to set up its roster.
+                    </Text>
+                  )}
+                  <View style={{ height: spacing.xl }} />
+                </View>
+              )}
+
+              {!rosterPickerVisible && (
+              <>
+              {/* Original menu body — wrapped in a fragment so the
+                  picker can replace it cleanly. */}
 
               {/* Current Context Banner */}
               {hasEvent && (
@@ -235,7 +302,9 @@ export function HamburgerMenu({
                   />
 
                   {/* Tracked teams — tap any to switch active team and
-                      open its Season History. */}
+                      open its Season History. The trailing ⋯ overflow
+                      surfaces the same action sheet as long-pressing a
+                      team card on MyHome (Manage roster / Remove). */}
                   {sortedTeamsForDisplay(userProfile).map((team) => (
                     <TeamSwitcherRow
                       key={team.id}
@@ -243,11 +312,33 @@ export function HamburgerMenu({
                       isActive={team.id === userProfile.activeTeamId}
                       onPress={() => {
                         if (!onSwitchTeam) return;
-                        setVisible(false);
+                        closeMenu();
                         onSwitchTeam(team.id);
                       }}
+                      onMenu={
+                        onTeamMenu
+                          ? () => {
+                              closeMenu();
+                              onTeamMenu(team);
+                            }
+                          : undefined
+                      }
                     />
                   ))}
+
+                  {/* Manage rosters — opens a "pick a team" sub-view
+                      inside the same panel. Hidden when there are no
+                      teams to manage and no editor handler wired. */}
+                  {onOpenRosterEditor && userProfile.teams.length > 0 && (
+                    <MenuRow
+                      icon={'\u{1F465}'}
+                      label="Manage rosters"
+                      subtitle="Add or edit players for any of your teams"
+                      available={true}
+                      isCurrent={false}
+                      onPress={() => setRosterPickerVisible(true)}
+                    />
+                  )}
 
                   {/* + Add team CTA — always at the bottom of the list. */}
                   <MenuRow
@@ -619,6 +710,8 @@ export function HamburgerMenu({
               )}
 
               <View style={{ height: spacing.xl }} />
+              </>
+              )}
             </ScrollView>
           </Pressable>
         </Pressable>
@@ -628,15 +721,18 @@ export function HamburgerMenu({
 }
 
 // Sub-component for the new "MY TEAMS" team-switcher rows. Active team
-// is highlighted; tap any other team to switch.
+// is highlighted; tap the main area to switch, tap the trailing ⋯
+// overflow to open per-team actions (Manage roster / Remove).
 function TeamSwitcherRow({
   team,
   isActive,
   onPress,
+  onMenu,
 }: {
   team: TeamProfile;
   isActive: boolean;
   onPress: () => void;
+  onMenu?: () => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -651,35 +747,97 @@ function TeamSwitcherRow({
       ? colors.accent
       : colors.primary;
   return (
-    <TouchableOpacity
+    <View
       style={[
         styles.menuItem,
         isActive && styles.menuItemCurrent,
       ]}
+    >
+      <TouchableOpacity
+        style={styles.teamSwitcherMain}
+        onPress={onPress}
+        disabled={isActive}
+        activeOpacity={0.7}
+      >
+        <View style={[styles.teamSwitcherBadge, { backgroundColor: sourceColor }]}>
+          <Text style={styles.teamSwitcherBadgeText}>{sourceLabel}</Text>
+        </View>
+        <View style={styles.menuLabelCol}>
+          <Text
+            style={[
+              styles.menuLabel,
+              isActive && styles.menuLabelCurrent,
+            ]}
+            numberOfLines={1}
+          >
+            {team.label}
+          </Text>
+          <Text style={styles.menuSubtitle} numberOfLines={1}>
+            {team.kind === 'watching' ? 'Watching' : 'Me'}
+            {team.seasonLabel ? ` · ${team.seasonLabel}` : ''}
+            {team.club ? ` · ${team.club}` : ''}
+          </Text>
+        </View>
+        {isActive && <View style={styles.currentDot} />}
+      </TouchableOpacity>
+      {onMenu && (
+        <TouchableOpacity
+          style={styles.teamSwitcherOverflow}
+          onPress={onMenu}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          accessibilityLabel={`Actions for ${team.label}`}
+          accessibilityRole="button"
+        >
+          <Text style={styles.teamSwitcherOverflowText}>{'⋮'}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+// Sub-component for the "Manage rosters" picker — same look as a
+// TeamSwitcherRow but tapping the whole row opens that team's roster
+// editor (no overflow, no active-team highlight).
+function RosterPickerRow({
+  team,
+  onPress,
+}: {
+  team: TeamProfile;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const sourceLabel =
+    team.source === 'mrs-linked'
+      ? 'OVA'
+      : team.source === 'mixed'
+      ? 'AES+TIMU'
+      : team.source.toUpperCase();
+  const sourceColor =
+    team.source === 'timu' || team.source === 'mixed'
+      ? colors.accent
+      : colors.primary;
+  const rosterCount = (team.roster ?? []).filter((p) => p.active).length;
+  return (
+    <TouchableOpacity
+      style={styles.menuItem}
       onPress={onPress}
-      disabled={isActive}
       activeOpacity={0.7}
     >
       <View style={[styles.teamSwitcherBadge, { backgroundColor: sourceColor }]}>
         <Text style={styles.teamSwitcherBadgeText}>{sourceLabel}</Text>
       </View>
       <View style={styles.menuLabelCol}>
-        <Text
-          style={[
-            styles.menuLabel,
-            isActive && styles.menuLabelCurrent,
-          ]}
-          numberOfLines={1}
-        >
+        <Text style={styles.menuLabel} numberOfLines={1}>
           {team.label}
         </Text>
         <Text style={styles.menuSubtitle} numberOfLines={1}>
-          {team.kind === 'watching' ? 'Watching' : 'Me'}
-          {team.seasonLabel ? ` · ${team.seasonLabel}` : ''}
-          {team.club ? ` · ${team.club}` : ''}
+          {rosterCount > 0
+            ? `${rosterCount} player${rosterCount === 1 ? '' : 's'}`
+            : 'No roster yet'}
+          {team.kind === 'watching' ? ' · Watching' : ''}
         </Text>
       </View>
-      {isActive && <View style={styles.currentDot} />}
     </TouchableOpacity>
   );
 }
@@ -968,6 +1126,34 @@ function makeStyles(colors: ThemeColors) {
     fontSize: 10,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  // Main tap area inside a TeamSwitcherRow — sibling to the overflow
+  // button so each has its own touchable without nesting.
+  teamSwitcherMain: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  teamSwitcherOverflow: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    marginLeft: spacing.xs,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 32,
+  },
+  teamSwitcherOverflowText: {
+    fontSize: 22,
+    lineHeight: 22,
+    color: colors.textLight,
+    fontWeight: '700',
+  },
+  pickerEmpty: {
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.lg,
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+    fontStyle: 'italic',
   },
 });
 }

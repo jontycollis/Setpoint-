@@ -2429,6 +2429,8 @@ export default function App() {
             prev ? { ...prev, scorerMode: next, updatedAt: Date.now() } : prev
           );
         }}
+        onOpenRosterEditor={handleOpenRosterEditor}
+        onTeamMenu={handleLongPressTeam}
       />
       <DiscoveryConfirmModal pending={confirmDiscovery} />
     </SafeAreaProvider>
@@ -2580,6 +2582,8 @@ function AppContent({
   userProfile,
   onSwitchTeam,
   onToggleScorerMode,
+  onOpenRosterEditor,
+  onTeamMenu,
   onTabSelect,
   onOpenGlobalSearch,
 }: any) {
@@ -2657,6 +2661,8 @@ function AppContent({
           userProfile={userProfile}
           onSwitchTeam={onSwitchTeam}
           onToggleScorerMode={onToggleScorerMode}
+          onOpenRosterEditor={onOpenRosterEditor}
+          onTeamMenu={onTeamMenu}
           menuContext={menuContextForScreen(screen)}
         />
       </View>
