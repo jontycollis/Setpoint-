@@ -73,6 +73,15 @@ interface Props {
   onClearMyTeam: () => void;
   /** Open the cross-source Timu+AES season history for the given team. */
   onViewSeasonHistory?: (teamName: string) => void;
+  // ── Follow toggle (single-pill replacement for ★/+Season/My Team) ────
+  /** How many TeamProfile.kind === 'me' teams the user already has. Used
+   *  to decide whether a fresh follow auto-promotes to primary (only
+   *  when zero — otherwise the team starts as 'watching'). */
+  meTeamCount?: number;
+  /** Open the per-team roster editor for the matching TeamProfile.
+   *  Surfaced in the Following action sheet only when this team is the
+   *  user's primary me-team. Optional — when omitted, the row hides. */
+  onManageRoster?: () => void;
 }
 
 export function TeamDashboardScreen({
@@ -90,6 +99,8 @@ export function TeamDashboardScreen({
   onSetAsMyTeam,
   onClearMyTeam,
   onViewSeasonHistory,
+  meTeamCount = 0,
+  onManageRoster,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -167,6 +178,60 @@ export function TeamDashboardScreen({
       setAdding(false);
     }
   }, [adding, event.Key, event.Name, division.DivisionId, team.TeamId, team.TeamText, team.TeamName, isFavorite, onToggleFavorite]);
+
+  // ─── Follow toggle (single-pill consolidation) ────────────────────────
+  // Replaces the prior cluster of ★ Favorite / + Season / 🏐 My Team.
+  // The audit's call: one button labelled "Follow" / "Following ✓" that
+  // does the right thing on first tap. The chevron next to "Following ✓"
+  // opens an action sheet for primary-team / manage-roster / unfollow.
+  //
+  // Following = isFavorite OR isMyTeam. (Adding a favorite already
+  // creates a watching TeamProfile via App.tsx's setUserProfile in
+  // toggleFavorite, so the favourite flag is the canonical "I follow
+  // this team" signal.)
+  const isFollowing = isFavorite || isMyTeam;
+
+  const handleFollow = useCallback(async () => {
+    // First tap = full follow: favourite + season-add + (if no other
+    // me-team exists, also set as primary so the "Welcome back"
+    // surface lands here). handleAddToSeasonHistory already toggles
+    // the favourite flag if it isn't on yet.
+    await handleAddToSeasonHistory();
+    if (!isMyTeam && meTeamCount === 0) {
+      onSetAsMyTeam();
+    }
+  }, [handleAddToSeasonHistory, isMyTeam, meTeamCount, onSetAsMyTeam]);
+
+  const handleStopFollowing = useCallback(() => {
+    // Drop favourite + clear my-team status. We deliberately keep the
+    // indexed AES snapshot — losing the snapshot would erase the
+    // user's history rows for this tournament, and unfollowing a
+    // team is supposed to be quiet, not destructive.
+    if (isFavorite) onToggleFavorite();
+    if (isMyTeam) onClearMyTeam();
+  }, [isFavorite, isMyTeam, onToggleFavorite, onClearMyTeam]);
+
+  const openFollowSheet = useCallback(() => {
+    const teamLabel = team.TeamText || team.TeamName;
+    const buttons: Array<{
+      text: string;
+      style?: 'cancel' | 'destructive';
+      onPress?: () => void;
+    }> = [];
+    if (!isMyTeam) {
+      buttons.push({ text: 'Set as primary team', onPress: onSetAsMyTeam });
+    }
+    if (isMyTeam && onManageRoster) {
+      buttons.push({ text: 'Manage roster', onPress: onManageRoster });
+    }
+    buttons.push({
+      text: 'Stop following',
+      style: 'destructive',
+      onPress: handleStopFollowing,
+    });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(teamLabel, undefined, buttons);
+  }, [team.TeamText, team.TeamName, isMyTeam, onManageRoster, onSetAsMyTeam, handleStopFollowing]);
 
   // ─── Live countdown tick (updates every 30s) ───────────────────────────
   const [now, setNow] = useState(Date.now());
@@ -590,44 +655,32 @@ export function TeamDashboardScreen({
             <Text style={styles.divisionName}>{division.Name}</Text>
           </View>
           <View style={styles.headerActions}>
+            {/* Single "Follow" / "Following \u2713" pill replacing the prior
+                cluster (\u2605 Favorite / + Season / \ud83c\udfd0 My Team). When already
+                following, tapping the pill opens an action sheet for
+                primary-team / manage-roster / unfollow \u2014 equivalent to
+                the chevron affordance the audit calls out. */}
             <TouchableOpacity
-              onPress={() => {
-                if (isMyTeam) {
-                  onClearMyTeam();
-                } else {
-                  onSetAsMyTeam();
-                }
-              }}
-              style={styles.myTeamButton}
-            >
-              <Text style={isMyTeam ? styles.myTeamBadgeActive : styles.myTeamBadge}>
-                {isMyTeam ? '\u{1F3D0} My Team' : '\u{1F3D0} Set My Team'}
-              </Text>
-            </TouchableOpacity>
-            {/* Compact "+Season" pill so the manual add is reachable from the
-                header \u2014 the long-form button further down only appears if the
-                user scrolls past upcoming matches. */}
-            <TouchableOpacity
-              onPress={handleAddToSeasonHistory}
-              disabled={aesIndexed || adding}
+              onPress={isFollowing ? openFollowSheet : handleFollow}
+              disabled={adding}
               style={[
-                styles.seasonAddPill,
-                (aesIndexed || adding) && styles.seasonAddPillDone,
+                styles.followPill,
+                isFollowing && styles.followPillActive,
+                adding && styles.followPillBusy,
               ]}
-              hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
               <Text
                 style={[
-                  styles.seasonAddPillText,
-                  (aesIndexed || adding) && styles.seasonAddPillTextDone,
+                  styles.followPillText,
+                  isFollowing && styles.followPillTextActive,
                 ]}
               >
-                {adding ? '\u2026' : aesIndexed ? '\u2713 Season' : '+ Season'}
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onToggleFavorite} style={styles.favButton}>
-              <Text style={isFavorite ? styles.favStarActive : styles.favStar}>
-                {isFavorite ? '\u2605' : '\u2606'}
+                {adding
+                  ? 'Following\u2026'
+                  : isFollowing
+                  ? `\u2713 Following${isMyTeam ? ' \u00b7 Primary' : ''}  \u25be`
+                  : '+ Follow'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -1535,6 +1588,29 @@ function makeStyles(colors: ThemeColors) {
   clubName: { fontSize: fontSize.md, color: 'rgba(255,255,255,0.8)', marginBottom: spacing.xs },
   divisionName: { fontSize: fontSize.sm, color: 'rgba(255,255,255,0.7)' },
   headerActions: { flexDirection: 'row', alignItems: 'center' },
+  // Single-pill follow toggle (replaces star + season + my-team cluster).
+  // White-on-blue when followed; ghost outline when not.
+  followPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.32)',
+  },
+  followPillActive: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+  },
+  followPillBusy: { opacity: 0.6 },
+  followPillText: {
+    color: '#ffffff',
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+  followPillTextActive: {
+    color: colors.primary,
+  },
   myTeamButton: { padding: spacing.xs, marginRight: 4 },
   myTeamBadge: {
     fontSize: fontSize.xs,

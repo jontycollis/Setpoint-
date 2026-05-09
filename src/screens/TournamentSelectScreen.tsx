@@ -2,11 +2,13 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
   ActivityIndicator,
   Image,
+  FlatList,
 } from 'react-native';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
@@ -25,6 +27,13 @@ import {
   groupIntoTournaments,
   mergeDiscoveredEvents,
 } from '../api/aesClient';
+import {
+  buildGlobalSearchCorpus,
+  matchesQuery,
+  resultKey,
+  type GlobalSearchResult,
+} from '../utils/globalSearchCorpus';
+import type { UserProfile } from '../types/profile';
 
 const APP_LOGO = require('../../assets/setpoint-logo.png');
 
@@ -40,9 +49,21 @@ interface Props {
    *  pre-enriched registry instead. App.tsx runs discovery at boot so the
    *  data is ready before the user reaches this screen. */
   initialRegistry?: Country[] | null;
+  /** User profile drives the search corpus's "profile teams" rows so
+   *  the user's own follow-list always floats to the top of results. */
+  profile?: UserProfile | null;
+  /** Tap a search result. App.tsx routes by kind, reusing the same
+   *  navigation paths as the full-screen GlobalSearchScreen. Optional —
+   *  when omitted the search input hides entirely (legacy callers). */
+  onSearchSelect?: (result: GlobalSearchResult) => void;
 }
 
-export function TournamentSelectScreen({ onTournamentSelected, initialRegistry }: Props) {
+export function TournamentSelectScreen({
+  onTournamentSelected,
+  initialRegistry,
+  profile,
+  onSearchSelect,
+}: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [step, setStep] = useState<Step>('country');
@@ -52,6 +73,42 @@ export function TournamentSelectScreen({ onTournamentSelected, initialRegistry }
   const [registry, setRegistry] = useState<Country[]>(initialRegistry ?? TOURNAMENT_REGISTRY);
   const [discoveryLoading, setDiscoveryLoading] = useState(!initialRegistry);
   const [discoveryError, setDiscoveryError] = useState(false);
+
+  // ── Search-first state ───────────────────────────────────────────────
+  // Corpus is built once on mount; the FlatList below filters live as
+  // the user types. Empty query hides the result list and reveals the
+  // country/tournament/year tree as the secondary "Browse all" affordance.
+  const [query, setQuery] = useState('');
+  const [corpus, setCorpus] = useState<GlobalSearchResult[] | null>(null);
+  useEffect(() => {
+    if (!onSearchSelect) return; // Search hidden — skip the build.
+    let cancelled = false;
+    (async () => {
+      try {
+        const out = await buildGlobalSearchCorpus(profile ?? null);
+        if (!cancelled) setCorpus(out);
+      } catch {
+        if (!cancelled) setCorpus([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [profile, onSearchSelect]);
+
+  const filteredResults = useMemo(() => {
+    if (!corpus) return null;
+    const q = query.trim().toLowerCase();
+    if (!q) return [];
+    const out: GlobalSearchResult[] = [];
+    for (const r of corpus) {
+      if (matchesQuery(r, q)) {
+        out.push(r);
+        if (out.length >= 50) break;
+      }
+    }
+    return out;
+  }, [corpus, query]);
 
   // Sync from parent when it finishes boot-time discovery
   useEffect(() => {
@@ -122,160 +179,329 @@ export function TournamentSelectScreen({ onTournamentSelected, initialRegistry }
     }
   }
 
+  const showSearch = !!onSearchSelect;
+  const querying = !!query.trim();
+
   return (
     <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.scroll}>
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
         {/* App Header */}
         <View style={styles.headerArea}>
           <Image source={APP_LOGO} style={styles.logoImage} resizeMode="contain" />
         </View>
 
-        {/* Breadcrumb / Back */}
-        {step !== 'country' && (
-          <TouchableOpacity
-            style={styles.backRow}
-            onPress={handleBack}
-            activeOpacity={0.6}
-          >
-            <Text style={styles.backArrow}>{'‹'}</Text>
-            <Text style={styles.backLabel}>
-              {step === 'tournament'
-                ? 'Countries'
-                : selectedCountry?.name ?? 'Back'}
-            </Text>
-          </TouchableOpacity>
-        )}
-
-        {/* Step: Country */}
-        {step === 'country' && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Select Country</Text>
-            {discoveryLoading && (
-              <View style={styles.discoveryRow}>
-                <ActivityIndicator size="small" color={colors.accent} />
-                <Text style={styles.discoveryText}>
-                  Checking for new tournaments…
-                </Text>
-              </View>
-            )}
-            {discoveryError && !discoveryLoading && (
-              <View style={styles.discoveryRow}>
-                <Text style={styles.discoveryErrorText}>
-                  Could not check for new events — showing saved tournaments
-                </Text>
-              </View>
-            )}
-            {registry.map((country) => (
-              <TouchableOpacity
-                key={country.id}
-                style={styles.card}
-                onPress={() => handleCountrySelect(country)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.cardFlag}>{country.flag}</Text>
-                <View style={styles.cardBody}>
-                  <Text style={styles.cardTitle}>{country.name}</Text>
-                  <Text style={styles.cardSubtitle}>
-                    {country.tournaments.length} tournament
-                    {country.tournaments.length !== 1 ? 's' : ''}
-                  </Text>
-                </View>
-                <Text style={styles.cardArrow}>{'›'}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Step: Tournament */}
-        {step === 'tournament' && selectedCountry && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              {selectedCountry.flag} {selectedCountry.name} Tournaments
-            </Text>
-            {selectedCountry.tournaments.map((tournament) => {
-              const years = getAvailableYears(tournament);
-              const isAvailable = years.length > 0;
-              return (
+        {/* ── Search-first input ────────────────────────────────────── */}
+        {showSearch && (
+          <View style={styles.searchSection}>
+            <View
+              style={[
+                styles.searchRow,
+                {
+                  backgroundColor: colors.surface,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <Text style={[styles.searchIcon, { color: colors.textSecondary }]}>
+                {'\u{1F50D}'}
+              </Text>
+              <TextInput
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Search tournaments and teams"
+                placeholderTextColor={colors.textLight}
+                style={[styles.searchInput, { color: colors.text }]}
+                autoCorrect={false}
+                autoCapitalize="none"
+                returnKeyType="search"
+              />
+              {query.length > 0 && (
                 <TouchableOpacity
-                  key={tournament.id}
-                  style={[styles.card, !isAvailable && styles.cardDisabled]}
-                  onPress={() => handleTournamentSelect(tournament)}
-                  activeOpacity={isAvailable ? 0.7 : 1}
-                  disabled={!isAvailable}
+                  onPress={() => setQuery('')}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                 >
-                  <Text style={styles.cardIcon}>{tournament.icon}</Text>
-                  <View style={styles.cardBody}>
-                    <Text
-                      style={[
-                        styles.cardTitle,
-                        !isAvailable && styles.cardTitleDisabled,
-                      ]}
-                    >
-                      {tournament.name}
-                    </Text>
-                    <Text style={styles.cardSubtitle}>
-                      {isAvailable
-                        ? years.join(', ')
-                        : 'Coming Soon'}
-                    </Text>
-                  </View>
-                  <Text style={styles.cardArrow}>
-                    {isAvailable ? '›' : ''}
+                  <Text
+                    style={[styles.searchClear, { color: colors.textSecondary }]}
+                  >
+                    Clear
                   </Text>
                 </TouchableOpacity>
-              );
-            })}
+              )}
+            </View>
+            {querying && (
+              <View style={styles.searchResults}>
+                {filteredResults == null ? (
+                  <View style={styles.searchEmpty}>
+                    <ActivityIndicator size="small" color={colors.primary} />
+                  </View>
+                ) : filteredResults.length === 0 ? (
+                  <View style={styles.searchEmpty}>
+                    <Text
+                      style={[
+                        styles.searchEmptyText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      No matches yet — try a different spelling, or scroll down to browse by country.
+                    </Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={filteredResults}
+                    keyExtractor={resultKey}
+                    keyboardShouldPersistTaps="handled"
+                    scrollEnabled={false}
+                    renderItem={({ item }) => (
+                      <SearchRow
+                        result={item}
+                        onPress={() => {
+                          setQuery('');
+                          onSearchSelect!(item);
+                        }}
+                      />
+                    )}
+                  />
+                )}
+              </View>
+            )}
           </View>
         )}
 
-        {/* Step: Year */}
-        {step === 'year' && selectedTournament && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
-              {selectedTournament.icon} {selectedTournament.name}
+        {/* ── Browse-by-country (de-emphasised when search is active) ── */}
+        <View style={querying ? styles.browseDimmed : null}>
+          {showSearch && !querying && (
+            <Text
+              style={[styles.browseSectionLabel, { color: colors.textLight }]}
+            >
+              BROWSE BY COUNTRY
             </Text>
-            <Text style={styles.sectionSubtitle}>Select Year</Text>
-            <View style={styles.yearGrid}>
-              {getAvailableYears(selectedTournament).map((year) => {
-                const ty = getTournamentYear(selectedTournament, year)!;
+          )}
+
+          {/* Breadcrumb / Back */}
+          {step !== 'country' && (
+            <TouchableOpacity
+              style={styles.backRow}
+              onPress={handleBack}
+              activeOpacity={0.6}
+            >
+              <Text style={styles.backArrow}>{'‹'}</Text>
+              <Text style={styles.backLabel}>
+                {step === 'tournament'
+                  ? 'Countries'
+                  : selectedCountry?.name ?? 'Back'}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Step: Country */}
+          {step === 'country' && (
+            <View style={styles.section}>
+              {!showSearch && <Text style={styles.sectionTitle}>Select Country</Text>}
+              {discoveryLoading && (
+                <View style={styles.discoveryRow}>
+                  <ActivityIndicator size="small" color={colors.accent} />
+                  <Text style={styles.discoveryText}>
+                    Checking for new tournaments…
+                  </Text>
+                </View>
+              )}
+              {discoveryError && !discoveryLoading && (
+                <View style={styles.discoveryRow}>
+                  <Text style={styles.discoveryErrorText}>
+                    Could not check for new events — showing saved tournaments
+                  </Text>
+                </View>
+              )}
+              {registry.map((country) => (
+                <TouchableOpacity
+                  key={country.id}
+                  style={styles.card}
+                  onPress={() => handleCountrySelect(country)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.cardFlag}>{country.flag}</Text>
+                  <View style={styles.cardBody}>
+                    <Text style={styles.cardTitle}>{country.name}</Text>
+                    <Text style={styles.cardSubtitle}>
+                      {country.tournaments.length} tournament
+                      {country.tournaments.length !== 1 ? 's' : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.cardArrow}>{'›'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {/* Step: Tournament */}
+          {step === 'tournament' && selectedCountry && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                {selectedCountry.flag} {selectedCountry.name} Tournaments
+              </Text>
+              {selectedCountry.tournaments.map((tournament) => {
+                const years = getAvailableYears(tournament);
+                const isAvailable = years.length > 0;
                 return (
                   <TouchableOpacity
-                    key={year}
-                    style={styles.yearCard}
-                    onPress={() => handleYearSelect(year)}
-                    activeOpacity={0.7}
+                    key={tournament.id}
+                    style={[styles.card, !isAvailable && styles.cardDisabled]}
+                    onPress={() => handleTournamentSelect(tournament)}
+                    activeOpacity={isAvailable ? 0.7 : 1}
+                    disabled={!isAvailable}
                   >
-                    <Text style={styles.yearNumber}>{year}</Text>
-                    {ty.venue && (
-                      <Text style={styles.yearVenue} numberOfLines={1}>
-                        {ty.venue}
+                    <Text style={styles.cardIcon}>{tournament.icon}</Text>
+                    <View style={styles.cardBody}>
+                      <Text
+                        style={[
+                          styles.cardTitle,
+                          !isAvailable && styles.cardTitleDisabled,
+                        ]}
+                      >
+                        {tournament.name}
                       </Text>
-                    )}
-                    <Text style={styles.yearEvents}>
-                      {ty.events.length} event
-                      {ty.events.length !== 1 ? 's' : ''}
+                      <Text style={styles.cardSubtitle}>
+                        {isAvailable
+                          ? years.join(', ')
+                          : 'Coming Soon'}
+                      </Text>
+                    </View>
+                    <Text style={styles.cardArrow}>
+                      {isAvailable ? '›' : ''}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </View>
-          </View>
-        )}
+          )}
 
-        {/* Manual URL entry hint */}
-        <View style={styles.hintSection}>
-          <View style={styles.hintDivider}>
-            <View style={styles.hintLine} />
-            <Text style={styles.hintDividerText}>or</Text>
-            <View style={styles.hintLine} />
+          {/* Step: Year */}
+          {step === 'year' && selectedTournament && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>
+                {selectedTournament.icon} {selectedTournament.name}
+              </Text>
+              <Text style={styles.sectionSubtitle}>Select Year</Text>
+              <View style={styles.yearGrid}>
+                {getAvailableYears(selectedTournament).map((year) => {
+                  const ty = getTournamentYear(selectedTournament, year)!;
+                  return (
+                    <TouchableOpacity
+                      key={year}
+                      style={styles.yearCard}
+                      onPress={() => handleYearSelect(year)}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.yearNumber}>{year}</Text>
+                      {ty.venue && (
+                        <Text style={styles.yearVenue} numberOfLines={1}>
+                          {ty.venue}
+                        </Text>
+                      )}
+                      <Text style={styles.yearEvents}>
+                        {ty.events.length} event
+                        {ty.events.length !== 1 ? 's' : ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+
+          {/* Manual URL entry hint */}
+          <View style={styles.hintSection}>
+            <View style={styles.hintDivider}>
+              <View style={styles.hintLine} />
+              <Text style={styles.hintDividerText}>or</Text>
+              <View style={styles.hintLine} />
+            </View>
+            <Text style={styles.hintText}>
+              Don't see your tournament? You can enter any AES event URL after
+              selecting a tournament above, or pick one from your recent events.
+            </Text>
           </View>
-          <Text style={styles.hintText}>
-            Don't see your tournament? You can enter any AES event URL after
-            selecting a tournament above, or pick one from your recent events.
-          </Text>
         </View>
       </ScrollView>
     </View>
+  );
+}
+
+// ── Inline search row ──────────────────────────────────────────────────────
+
+function SearchRow({
+  result,
+  onPress,
+}: {
+  result: GlobalSearchResult;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+
+  let badgeLabel = '';
+  let badgeColor = colors.primary;
+  let title = '';
+  let subtitle = '';
+
+  if (result.kind === 'aes-team') {
+    badgeLabel = 'AES';
+    badgeColor = colors.primary;
+    title = result.teamText || result.teamName;
+    subtitle = `${result.divisionName} — ${result.eventName}`;
+  } else if (result.kind === 'timu-team') {
+    badgeLabel = 'TIMU';
+    badgeColor = colors.accent;
+    title = result.teamName;
+    subtitle = result.tournamentName;
+  } else {
+    const team = result.team;
+    badgeLabel =
+      team.source === 'mrs-linked'
+        ? 'OVA'
+        : team.source === 'mixed'
+        ? 'AES+TIMU'
+        : team.source.toUpperCase();
+    badgeColor =
+      team.source === 'timu' || team.source === 'mixed'
+        ? colors.accent
+        : colors.primary;
+    title = team.label;
+    subtitle = team.kind === 'watching' ? 'Watching' : 'Me';
+    if (team.club) subtitle += ` · ${team.club}`;
+  }
+
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[
+        styles.searchResultRow,
+        {
+          backgroundColor: colors.surface,
+          borderBottomColor: colors.divider,
+        },
+      ]}
+    >
+      <View style={[styles.searchBadge, { backgroundColor: badgeColor }]}>
+        <Text style={styles.searchBadgeText}>{badgeLabel}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.searchResultTitle, { color: colors.text }]} numberOfLines={1}>
+          {title}
+        </Text>
+        <Text
+          style={[styles.searchResultSub, { color: colors.textSecondary }]}
+          numberOfLines={1}
+        >
+          {subtitle}
+        </Text>
+      </View>
+      <Text style={[styles.searchResultArrow, { color: colors.textLight }]}>›</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -302,6 +528,80 @@ function makeStyles(colors: ThemeColors) {
     width: 300,
     height: 100,
   },
+
+  // ── Search section ─────────────────────────────────────────────────────
+  searchSection: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  searchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    gap: spacing.sm,
+  },
+  searchIcon: { fontSize: 18 },
+  searchInput: {
+    flex: 1,
+    fontSize: fontSize.md,
+    paddingVertical: 4,
+  },
+  searchClear: { fontSize: fontSize.sm, fontWeight: '600' },
+  searchResults: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderColor: colors.divider,
+    overflow: 'hidden',
+  },
+  searchEmpty: {
+    padding: spacing.lg,
+    alignItems: 'center',
+  },
+  searchEmptyText: {
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+  },
+  searchResultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: 1,
+  },
+  searchBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    minWidth: 36,
+    alignItems: 'center',
+  },
+  searchBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  searchResultTitle: { fontSize: fontSize.md, fontWeight: '700' },
+  searchResultSub: { fontSize: fontSize.xs, marginTop: 2 },
+  searchResultArrow: { fontSize: fontSize.lg, fontWeight: '600' },
+
+  // De-emphasis treatment for the country tree when the user is mid-search.
+  browseDimmed: { opacity: 0.55 },
+  browseSectionLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1.2,
+    paddingHorizontal: spacing.xxl,
+    paddingTop: spacing.sm,
+    textTransform: 'uppercase',
+  },
+
   backRow: {
     flexDirection: 'row',
     alignItems: 'center',

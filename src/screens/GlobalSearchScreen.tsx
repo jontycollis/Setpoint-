@@ -27,33 +27,16 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { spacing, fontSize, borderRadius, useTheme } from '../utils/theme';
-import { loadAesSeasonIndex, sortedAesSnapshots } from '../utils/aesSeasonIndex';
-import { loadSeasonIndex as loadTimuIndex, sortedSnapshots as sortedTimuSnapshots } from '../utils/timuSeasonIndex';
-import type { UserProfile, TeamProfile } from '../types/profile';
+import type { UserProfile } from '../types/profile';
+import {
+  buildGlobalSearchCorpus,
+  matchesQuery,
+  resultKey,
+  type GlobalSearchResult,
+} from '../utils/globalSearchCorpus';
 
-export type GlobalSearchResult =
-  | {
-      kind: 'aes-team';
-      eventKey: string;
-      eventName: string;
-      divisionId: number;
-      divisionName: string;
-      divisionColorHex?: string;
-      teamId: number;
-      teamName: string;
-      teamText: string;
-      clubName?: string;
-    }
-  | {
-      kind: 'timu-team';
-      tid: number;
-      tournamentName: string;
-      teamName: string;
-    }
-  | {
-      kind: 'profile-team';
-      team: TeamProfile;
-    };
+// Re-export so the existing App.tsx import still resolves.
+export type { GlobalSearchResult } from '../utils/globalSearchCorpus';
 
 interface Props {
   profile: UserProfile | null;
@@ -71,63 +54,8 @@ export function GlobalSearchScreen({ profile, onBack, onSelect }: Props) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [aesIdx, timuIdx] = await Promise.all([
-        loadAesSeasonIndex(),
-        loadTimuIndex(),
-      ]);
+      const out = await buildGlobalSearchCorpus(profile);
       if (cancelled) return;
-
-      const out: GlobalSearchResult[] = [];
-      const seen = new Set<string>();
-
-      // Profile teams first — the user's own roster always sits at the
-      // top of the corpus so familiar teams float up regardless of what
-      // they've recently browsed.
-      if (profile) {
-        for (const team of profile.teams) {
-          const key = `profile:${team.id}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          out.push({ kind: 'profile-team', team });
-        }
-      }
-
-      // AES — one row per (snapshot, team).
-      for (const snap of sortedAesSnapshots(aesIdx)) {
-        for (const team of snap.teams) {
-          const key = `aes:${snap.eventKey}:${snap.divisionId}:${team.teamId}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          out.push({
-            kind: 'aes-team',
-            eventKey: snap.eventKey,
-            eventName: snap.eventName,
-            divisionId: snap.divisionId,
-            divisionName: snap.divisionName,
-            divisionColorHex: snap.divisionColorHex,
-            teamId: team.teamId,
-            teamName: team.teamName,
-            teamText: team.teamText,
-            clubName: team.clubName,
-          });
-        }
-      }
-
-      // Timu — one row per (snapshot, team-row by name).
-      for (const snap of sortedTimuSnapshots(timuIdx)) {
-        for (const team of snap.teams) {
-          const key = `timu:${snap.tid}:${team.teamName.toLowerCase().trim()}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          out.push({
-            kind: 'timu-team',
-            tid: snap.tid,
-            tournamentName: snap.name,
-            teamName: team.teamName,
-          });
-        }
-      }
-
       setAllResults(out);
     })();
     return () => {
@@ -230,42 +158,7 @@ export function GlobalSearchScreen({ profile, onBack, onSelect }: Props) {
   );
 }
 
-// ── Filtering ─────────────────────────────────────────────────────────────
-
-function matchesQuery(r: GlobalSearchResult, q: string): boolean {
-  switch (r.kind) {
-    case 'aes-team':
-      return (
-        r.teamName.toLowerCase().includes(q) ||
-        r.teamText.toLowerCase().includes(q) ||
-        (r.clubName ?? '').toLowerCase().includes(q) ||
-        r.eventName.toLowerCase().includes(q) ||
-        r.divisionName.toLowerCase().includes(q)
-      );
-    case 'timu-team':
-      return (
-        r.teamName.toLowerCase().includes(q) ||
-        r.tournamentName.toLowerCase().includes(q)
-      );
-    case 'profile-team':
-      return (
-        r.team.label.toLowerCase().includes(q) ||
-        r.team.aliases.some((a) => a.toLowerCase().includes(q)) ||
-        (r.team.club ?? '').toLowerCase().includes(q)
-      );
-  }
-}
-
-function resultKey(r: GlobalSearchResult): string {
-  switch (r.kind) {
-    case 'aes-team':
-      return `aes:${r.eventKey}:${r.divisionId}:${r.teamId}`;
-    case 'timu-team':
-      return `timu:${r.tid}:${r.teamName}`;
-    case 'profile-team':
-      return `profile:${r.team.id}`;
-  }
-}
+// Filtering / row helpers live in `utils/globalSearchCorpus`.
 
 // ── Row ───────────────────────────────────────────────────────────────────
 

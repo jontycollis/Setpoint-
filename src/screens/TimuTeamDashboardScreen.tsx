@@ -77,6 +77,14 @@ interface Props {
   isMyTeam: boolean;
   onSetAsMyTeam: () => void;
   onClearMyTeam: () => void;
+  // ── Follow toggle (single-pill replacement for ★ / My Team) ─────────
+  /** How many TeamProfile.kind === 'me' teams the user already has.
+   *  When zero, a fresh follow auto-promotes this team to primary. */
+  meTeamCount?: number;
+  /** Open the per-team roster editor for the matching TeamProfile.
+   *  Surfaced in the Following action sheet only when this team is the
+   *  user's primary me-team. */
+  onManageRoster?: () => void;
 
   onInfoLoaded?: (info: TimuTournamentInfo) => void;
 }
@@ -97,6 +105,8 @@ export function TimuTeamDashboardScreen({
   isMyTeam,
   onSetAsMyTeam,
   onClearMyTeam,
+  meTeamCount = 0,
+  onManageRoster,
   onInfoLoaded,
 }: Props) {
   const { colors } = useTheme();
@@ -332,6 +342,8 @@ export function TimuTeamDashboardScreen({
         isMyTeam={isMyTeam}
         onSetAsMyTeam={onSetAsMyTeam}
         onClearMyTeam={onClearMyTeam}
+        meTeamCount={meTeamCount}
+        onManageRoster={onManageRoster}
       />
       <ScrollView
         style={styles.body}
@@ -530,6 +542,8 @@ function Hero({
   isMyTeam,
   onSetAsMyTeam,
   onClearMyTeam,
+  meTeamCount,
+  onManageRoster,
 }: {
   teamName: string;
   poolName?: string;
@@ -542,9 +556,48 @@ function Hero({
   isMyTeam: boolean;
   onSetAsMyTeam: () => void;
   onClearMyTeam: () => void;
+  meTeamCount: number;
+  onManageRoster?: () => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+
+  // Single-pill follow toggle, mirroring the AES TeamDashboard. The
+  // prior cluster (★ Favorite + My Team) collapses into one button. See
+  // the AES dashboard for the rationale; same behaviour here.
+  const isFollowing = isFavorite || isMyTeam;
+
+  const handleFollow = useCallback(() => {
+    if (!isFavorite) onToggleFavorite();
+    if (!isMyTeam && meTeamCount === 0) onSetAsMyTeam();
+  }, [isFavorite, isMyTeam, meTeamCount, onToggleFavorite, onSetAsMyTeam]);
+
+  const handleStopFollowing = useCallback(() => {
+    if (isFavorite) onToggleFavorite();
+    if (isMyTeam) onClearMyTeam();
+  }, [isFavorite, isMyTeam, onToggleFavorite, onClearMyTeam]);
+
+  const openFollowSheet = useCallback(() => {
+    const buttons: Array<{
+      text: string;
+      style?: 'cancel' | 'destructive';
+      onPress?: () => void;
+    }> = [];
+    if (!isMyTeam) {
+      buttons.push({ text: 'Set as primary team', onPress: onSetAsMyTeam });
+    }
+    if (isMyTeam && onManageRoster) {
+      buttons.push({ text: 'Manage roster', onPress: onManageRoster });
+    }
+    buttons.push({
+      text: 'Stop following',
+      style: 'destructive',
+      onPress: handleStopFollowing,
+    });
+    buttons.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert(teamName, undefined, buttons);
+  }, [teamName, isMyTeam, onManageRoster, onSetAsMyTeam, handleStopFollowing]);
+
   return (
     <View style={styles.hero}>
       <View style={styles.heroTop}>
@@ -552,15 +605,24 @@ function Hero({
           <Text style={styles.heroBack}>{'< Back'}</Text>
         </TouchableOpacity>
         <View style={styles.heroTopRight}>
-          <TouchableOpacity onPress={onToggleFavorite} style={styles.favBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-            <Text style={[styles.fav, isFavorite && styles.favActive]}>{isFavorite ? '★' : '☆'}</Text>
-          </TouchableOpacity>
           <TouchableOpacity
-            onPress={isMyTeam ? onClearMyTeam : onSetAsMyTeam}
-            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-            style={styles.myTeamBtn}
+            onPress={isFollowing ? openFollowSheet : handleFollow}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={[
+              styles.followPill,
+              isFollowing && styles.followPillActive,
+            ]}
           >
-            <Text style={[styles.myTeam, isMyTeam && styles.myTeamActive]}>My Team</Text>
+            <Text
+              style={[
+                styles.followPillText,
+                isFollowing && styles.followPillTextActive,
+              ]}
+            >
+              {isFollowing
+                ? `✓ Following${isMyTeam ? ' · Primary' : ''}  ▾`
+                : '+ Follow'}
+            </Text>
           </TouchableOpacity>
           <TimuShareButton tid={tid} tournamentName={tournamentName} />
         </View>
@@ -868,6 +930,28 @@ function makeStyles(colors: ThemeColors) {
   },
   heroBack: { color: 'rgba(255,255,255,0.9)', fontSize: fontSize.md, fontWeight: '600' },
   heroTopRight: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  // Single-pill follow toggle (replaces ★ Favorite + My Team cluster).
+  // White-on-blue when followed; ghost outline otherwise.
+  followPill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.32)',
+  },
+  followPillActive: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+  },
+  followPillText: {
+    color: '#ffffff',
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+  followPillTextActive: {
+    color: colors.primary,
+  },
   favBtn: { padding: spacing.xs },
   fav: { fontSize: 22, color: 'rgba(255,255,255,0.6)' },
   favActive: { color: colors.warning },
