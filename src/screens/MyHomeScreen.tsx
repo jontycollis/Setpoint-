@@ -53,6 +53,9 @@ import {
   useRecentlyViewed,
   type RecentItem,
 } from '../utils/recentlyViewed';
+import type { Match } from '../types/match';
+import { loadMatches } from '../utils/scoredMatchStore';
+import { aggregateSeasonStats } from '../utils/statAggregator';
 
 interface Props {
   profile: UserProfile;
@@ -91,6 +94,10 @@ interface Props {
   onLongPressTeam?: (team: TeamProfile) => void;
   /** Tap a recently-viewed entry — App routes by kind. */
   onOpenRecent?: (item: RecentItem) => void;
+  /** Tap the per-team "Analytics" chip → opens that team's analytics
+   *  dashboard. Optional; the chip hides when undefined. Wired only on
+   *  `kind: 'me'` cards (Watching teams have no team-scoped analytics). */
+  onOpenAnalytics?: (team: TeamProfile) => void;
 }
 
 export function MyHomeScreen({
@@ -110,6 +117,7 @@ export function MyHomeScreen({
   onViewDiscoveryResult,
   onLongPressTeam,
   onOpenRecent,
+  onOpenAnalytics,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -208,6 +216,7 @@ export function MyHomeScreen({
           onOpenTeam={onOpenTeam}
           onAddTeam={onAddTeam}
           onLongPressTeam={onLongPressTeam}
+          onOpenAnalytics={onOpenAnalytics}
         />
 
         {watchingTeams.length > 0 ? (
@@ -228,6 +237,12 @@ export function MyHomeScreen({
         />
 
         {meTeams.length > 0 ? <CareerCard profile={profile} /> : null}
+        {meTeams.length > 0 && onOpenAnalytics ? (
+          <LiveScoringStrip
+            profile={profile}
+            onOpen={(team) => onOpenAnalytics(team)}
+          />
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -333,6 +348,7 @@ function MyTeamsSection({
   onOpenTeam,
   onAddTeam,
   onLongPressTeam,
+  onOpenAnalytics,
 }: {
   teams: TeamProfile[];
   upcomingByTeamId: Map<string, UnifiedTournamentEntry | null>;
@@ -340,6 +356,7 @@ function MyTeamsSection({
   onOpenTeam: (team: TeamProfile) => void;
   onAddTeam: () => void;
   onLongPressTeam?: (team: TeamProfile) => void;
+  onOpenAnalytics?: (team: TeamProfile) => void;
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -369,6 +386,7 @@ function MyTeamsSection({
             indicesLoaded={indicesLoaded}
             onOpen={() => onOpenTeam(team)}
             onLongPress={onLongPressTeam ? () => onLongPressTeam(team) : undefined}
+            onOpenAnalytics={onOpenAnalytics ? () => onOpenAnalytics(team) : undefined}
           />
         ))
       )}
@@ -434,6 +452,7 @@ function TeamCard({
   indicesLoaded,
   onOpen,
   onLongPress,
+  onOpenAnalytics,
   compact,
 }: {
   team: TeamProfile;
@@ -442,6 +461,7 @@ function TeamCard({
   indicesLoaded: boolean;
   onOpen: () => void;
   onLongPress?: () => void;
+  onOpenAnalytics?: () => void;
   compact?: boolean;
 }) {
   const { colors } = useTheme();
@@ -504,6 +524,18 @@ function TeamCard({
           <UpcomingLine entry={upcoming} />
         ) : null}
       </View>
+      {onOpenAnalytics && !compact ? (
+        <TouchableOpacity
+          onPress={onOpenAnalytics}
+          activeOpacity={0.6}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={[styles.analyticsChip, { borderColor: colors.primary }]}
+        >
+          <Text style={[styles.analyticsChipText, { color: colors.primary }]}>
+            {'\u{1F4CA}'} Analytics
+          </Text>
+        </TouchableOpacity>
+      ) : null}
       <Text style={[styles.teamCardArrow, { color: colors.textLight }]}>
         ›
       </Text>
@@ -667,6 +699,110 @@ function ConnectionRow({
           {connected ? 'Connected' : 'Connect'}
         </Text>
       </View>
+    </TouchableOpacity>
+  );
+}
+
+// ── Live-scoring strip ────────────────────────────────────────────────────
+//
+// Compact summary below the Career card showing live-scored matches
+// only. Reads `scored.matches.v1` and filters to the user's active
+// team (or any 'me' team when there's no active selection). Hidden
+// when there are no `source: 'tier2-live'` matches with
+// `includeInStats: true` — the user just sees their Career card.
+
+function LiveScoringStrip({
+  profile,
+  onOpen,
+}: {
+  profile: UserProfile;
+  onOpen: (team: TeamProfile) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const [stats, setStats] = useState<{
+    matchCount: number;
+    kills: number;
+    topName: string | null;
+    topScore: number;
+    team: TeamProfile;
+  } | null>(null);
+
+  // Pick the team to scope by: active team if set, else the first
+  // `kind: 'me'` team. The strip is hidden when the user has no me-teams,
+  // so meTeams[0] always exists when this effect runs.
+  const meTeams = useMemo(
+    () => profile.teams.filter((t) => t.kind === 'me'),
+    [profile.teams]
+  );
+  const scopedTeam = useMemo(() => {
+    if (profile.activeTeamId) {
+      const active = profile.teams.find((t) => t.id === profile.activeTeamId);
+      if (active && active.kind === 'me') return active;
+    }
+    return meTeams[0] ?? null;
+  }, [profile.activeTeamId, profile.teams, meTeams]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!scopedTeam) {
+      setStats(null);
+      return;
+    }
+    (async () => {
+      try {
+        const all = await loadMatches();
+        if (cancelled) return;
+        const liveScored = all.filter(
+          (m: Match) =>
+            (m.meta.home.teamProfileId === scopedTeam.id ||
+              m.meta.away.teamProfileId === scopedTeam.id) &&
+            (m.meta.source ?? 'tier2-live') === 'tier2-live' &&
+            m.meta.includeInStats !== false
+        );
+        if (liveScored.length === 0) {
+          setStats(null);
+          return;
+        }
+        const summary = aggregateSeasonStats(liveScored, scopedTeam.id);
+        const topPlayer = summary.players[0];
+        setStats({
+          matchCount: liveScored.length,
+          kills: summary.totals.kills,
+          topName: topPlayer && topPlayer.totalPoints > 0 ? topPlayer.name : null,
+          topScore: topPlayer ? topPlayer.totalPoints : 0,
+          team: scopedTeam,
+        });
+      } catch {
+        if (!cancelled) setStats(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [scopedTeam]);
+
+  if (!stats) return null;
+
+  return (
+    <TouchableOpacity
+      onPress={() => onOpen(stats.team)}
+      activeOpacity={0.7}
+      style={[styles.liveStrip, { borderColor: colors.divider, backgroundColor: colors.surface }]}
+    >
+      <View style={[styles.liveStripBadge, { backgroundColor: colors.primary }]}>
+        <Text style={styles.liveStripBadgeText}>LIVE</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.liveStripTitle, { color: colors.text }]} numberOfLines={1}>
+          Live scoring · {stats.team.label}
+        </Text>
+        <Text style={[styles.liveStripMeta, { color: colors.textSecondary }]} numberOfLines={1}>
+          {stats.matchCount} match{stats.matchCount === 1 ? '' : 'es'} · {stats.kills} kills
+          {stats.topName ? ` · top: ${stats.topName} (${stats.topScore})` : ''}
+        </Text>
+      </View>
+      <Text style={[styles.liveStripArrow, { color: colors.textLight }]}>›</Text>
     </TouchableOpacity>
   );
 }
@@ -992,6 +1128,17 @@ function makeStyles(colors: ThemeColors) {
     fontSize: fontSize.lg,
     fontWeight: '600',
   },
+  analyticsChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: borderRadius.full,
+    borderWidth: 1,
+    marginRight: spacing.xs,
+  },
+  analyticsChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+  },
 
   addTeamBtn: {
     paddingVertical: spacing.md,
@@ -1092,6 +1239,40 @@ function makeStyles(colors: ThemeColors) {
   careerLabel: {
     fontSize: fontSize.xs,
     marginTop: 2,
+  },
+
+  liveStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    marginTop: spacing.sm,
+    gap: spacing.sm,
+  },
+  liveStripBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+  },
+  liveStripBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  liveStripTitle: {
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+  liveStripMeta: {
+    fontSize: fontSize.xs,
+    marginTop: 2,
+  },
+  liveStripArrow: {
+    fontSize: fontSize.lg,
+    fontWeight: '600',
   },
 });
 }

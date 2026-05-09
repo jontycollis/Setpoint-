@@ -37,7 +37,8 @@ export type MenuDestination =
   | 'MrsConnection'
   | 'CacConnection'
   | 'Scoreboard'
-  | 'MatchList';
+  | 'MatchList'
+  | 'TeamAnalytics';
 
 /**
  * The hamburger renders different items depending on whether the user is
@@ -437,6 +438,19 @@ export function HamburgerMenu({
                     available={true}
                     isCurrent={isCurrentScreen('MatchList')}
                     onPress={() => handleSelect('MatchList')}
+                  />
+                ) : null}
+                {/* Team Analytics — only meaningful when there's an
+                    active team to scope against. Routes to the active
+                    team's Stats dashboard. */}
+                {userProfile?.activeTeamId ? (
+                  <MenuRow
+                    icon={'\u{1F4CA}'}
+                    label="Team Analytics"
+                    subtitle="Per-player + per-tournament breakdown"
+                    available={true}
+                    isCurrent={isCurrentScreen('Stats')}
+                    onPress={() => handleSelect('TeamAnalytics')}
                   />
                 ) : null}
                 <MenuRow

@@ -1,15 +1,27 @@
-// ── StatsScreen ───────────────────────────────────────────────────────────
+// ── StatsScreen (Analytics dashboard) ─────────────────────────────────────
 //
-// Team stats dashboard showing per-player statistics aggregated from
-// scored matches. Displays:
-//   • Season totals (all scored matches for this team)
-//   • Per-player stat lines (kills, blocks, aces, assists, digs, pass avg)
-//   • Match-by-match breakdown drill-down
+// The team's analytics dashboard — Session γ rebuild on top of the
+// Session-α data model. Sections, top-to-bottom:
+//   • Season-at-a-glance card (record, top contributors, most-improved,
+//     trend mini-chart)
+//   • Splits stripe by matchKind (All / AES / Timu / Standalone),
+//     sticky on scroll. Filters everything below.
+//   • Sortable per-player table (drill-in → PlayerDetailScreen)
+//   • Per-tournament rollup (drill-in → TournamentDetailScreen)
+//   • Match-by-match list with kind/phase badges
 //
-// Data comes from the event-sourced match logs stored in AsyncStorage.
+// Pulls from `scored.matches.v1` via `loadMatches()` and respects
+// `meta.includeInStats` for everything in the dashboard. The screen's
+// own filter state lives locally — not persisted.
+//
+// Entry points:
+//   • MatchList "📊 Team Stats" button (after the parallel session's
+//     rename to "Analytics" lands)
+//   • MyHome team-card "Analytics" chip
+//   • Hamburger Tools → "Team Analytics"
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -20,134 +32,118 @@ import {
 } from 'react-native';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
-import type { Match, Side } from '../types/match';
+import type { Match, MatchKind } from '../types/match';
 import { loadMatches } from '../utils/scoredMatchStore';
 import {
-  aggregateMatchStats,
-  buildMatchStatSummary,
+  aggregateSeasonStats,
   type PlayerStatLine,
-  type TeamMatchStatSummary,
+  type SeasonStatSummary,
 } from '../utils/statAggregator';
+import {
+  aggregateTournamentRollups,
+  buildSeasonGlance,
+  presentSplitKeys,
+  type SeasonGlance,
+  type TournamentRollup,
+} from '../utils/analytics';
+
+type KindFilter = 'all' | MatchKind;
+type SortKey = 'kills' | 'blocks' | 'aces' | 'assists' | 'digs' | 'passAvg' | 'errors' | 'totalPoints';
 
 interface Props {
   teamProfileId: string;
   teamName: string;
   onBack: () => void;
+  /** Drill-in to a single player. Caller pushes a PlayerDetailScreen
+   *  with the same teamProfileId and the chosen shirt #. */
+  onOpenPlayer?: (shirt: number, name: string) => void;
+  /** Drill-in to a single tournament. Caller pushes a
+   *  TournamentDetailScreen with the matchIds array. */
+  onOpenTournament?: (
+    tournamentName: string,
+    matchIds: string[]
+  ) => void;
 }
 
-type SortKey = 'kills' | 'blocks' | 'aces' | 'assists' | 'digs' | 'passAvg' | 'errors' | 'totalPoints';
-
-export function StatsScreen({ teamProfileId, teamName, onBack }: Props) {
+export function StatsScreen({
+  teamProfileId,
+  teamName,
+  onBack,
+  onOpenPlayer,
+  onOpenTournament,
+}: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [loading, setLoading] = useState(true);
-  const [matchSummaries, setMatchSummaries] = useState<TeamMatchStatSummary[]>([]);
-  const [seasonPlayers, setSeasonPlayers] = useState<PlayerStatLine[]>([]);
-  const [seasonTotals, setSeasonTotals] = useState<PlayerStatLine | null>(null);
+  const [allMatches, setAllMatches] = useState<Match[]>([]);
+  const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('totalPoints');
-  const [expandedMatch, setExpandedMatch] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
-        const allMatches = await loadMatches();
-        // Filter to matches involving this team
-        const teamMatches = allMatches.filter(
+        const matches = await loadMatches();
+        if (cancelled) return;
+        const teamMatches = matches.filter(
           (m) =>
             m.meta.home.teamProfileId === teamProfileId ||
             m.meta.away.teamProfileId === teamProfileId
         );
-
-        // Build per-match summaries
-        const summaries: TeamMatchStatSummary[] = [];
-        const seasonLines = new Map<number, PlayerStatLine>();
-
-        for (const match of teamMatches) {
-          const side: Side =
-            match.meta.home.teamProfileId === teamProfileId ? 'home' : 'away';
-          const summary = buildMatchStatSummary(match, side);
-          summaries.push(summary);
-
-          // Merge into season totals
-          for (const pl of summary.players) {
-            let existing = seasonLines.get(pl.shirt);
-            if (!existing) {
-              existing = { ...pl };
-              seasonLines.set(pl.shirt, existing);
-            } else {
-              existing.kills += pl.kills;
-              existing.attacks += pl.attacks;
-              existing.blocks += pl.blocks;
-              existing.aces += pl.aces;
-              existing.assists += pl.assists;
-              existing.digs += pl.digs;
-              existing.passAttempts += pl.passAttempts;
-              existing.passQualitySum += pl.passQualitySum;
-              existing.errors += pl.errors;
-              existing.name = pl.name;
-              if (pl.position) existing.position = pl.position;
-            }
-          }
-        }
-
-        // Recalculate derived fields
-        const players: PlayerStatLine[] = [];
-        let totKills = 0, totAttacks = 0, totBlocks = 0, totAces = 0;
-        let totAssists = 0, totDigs = 0, totPassAtt = 0, totPassQ = 0, totErrors = 0;
-
-        for (const line of seasonLines.values()) {
-          line.totalPoints = line.kills + line.blocks + line.aces;
-          line.killPct = line.attacks > 0 ? (line.kills - line.errors) / line.attacks : NaN;
-          line.passAvg = line.passAttempts > 0 ? line.passQualitySum / line.passAttempts : NaN;
-          players.push(line);
-
-          totKills += line.kills;
-          totAttacks += line.attacks;
-          totBlocks += line.blocks;
-          totAces += line.aces;
-          totAssists += line.assists;
-          totDigs += line.digs;
-          totPassAtt += line.passAttempts;
-          totPassQ += line.passQualitySum;
-          totErrors += line.errors;
-        }
-
-        const totals: PlayerStatLine = {
-          shirt: 0,
-          name: 'Team',
-          attacks: totAttacks,
-          kills: totKills,
-          killPct: totAttacks > 0 ? (totKills - totErrors) / totAttacks : NaN,
-          blocks: totBlocks,
-          aces: totAces,
-          assists: totAssists,
-          digs: totDigs,
-          passAttempts: totPassAtt,
-          passQualitySum: totPassQ,
-          passAvg: totPassAtt > 0 ? totPassQ / totPassAtt : NaN,
-          errors: totErrors,
-          totalPoints: totKills + totBlocks + totAces,
-        };
-
-        summaries.sort((a, b) => b.dateMs - a.dateMs);
-        setMatchSummaries(summaries);
-        setSeasonPlayers(players);
-        setSeasonTotals(totals);
+        setAllMatches(teamMatches);
       } catch (err) {
-        console.warn('Failed to load stats:', err);
+        if (!cancelled) console.warn('[StatsScreen] load failed', err);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [teamProfileId]);
 
+  // Apply includeInStats + matchKind filter once. Everything below
+  // (glance, season totals, tournament rollup) is built from this
+  // pre-filtered list.
+  const filteredMatches = useMemo(() => {
+    return allMatches.filter((m) => {
+      if (m.meta.includeInStats === false) return false;
+      if (kindFilter !== 'all' && (m.meta.matchKind ?? 'standalone') !== kindFilter) {
+        return false;
+      }
+      return true;
+    });
+  }, [allMatches, kindFilter]);
+
+  const presentKinds = useMemo(
+    () => presentSplitKeys(allMatches, teamProfileId, 'matchKind', { respectIncludeInStats: true }),
+    [allMatches, teamProfileId]
+  );
+
+  const glance: SeasonGlance = useMemo(
+    () => buildSeasonGlance(filteredMatches, teamProfileId, { respectIncludeInStats: false }),
+    [filteredMatches, teamProfileId]
+  );
+
+  const seasonSummary: SeasonStatSummary = useMemo(
+    () => aggregateSeasonStats(filteredMatches, teamProfileId),
+    [filteredMatches, teamProfileId]
+  );
+
+  const tournamentRollups: TournamentRollup[] = useMemo(
+    () =>
+      aggregateTournamentRollups(filteredMatches, teamProfileId, {
+        respectIncludeInStats: false,
+      }),
+    [filteredMatches, teamProfileId]
+  );
+
   const sortedPlayers = useMemo(() => {
-    const sorted = [...seasonPlayers];
+    const sorted = seasonSummary.players.slice();
     sorted.sort((a, b) => {
       const aVal = a[sortKey];
       const bVal = b[sortKey];
-      // NaN sorts last
       if (typeof aVal === 'number' && typeof bVal === 'number') {
         if (isNaN(aVal) && isNaN(bVal)) return 0;
         if (isNaN(aVal)) return 1;
@@ -157,280 +153,587 @@ export function StatsScreen({ teamProfileId, teamName, onBack }: Props) {
       return 0;
     });
     return sorted;
-  }, [seasonPlayers, sortKey]);
-
-  function formatNum(n: number): string {
-    if (isNaN(n)) return '—';
-    return n.toFixed(n % 1 === 0 ? 0 : 1);
-  }
-
-  function formatPct(n: number): string {
-    if (isNaN(n)) return '—';
-    return (n * 100).toFixed(1) + '%';
-  }
+  }, [seasonSummary, sortKey]);
 
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.topBar}>
-          <TouchableOpacity onPress={onBack}>
-            <Text style={styles.backBtn}>‹ Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.title}>Stats</Text>
-          <View style={{ width: 50 }} />
-        </View>
+        <Header onBack={onBack} title={`${teamName} Analytics`} colors={colors} styles={styles} />
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading stats…</Text>
+          <Text style={styles.loadingText}>Loading analytics…</Text>
         </View>
       </View>
     );
   }
 
-  const hasStats = seasonPlayers.some(
-    (p) => p.kills > 0 || p.blocks > 0 || p.aces > 0 || p.assists > 0 || p.digs > 0 || p.passAttempts > 0 || p.errors > 0
-  );
+  // Honest empty state — no matches at all.
+  if (allMatches.length === 0) {
+    return (
+      <View style={styles.container}>
+        <Header onBack={onBack} title={`${teamName} Analytics`} colors={colors} styles={styles} />
+        <ScrollView contentContainerStyle={styles.scroll}>
+          <EmptyState
+            title="No scored matches yet"
+            body="Score a match in Tier 2 to see analytics here. Every match counts toward your season totals once you save it."
+            colors={colors}
+            styles={styles}
+          />
+        </ScrollView>
+      </View>
+    );
+  }
+
+  // Empty after filter — but data exists.
+  const noMatchesInSlice = filteredMatches.length === 0;
 
   return (
     <View style={styles.container}>
-      <View style={styles.topBar}>
-        <TouchableOpacity onPress={onBack}>
-          <Text style={styles.backBtn}>‹ Back</Text>
-        </TouchableOpacity>
-        <Text style={styles.title} numberOfLines={1}>{teamName} Stats</Text>
-        <View style={{ width: 50 }} />
-      </View>
-
-      <ScrollView contentContainerStyle={styles.scroll}>
-        {/* Season summary card */}
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryTitle}>Season Summary</Text>
-          <Text style={styles.summarySubtitle}>
-            {matchSummaries.length} match{matchSummaries.length !== 1 ? 'es' : ''} scored
-          </Text>
-          {seasonTotals && hasStats ? (
-            <View style={styles.summaryGrid}>
-              <StatBox label="Kills" value={seasonTotals.kills} colors={colors} />
-              <StatBox label="Blocks" value={seasonTotals.blocks} colors={colors} />
-              <StatBox label="Aces" value={seasonTotals.aces} colors={colors} />
-              <StatBox label="Assists" value={seasonTotals.assists} colors={colors} />
-              <StatBox label="Digs" value={seasonTotals.digs} colors={colors} />
-              <StatBox label="Pass Avg" value={formatNum(seasonTotals.passAvg)} colors={colors} />
-              <StatBox label="Kill %" value={formatPct(seasonTotals.killPct)} colors={colors} />
-              <StatBox label="Errors" value={seasonTotals.errors} accent={colors.error} colors={colors} />
-            </View>
-          ) : (
-            <Text style={styles.noStatsText}>
-              No stats recorded yet. Tap a player on the court diagram during live scoring to start tracking stats.
-            </Text>
-          )}
+      <Header onBack={onBack} title={`${teamName} Analytics`} colors={colors} styles={styles} />
+      <ScrollView
+        contentContainerStyle={styles.scroll}
+        stickyHeaderIndices={[0]}
+        showsVerticalScrollIndicator={true}
+      >
+        {/* Sticky splits stripe */}
+        <View style={styles.stripeWrap}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.stripeRow}
+          >
+            <Chip label="All" active={kindFilter === 'all'} onPress={() => setKindFilter('all')} colors={colors} />
+            {presentKinds.has('aes') ? (
+              <Chip label="AES" active={kindFilter === 'aes'} onPress={() => setKindFilter('aes')} colors={colors} />
+            ) : null}
+            {presentKinds.has('timu') ? (
+              <Chip label="Timu" active={kindFilter === 'timu'} onPress={() => setKindFilter('timu')} colors={colors} />
+            ) : null}
+            {presentKinds.has('standalone') ? (
+              <Chip
+                label="Standalone"
+                active={kindFilter === 'standalone'}
+                onPress={() => setKindFilter('standalone')}
+                colors={colors}
+              />
+            ) : null}
+            {presentKinds.has('imported') ? (
+              <Chip
+                label="Imported"
+                active={kindFilter === 'imported'}
+                onPress={() => setKindFilter('imported')}
+                colors={colors}
+              />
+            ) : null}
+          </ScrollView>
         </View>
 
-        {/* Player stat table */}
-        {hasStats ? (
-          <View style={styles.tableCard}>
-            <Text style={styles.tableTitle}>Player Stats</Text>
+        {noMatchesInSlice ? (
+          <EmptyState
+            title="No matches in this view"
+            body="Try a different split, or score more matches with this match-kind to see analytics here."
+            colors={colors}
+            styles={styles}
+          />
+        ) : (
+          <>
+            <SeasonGlanceCard glance={glance} colors={colors} styles={styles} />
 
-            {/* Sort buttons */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.sortRow}>
-              {([
-                ['totalPoints', 'Pts'],
-                ['kills', 'K'],
-                ['blocks', 'B'],
-                ['aces', 'A'],
-                ['assists', 'Ast'],
-                ['digs', 'D'],
-                ['passAvg', 'Pass'],
-                ['errors', 'Err'],
-              ] as [SortKey, string][]).map(([key, label]) => (
-                <TouchableOpacity
-                  key={key}
-                  style={[styles.sortBtn, sortKey === key && styles.sortBtnActive]}
-                  onPress={() => setSortKey(key)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.sortBtnText, sortKey === key && styles.sortBtnTextActive]}>
-                    {label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {/* Sortable per-player table */}
+            <View style={styles.card}>
+              <Text style={styles.kicker}>PLAYERS</Text>
+              <Text style={styles.cardSubtitle}>Tap a row for the full per-player breakdown</Text>
 
-            {/* Table header */}
-            <View style={styles.tableHeaderRow}>
-              <Text style={[styles.tableHeaderCell, { flex: 2 }]}>#</Text>
-              <Text style={[styles.tableHeaderCell, { flex: 4 }]}>Player</Text>
-              <Text style={styles.tableHeaderCell}>K</Text>
-              <Text style={styles.tableHeaderCell}>B</Text>
-              <Text style={styles.tableHeaderCell}>A</Text>
-              <Text style={styles.tableHeaderCell}>Ast</Text>
-              <Text style={styles.tableHeaderCell}>D</Text>
-              <Text style={styles.tableHeaderCell}>P</Text>
-              <Text style={styles.tableHeaderCell}>E</Text>
-              <Text style={styles.tableHeaderCell}>Pts</Text>
+              {/* Sort buttons */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: spacing.sm }}>
+                {([
+                  ['totalPoints', 'Pts'],
+                  ['kills', 'K'],
+                  ['blocks', 'B'],
+                  ['aces', 'A'],
+                  ['assists', 'Ast'],
+                  ['digs', 'D'],
+                  ['passAvg', 'Pass'],
+                  ['errors', 'Err'],
+                ] as [SortKey, string][]).map(([key, label]) => (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.sortBtn, sortKey === key && styles.sortBtnActive]}
+                    onPress={() => setSortKey(key)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={[styles.sortBtnText, sortKey === key && styles.sortBtnTextActive]}>
+                      {label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Header row */}
+              <View style={styles.tableHeader}>
+                <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
+                <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
+                <Text style={styles.headerCell}>K</Text>
+                <Text style={styles.headerCell}>B</Text>
+                <Text style={styles.headerCell}>A</Text>
+                <Text style={styles.headerCell}>Pts</Text>
+              </View>
+
+              {sortedPlayers.length === 0 ? (
+                <Text style={styles.empty}>No player stats recorded yet.</Text>
+              ) : (
+                sortedPlayers
+                  .filter(
+                    (p) =>
+                      p.kills > 0 ||
+                      p.blocks > 0 ||
+                      p.aces > 0 ||
+                      p.assists > 0 ||
+                      p.digs > 0 ||
+                      p.passAttempts > 0 ||
+                      p.errors > 0
+                  )
+                  .map((p) => (
+                    <PlayerRow
+                      key={p.shirt}
+                      line={p}
+                      onPress={
+                        onOpenPlayer ? () => onOpenPlayer(p.shirt, p.name) : undefined
+                      }
+                      colors={colors}
+                      styles={styles}
+                    />
+                  ))
+              )}
             </View>
 
-            {/* Player rows */}
-            {sortedPlayers.map((p) => {
-              const hasAny = p.kills > 0 || p.blocks > 0 || p.aces > 0 || p.assists > 0 || p.digs > 0 || p.passAttempts > 0 || p.errors > 0;
-              if (!hasAny) return null;
-              return (
-                <View key={p.shirt} style={styles.tableRow}>
-                  <Text style={[styles.tableCell, { flex: 2, fontWeight: '800' }]}>
-                    {p.shirt}
-                  </Text>
-                  <Text style={[styles.tableCell, { flex: 4 }]} numberOfLines={1}>
-                    {p.name}
-                  </Text>
-                  <Text style={styles.tableCell}>{p.kills || '—'}</Text>
-                  <Text style={styles.tableCell}>{p.blocks || '—'}</Text>
-                  <Text style={styles.tableCell}>{p.aces || '—'}</Text>
-                  <Text style={styles.tableCell}>{p.assists || '—'}</Text>
-                  <Text style={styles.tableCell}>{p.digs || '—'}</Text>
-                  <Text style={styles.tableCell}>{formatNum(p.passAvg)}</Text>
-                  <Text style={[styles.tableCell, p.errors > 0 && { color: colors.error }]}>
-                    {p.errors || '—'}
-                  </Text>
-                  <Text style={[styles.tableCell, { fontWeight: '800', color: colors.primary }]}>
-                    {p.totalPoints || '—'}
-                  </Text>
-                </View>
-              );
-            })}
-          </View>
-        ) : null}
+            {/* Per-tournament rollup */}
+            {tournamentRollups.length > 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.kicker}>TOURNAMENTS</Text>
+                <Text style={styles.cardSubtitle}>
+                  {tournamentRollups.length} tournament{tournamentRollups.length === 1 ? '' : 's'}{' '}
+                  · tap to drill in
+                </Text>
+                {tournamentRollups.map((row) => (
+                  <TournamentRow
+                    key={row.tournamentKey}
+                    rollup={row}
+                    onPress={
+                      onOpenTournament
+                        ? () => onOpenTournament(row.tournamentName, row.matchIds)
+                        : undefined
+                    }
+                    colors={colors}
+                    styles={styles}
+                  />
+                ))}
+              </View>
+            ) : null}
 
-        {/* Match-by-match breakdown */}
-        {matchSummaries.length > 0 ? (
-          <View style={styles.matchSection}>
-            <Text style={styles.matchSectionTitle}>Match Breakdown</Text>
-            {matchSummaries.map((ms) => (
-              <View key={ms.matchId} style={styles.matchCard}>
-                <TouchableOpacity
-                  onPress={() => setExpandedMatch(expandedMatch === ms.matchId ? null : ms.matchId)}
-                  style={styles.matchCardHeader}
-                  activeOpacity={0.7}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.matchOpponent} numberOfLines={1}>
-                      vs {ms.opponent}
-                    </Text>
-                    <Text style={styles.matchDetail}>
-                      {ms.matchLabel} · {new Date(ms.dateMs).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  <View style={styles.matchResultBadge}>
-                    <Text style={[
-                      styles.matchResultText,
-                      ms.result === 'W' && { color: '#16a34a' },
-                      ms.result === 'L' && { color: colors.error },
-                    ]}>
-                      {ms.result ?? '—'} {ms.setsWon}–{ms.setsLost}
-                    </Text>
-                  </View>
-                  <Text style={styles.matchExpandArrow}>
-                    {expandedMatch === ms.matchId ? '▾' : '▸'}
-                  </Text>
-                </TouchableOpacity>
-
-                {expandedMatch === ms.matchId ? (
-                  <View style={styles.matchExpanded}>
-                    {/* Totals row */}
-                    <View style={styles.matchTotalsRow}>
-                      <Text style={styles.matchTotalLabel}>
-                        K:{ms.totals.kills} B:{ms.totals.blocks} A:{ms.totals.aces} Ast:{ms.totals.assists} D:{ms.totals.digs} E:{ms.totals.errors}
-                      </Text>
-                    </View>
-                    {/* Player rows */}
-                    {ms.players
-                      .filter((p) => p.kills > 0 || p.blocks > 0 || p.aces > 0 || p.assists > 0 || p.digs > 0 || p.passAttempts > 0 || p.errors > 0)
-                      .map((p) => (
-                        <View key={p.shirt} style={styles.matchPlayerRow}>
-                          <Text style={styles.matchPlayerShirt}>#{p.shirt}</Text>
-                          <Text style={styles.matchPlayerName} numberOfLines={1}>{p.name}</Text>
-                          <Text style={styles.matchPlayerStats}>
-                            {p.kills > 0 ? `K:${p.kills} ` : ''}
-                            {p.blocks > 0 ? `B:${p.blocks} ` : ''}
-                            {p.aces > 0 ? `A:${p.aces} ` : ''}
-                            {p.assists > 0 ? `Ast:${p.assists} ` : ''}
-                            {p.digs > 0 ? `D:${p.digs} ` : ''}
-                            {p.passAttempts > 0 ? `P:${formatNum(p.passAvg)} ` : ''}
-                            {p.errors > 0 ? `E:${p.errors}` : ''}
+            {/* Match-by-match */}
+            <View style={styles.card}>
+              <Text style={styles.kicker}>MATCH BY MATCH</Text>
+              {seasonSummary.matches.length === 0 ? (
+                <Text style={styles.empty}>No matches in this view.</Text>
+              ) : (
+                seasonSummary.matches
+                  .slice()
+                  .sort((a, b) => b.dateMs - a.dateMs)
+                  .map((m) => {
+                    const match = filteredMatches.find((x) => x.id === m.matchId);
+                    const kind = match?.meta.matchKind ?? 'standalone';
+                    return (
+                      <View key={m.matchId} style={styles.matchListRow}>
+                        <View style={{ flex: 1 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Text style={[styles.matchOpponent, { color: colors.text }]} numberOfLines={1}>
+                              vs {m.opponent}
+                            </Text>
+                            <KindBadge kind={kind} colors={colors} />
+                          </View>
+                          <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>
+                            {m.matchLabel} · {new Date(m.dateMs).toLocaleDateString()}
                           </Text>
                         </View>
-                      ))}
-                    {ms.players.every(
-                      (p) => p.kills === 0 && p.blocks === 0 && p.aces === 0 && p.assists === 0 && p.digs === 0 && p.passAttempts === 0 && p.errors === 0
-                    ) ? (
-                      <Text style={styles.noStatsText}>No stats recorded for this match.</Text>
-                    ) : null}
-                  </View>
-                ) : null}
-              </View>
-            ))}
-          </View>
-        ) : null}
-
-        {matchSummaries.length === 0 ? (
-          <View style={styles.emptyWrap}>
-            <Text style={styles.emptyTitle}>No Scored Matches</Text>
-            <Text style={styles.emptyBody}>
-              Score a match using the live scorer to start building your team stats dashboard. Stats are recorded when you tap a player on the court diagram during scoring.
-            </Text>
-          </View>
-        ) : null}
+                        <View style={{ alignItems: 'center', minWidth: 48 }}>
+                          <Text
+                            style={[
+                              styles.matchResultText,
+                              m.result === 'W'
+                                ? { color: colors.success }
+                                : m.result === 'L'
+                                ? { color: colors.error }
+                                : { color: colors.textSecondary },
+                            ]}
+                          >
+                            {m.result ?? '—'}
+                          </Text>
+                          <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary }}>
+                            {m.setsWon}–{m.setsLost}
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })
+              )}
+            </View>
+          </>
+        )}
       </ScrollView>
     </View>
   );
 }
 
-// ─── StatBox ──────────────────────────────────────────────────────────────
+// ── Header ───────────────────────────────────────────────────────────────
 
-function StatBox({
-  label,
-  value,
-  accent,
+function Header({
+  onBack,
+  title,
   colors,
+  styles,
 }: {
-  label: string;
-  value: number | string;
-  accent?: string;
+  onBack: () => void;
+  title: string;
   colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
 }) {
   return (
-    <View style={{
-      alignItems: 'center',
-      minWidth: 70,
-      paddingVertical: spacing.sm,
-      paddingHorizontal: spacing.xs,
-    }}>
-      <Text style={{
-        fontSize: fontSize.xxl,
-        fontWeight: '900',
-        color: accent ?? colors.primary,
-      }}>
-        {typeof value === 'number' ? value : value}
-      </Text>
-      <Text style={{
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
-        fontWeight: '600',
-        marginTop: 2,
-      }}>
-        {label}
-      </Text>
+    <View style={styles.topBar}>
+      <TouchableOpacity onPress={onBack} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+        <Text style={styles.backBtn}>‹ Back</Text>
+      </TouchableOpacity>
+      <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      <View style={{ width: 50 }} />
     </View>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────
+// ── Chip ─────────────────────────────────────────────────────────────────
+
+function Chip({
+  label,
+  active,
+  onPress,
+  colors,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  colors: ThemeColors;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[
+        {
+          paddingHorizontal: spacing.md,
+          paddingVertical: 6,
+          borderRadius: borderRadius.full,
+          marginRight: 6,
+          borderWidth: 1,
+        },
+        active
+          ? { backgroundColor: colors.primary, borderColor: colors.primary }
+          : { backgroundColor: colors.surface, borderColor: colors.border },
+      ]}
+    >
+      <Text
+        style={{
+          fontSize: fontSize.xs,
+          fontWeight: '700',
+          color: active ? colors.textOnPrimary : colors.textSecondary,
+        }}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+// ── Season-at-a-glance card ─────────────────────────────────────────────
+
+function SeasonGlanceCard({
+  glance,
+  colors,
+  styles,
+}: {
+  glance: SeasonGlance;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const { record, topContributors, mostImproved, mostImprovedReason, trendPoints, sourceBreakdown } = glance;
+  const sourceLine: string[] = [];
+  if (sourceBreakdown.tier2Live > 0) sourceLine.push(`${sourceBreakdown.tier2Live} live`);
+  if (sourceBreakdown.sidelineImport > 0) sourceLine.push(`${sourceBreakdown.sidelineImport} imported`);
+  if (sourceBreakdown.manual > 0) sourceLine.push(`${sourceBreakdown.manual} manual`);
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.kicker}>SEASON AT A GLANCE</Text>
+      <Text style={styles.cardSubtitle}>
+        {record.matchCount} match{record.matchCount === 1 ? '' : 'es'}
+        {sourceLine.length > 0 ? ` · ${sourceLine.join(' · ')}` : ''}
+      </Text>
+
+      <View style={styles.glanceRecordRow}>
+        <View style={styles.glanceRecordCell}>
+          <Text style={[styles.glanceRecordValue, { color: colors.primary }]}>
+            {record.matchesWon}–{record.matchesLost}
+          </Text>
+          <Text style={styles.glanceRecordLabel}>Match record</Text>
+        </View>
+        <View style={styles.glanceRecordCell}>
+          <Text style={styles.glanceRecordValue}>
+            {record.setsWon}–{record.setsLost}
+          </Text>
+          <Text style={styles.glanceRecordLabel}>Sets</Text>
+        </View>
+      </View>
+
+      {topContributors.length > 0 ? (
+        <View style={{ marginTop: spacing.md }}>
+          <Text style={styles.glanceSubKicker}>TOP CONTRIBUTORS</Text>
+          {topContributors.map((c, idx) => (
+            <View key={c.shirt} style={styles.contribRow}>
+              <Text style={[styles.contribRank, { color: colors.primary }]}>{idx + 1}</Text>
+              <Text style={[styles.contribShirt, { color: colors.textSecondary }]}>#{c.shirt}</Text>
+              <Text style={[styles.contribName, { color: colors.text }]} numberOfLines={1}>
+                {c.name}
+              </Text>
+              <Text style={[styles.contribPoints, { color: colors.primary }]}>
+                {c.totalPoints} pts
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={{ marginTop: spacing.md }}>
+        <Text style={styles.glanceSubKicker}>MOST IMPROVED</Text>
+        {mostImproved ? (
+          <View style={{ marginTop: 4 }}>
+            <Text style={{ fontSize: fontSize.md, fontWeight: '700', color: colors.text }}>
+              #{mostImproved.shirt} {mostImproved.name}
+            </Text>
+            <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 }}>
+              +{mostImproved.delta.toFixed(1)} pts/match · {mostImproved.baseline.toFixed(1)} → {mostImproved.recent.toFixed(1)}
+            </Text>
+          </View>
+        ) : (
+          <Text style={{ fontSize: fontSize.xs, color: colors.textLight, fontStyle: 'italic', marginTop: 4 }}>
+            {mostImprovedReason ?? 'No data'}
+          </Text>
+        )}
+      </View>
+
+      {trendPoints.length >= 2 ? (
+        <View style={{ marginTop: spacing.lg }}>
+          <Text style={styles.glanceSubKicker}>RALLY WIN % BY MATCH</Text>
+          <TrendChart points={trendPoints} colors={colors} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+// Compact bar-style trend chart. Each bar is one match; height = rally
+// win % (0..1). NaN entries render as a hollow bar so missing data is
+// visible without faking a number. Tournament-start matches get a
+// thin accent stripe at the bottom of the bar.
+function TrendChart({
+  points,
+  colors,
+}: {
+  points: SeasonGlance['trendPoints'];
+  colors: ThemeColors;
+}) {
+  const barW = 14;
+  const gap = 4;
+  const maxH = 60;
+  return (
+    <View style={{ flexDirection: 'row', alignItems: 'flex-end', marginTop: spacing.sm, height: maxH + 8 }}>
+      {points.map((p, idx) => {
+        const valid = !isNaN(p.rallyWinPct);
+        const h = valid ? Math.max(2, p.rallyWinPct * maxH) : 2;
+        const bg = valid ? colors.primary : colors.border;
+        return (
+          <View key={p.matchId + idx} style={{ alignItems: 'center', marginRight: gap }}>
+            <View
+              style={{
+                width: barW,
+                height: h,
+                backgroundColor: bg,
+                borderRadius: 2,
+                opacity: valid ? 1 : 0.5,
+              }}
+            />
+            {p.tournamentName ? (
+              <View
+                style={{
+                  width: barW,
+                  height: 3,
+                  backgroundColor: colors.accent,
+                  marginTop: 2,
+                }}
+              />
+            ) : (
+              <View style={{ height: 5 }} />
+            )}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+// ── Player row ───────────────────────────────────────────────────────────
+
+function PlayerRow({
+  line,
+  onPress,
+  colors,
+  styles,
+}: {
+  line: PlayerStatLine;
+  onPress?: () => void;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const inner = (
+    <>
+      <Text style={[styles.cell, { flex: 2, fontWeight: '800' }]}>{line.shirt}</Text>
+      <Text style={[styles.cell, { flex: 4, textAlign: 'left', paddingLeft: spacing.xs }]} numberOfLines={1}>
+        {line.name}
+      </Text>
+      <Text style={styles.cell}>{line.kills || '—'}</Text>
+      <Text style={styles.cell}>{line.blocks || '—'}</Text>
+      <Text style={styles.cell}>{line.aces || '—'}</Text>
+      <Text style={[styles.cell, { fontWeight: '800', color: colors.primary }]}>
+        {line.totalPoints || '—'}
+      </Text>
+    </>
+  );
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.6} style={styles.tableRow}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={styles.tableRow}>{inner}</View>;
+}
+
+// ── Tournament row ───────────────────────────────────────────────────────
+
+function TournamentRow({
+  rollup,
+  onPress,
+  colors,
+  styles,
+}: {
+  rollup: TournamentRollup;
+  onPress?: () => void;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const sourceLabel =
+    rollup.source === 'aes' ? 'AES' : rollup.source === 'timu' ? 'TIMU' : rollup.source === 'imported' ? 'IMP' : 'STD';
+  const sourceColor =
+    rollup.source === 'aes' ? colors.primary : rollup.source === 'timu' ? colors.accent : colors.textLight;
+  const inner = (
+    <>
+      <View
+        style={{
+          backgroundColor: sourceColor,
+          paddingHorizontal: 6,
+          paddingVertical: 2,
+          borderRadius: borderRadius.sm,
+          marginRight: spacing.sm,
+        }}
+      >
+        <Text style={{ color: '#fff', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 }}>
+          {sourceLabel}
+        </Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.tournamentName, { color: colors.text }]} numberOfLines={1}>
+          {rollup.tournamentName}
+        </Text>
+        <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>
+          {rollup.matchIds.length} match{rollup.matchIds.length === 1 ? '' : 'es'}
+          {rollup.phaseLabel !== 'Unknown' ? ` · ${rollup.phaseLabel}` : ''}
+          {' · '}
+          {new Date(rollup.dateMs).toLocaleDateString()}
+        </Text>
+      </View>
+      <View style={{ alignItems: 'flex-end' }}>
+        <Text style={{ fontSize: fontSize.md, fontWeight: '900', color: colors.primary }}>
+          {rollup.matchesWon}–{rollup.matchesLost}
+        </Text>
+        <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary }}>
+          {rollup.setsWon}–{rollup.setsLost} sets
+        </Text>
+      </View>
+    </>
+  );
+  if (onPress) {
+    return (
+      <TouchableOpacity onPress={onPress} activeOpacity={0.6} style={styles.tournamentRow}>
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={styles.tournamentRow}>{inner}</View>;
+}
+
+// ── Kind badge ──────────────────────────────────────────────────────────
+
+function KindBadge({ kind, colors }: { kind: MatchKind; colors: ThemeColors }) {
+  const label = kind === 'aes' ? 'AES' : kind === 'timu' ? 'TIMU' : kind === 'imported' ? 'IMP' : 'STD';
+  const bg = kind === 'aes' ? colors.primary : kind === 'timu' ? colors.accent : colors.textLight;
+  return (
+    <View
+      style={{
+        backgroundColor: bg,
+        paddingHorizontal: 5,
+        paddingVertical: 1,
+        borderRadius: borderRadius.sm,
+        marginLeft: 6,
+      }}
+    >
+      <Text style={{ fontSize: 9, fontWeight: '800', color: '#fff' }}>{label}</Text>
+    </View>
+  );
+}
+
+// ── Empty state ─────────────────────────────────────────────────────────
+
+function EmptyState({
+  title,
+  body,
+  colors,
+  styles,
+}: {
+  title: string;
+  body: string;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <View style={styles.emptyCard}>
+      <Text style={styles.emptyTitle}>{title}</Text>
+      <Text style={styles.emptyBody}>{body}</Text>
+    </View>
+  );
+}
+
+// ── Styles ──────────────────────────────────────────────────────────────
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-    container: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+    container: { flex: 1, backgroundColor: colors.background },
     topBar: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -442,83 +745,68 @@ function makeStyles(colors: ThemeColors) {
       borderBottomWidth: 1,
       borderBottomColor: colors.border,
     },
-    backBtn: {
-      color: colors.primary,
-      fontSize: fontSize.md,
-      fontWeight: '600',
+    backBtn: { color: colors.primary, fontSize: fontSize.md, fontWeight: '600' },
+    title: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800', flex: 1, textAlign: 'center' },
+    scroll: { paddingBottom: spacing.xxxl + 40 },
+    loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    loadingText: { color: colors.textSecondary, marginTop: spacing.sm },
+
+    stripeWrap: {
+      backgroundColor: colors.surface,
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.divider,
     },
-    title: {
-      color: colors.text,
-      fontSize: fontSize.lg,
-      fontWeight: '800',
-      flex: 1,
-      textAlign: 'center',
-    },
-    scroll: {
-      paddingBottom: spacing.xxxl + 40,
-    },
-    loadingWrap: {
-      flex: 1,
-      justifyContent: 'center',
-      alignItems: 'center',
-    },
-    loadingText: {
-      color: colors.textSecondary,
-      marginTop: spacing.sm,
+    stripeRow: {
+      paddingHorizontal: spacing.md,
+      flexDirection: 'row',
     },
 
-    // Summary card
-    summaryCard: {
+    card: {
       backgroundColor: colors.surface,
-      margin: spacing.md,
+      marginHorizontal: spacing.md,
+      marginTop: spacing.md,
       borderRadius: borderRadius.lg,
       padding: spacing.lg,
       borderWidth: 1,
       borderColor: colors.border,
     },
-    summaryTitle: {
-      fontSize: fontSize.xl,
-      fontWeight: '800',
-      color: colors.text,
-      marginBottom: 4,
+    kicker: { fontSize: 11, fontWeight: '800', color: colors.textLight, letterSpacing: 1 },
+    cardSubtitle: {
+      fontSize: fontSize.xs,
+      color: colors.textSecondary,
+      marginTop: 2,
+      marginBottom: spacing.md,
     },
-    summarySubtitle: {
+    empty: {
       fontSize: fontSize.sm,
       color: colors.textSecondary,
-      marginBottom: spacing.md,
-    },
-    summaryGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'space-around',
-    },
-    noStatsText: {
-      fontSize: fontSize.sm,
-      color: colors.textLight,
-      textAlign: 'center',
-      lineHeight: 20,
       paddingVertical: spacing.md,
+      textAlign: 'center',
     },
 
-    // Player table
-    tableCard: {
-      backgroundColor: colors.surface,
-      marginHorizontal: spacing.md,
-      marginBottom: spacing.md,
-      borderRadius: borderRadius.lg,
-      padding: spacing.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
-    tableTitle: {
-      fontSize: fontSize.lg,
+    glanceRecordRow: { flexDirection: 'row', justifyContent: 'space-around', marginTop: spacing.sm },
+    glanceRecordCell: { alignItems: 'center', minWidth: 80 },
+    glanceRecordValue: { fontSize: fontSize.xxxl, fontWeight: '900', color: colors.text },
+    glanceRecordLabel: { fontSize: fontSize.xs, color: colors.textSecondary, fontWeight: '600', marginTop: 2 },
+
+    glanceSubKicker: {
+      fontSize: 10,
       fontWeight: '800',
-      color: colors.text,
-      marginBottom: spacing.sm,
+      color: colors.textLight,
+      letterSpacing: 1,
+      marginBottom: spacing.xs,
     },
-    sortRow: {
-      marginBottom: spacing.sm,
+    contribRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 4,
     },
+    contribRank: { width: 18, fontSize: fontSize.md, fontWeight: '900' },
+    contribShirt: { width: 32, fontSize: fontSize.xs, fontWeight: '700' },
+    contribName: { flex: 1, fontSize: fontSize.sm, fontWeight: '600' },
+    contribPoints: { fontSize: fontSize.sm, fontWeight: '800' },
+
     sortBtn: {
       paddingHorizontal: spacing.md,
       paddingVertical: 6,
@@ -528,25 +816,17 @@ function makeStyles(colors: ThemeColors) {
       borderWidth: 1,
       borderColor: colors.border,
     },
-    sortBtnActive: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-    },
-    sortBtnText: {
-      fontSize: fontSize.xs,
-      fontWeight: '700',
-      color: colors.textSecondary,
-    },
-    sortBtnTextActive: {
-      color: colors.textOnPrimary,
-    },
-    tableHeaderRow: {
+    sortBtnActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+    sortBtnText: { fontSize: fontSize.xs, fontWeight: '700', color: colors.textSecondary },
+    sortBtnTextActive: { color: colors.textOnPrimary },
+
+    tableHeader: {
       flexDirection: 'row',
       paddingVertical: 6,
       borderBottomWidth: 2,
       borderBottomColor: colors.border,
     },
-    tableHeaderCell: {
+    headerCell: {
       flex: 1,
       fontSize: 10,
       fontWeight: '800',
@@ -559,122 +839,38 @@ function makeStyles(colors: ThemeColors) {
       paddingVertical: 8,
       borderBottomWidth: 1,
       borderBottomColor: colors.divider,
+      alignItems: 'center',
     },
-    tableCell: {
-      flex: 1,
-      fontSize: fontSize.sm,
-      color: colors.text,
-      textAlign: 'center',
-    },
+    cell: { flex: 1, fontSize: fontSize.sm, color: colors.text, textAlign: 'center' },
 
-    // Match breakdown
-    matchSection: {
-      paddingHorizontal: spacing.md,
-      marginBottom: spacing.md,
-    },
-    matchSectionTitle: {
-      fontSize: fontSize.lg,
-      fontWeight: '800',
-      color: colors.text,
-      marginBottom: spacing.sm,
-    },
-    matchCard: {
-      backgroundColor: colors.surface,
-      borderRadius: borderRadius.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
-      marginBottom: spacing.sm,
-      overflow: 'hidden',
-    },
-    matchCardHeader: {
+    tournamentRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      padding: spacing.md,
-    },
-    matchOpponent: {
-      fontSize: fontSize.md,
-      fontWeight: '700',
-      color: colors.text,
-    },
-    matchDetail: {
-      fontSize: fontSize.xs,
-      color: colors.textSecondary,
-      marginTop: 2,
-    },
-    matchResultBadge: {
-      paddingHorizontal: spacing.sm,
-      paddingVertical: 4,
-      borderRadius: borderRadius.sm,
-      backgroundColor: colors.background,
-      marginLeft: spacing.sm,
-    },
-    matchResultText: {
-      fontSize: fontSize.sm,
-      fontWeight: '800',
-      color: colors.text,
-    },
-    matchExpandArrow: {
-      fontSize: fontSize.md,
-      color: colors.textLight,
-      marginLeft: spacing.sm,
-    },
-    matchExpanded: {
-      borderTopWidth: 1,
-      borderTopColor: colors.divider,
-      paddingHorizontal: spacing.md,
       paddingVertical: spacing.sm,
-    },
-    matchTotalsRow: {
-      paddingVertical: 4,
-      marginBottom: spacing.xs,
-    },
-    matchTotalLabel: {
-      fontSize: fontSize.sm,
-      fontWeight: '700',
-      color: colors.primary,
-    },
-    matchPlayerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 4,
       borderBottomWidth: 1,
       borderBottomColor: colors.divider,
     },
-    matchPlayerShirt: {
-      fontSize: fontSize.sm,
-      fontWeight: '800',
-      color: colors.text,
-      width: 36,
-    },
-    matchPlayerName: {
-      fontSize: fontSize.sm,
-      color: colors.text,
-      flex: 1,
-      marginRight: spacing.sm,
-    },
-    matchPlayerStats: {
-      fontSize: fontSize.xs,
-      color: colors.textSecondary,
-      flexShrink: 0,
-    },
+    tournamentName: { fontSize: fontSize.md, fontWeight: '700' },
 
-    // Empty state
-    emptyWrap: {
+    matchListRow: {
+      flexDirection: 'row',
+      paddingVertical: spacing.sm,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.divider,
       alignItems: 'center',
-      padding: spacing.xxl,
+    },
+    matchOpponent: { fontSize: fontSize.md, fontWeight: '700' },
+    matchResultText: { fontSize: fontSize.lg, fontWeight: '900' },
+
+    emptyCard: {
+      backgroundColor: colors.surface,
+      marginHorizontal: spacing.md,
       marginTop: spacing.xxl,
+      borderRadius: borderRadius.lg,
+      padding: spacing.xl,
+      alignItems: 'center',
     },
-    emptyTitle: {
-      fontSize: fontSize.xl,
-      fontWeight: '800',
-      color: colors.text,
-      marginBottom: spacing.sm,
-    },
-    emptyBody: {
-      fontSize: fontSize.md,
-      color: colors.textSecondary,
-      textAlign: 'center',
-      lineHeight: 22,
-    },
+    emptyTitle: { fontSize: fontSize.lg, fontWeight: '800', color: colors.text, marginBottom: spacing.sm },
+    emptyBody: { fontSize: fontSize.sm, color: colors.textSecondary, textAlign: 'center', lineHeight: 20 },
   });
 }

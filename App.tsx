@@ -52,6 +52,8 @@ import { AddTournamentsScreen } from './src/screens/AddTournamentsScreen';
 import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
 import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
+import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
+import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
 import { ToolsScreen } from './src/screens/ToolsScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
 import type { GlobalSearchResult } from './src/screens/GlobalSearchScreen';
@@ -154,6 +156,8 @@ type Screen =
   | 'MatchScoring'
   | 'TeamRoster'
   | 'Stats'
+  | 'PlayerDetail'
+  | 'TournamentDetail'
   | 'Tools'
   | 'GlobalSearch';
 
@@ -209,6 +213,10 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'MatchScoring',
   // Roster editor — the team being edited is in its own header.
   'TeamRoster',
+  // Analytics — team identity is in the screen title
+  'Stats',
+  'PlayerDetail',
+  'TournamentDetail',
 ]);
 
 // Screens where the bottom tab bar is hidden (focused full-screen flows).
@@ -302,6 +310,13 @@ export default function App() {
   // Stats screen navigation — carries the team profile ID and name.
   const [statsTeamProfileId, setStatsTeamProfileId] = useState<string>('');
   const [statsTeamName, setStatsTeamName] = useState<string>('');
+  // PlayerDetail and TournamentDetail share the same teamProfileId/teamName
+  // as the Stats dashboard they were opened from. Each carries its own
+  // selection (shirt # or tournament + matchIds list).
+  const [playerDetailShirt, setPlayerDetailShirt] = useState<number>(0);
+  const [playerDetailName, setPlayerDetailName] = useState<string>('');
+  const [tournamentDetailName, setTournamentDetailName] = useState<string>('');
+  const [tournamentDetailMatchIds, setTournamentDetailMatchIds] = useState<string[]>([]);
   // TeamRoster screen — which TeamProfile.id is being edited.
   const [rosterEditTeamId, setRosterEditTeamId] = useState<string | null>(null);
   // When a team dashboard's "+ Add a tournament" button routes the user
@@ -1502,6 +1517,21 @@ export default function App() {
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('OvaRankings');
           break;
+        case 'TeamAnalytics': {
+          // Routes to the active team's Stats dashboard. The hamburger
+          // gates this entry on `activeTeamId`, but defensively re-check
+          // here so a stale render doesn't navigate into a blank screen.
+          const activeTeam = userProfile?.activeTeamId
+            ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
+            : null;
+          if (activeTeam) {
+            setStatsTeamProfileId(activeTeam.id);
+            setStatsTeamName(activeTeam.label);
+            setScreenHistory((prev) => [...prev, screen]);
+            setScreen('Stats');
+          }
+          break;
+        }
       }
     },
     [screen, currentEvent, currentDivision, currentTeam, currentTimuTid, currentTimuTeamName, myTeam, userProfile]
@@ -1738,6 +1768,12 @@ export default function App() {
               setScreen('CacConnection');
             }}
             onOpenRecent={handleOpenRecent}
+            onOpenAnalytics={(team) => {
+              setStatsTeamProfileId(team.id);
+              setStatsTeamName(team.label);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('Stats');
+            }}
           />
         );
       case 'AddTeamChooser':
@@ -2107,6 +2143,44 @@ export default function App() {
             teamProfileId={statsTeamProfileId}
             teamName={statsTeamName}
             onBack={goBack}
+            onOpenPlayer={(shirt, name) => {
+              setPlayerDetailShirt(shirt);
+              setPlayerDetailName(name);
+              setScreenHistory((prev) => [...prev, 'Stats']);
+              setScreen('PlayerDetail');
+            }}
+            onOpenTournament={(name, matchIds) => {
+              setTournamentDetailName(name);
+              setTournamentDetailMatchIds(matchIds);
+              setScreenHistory((prev) => [...prev, 'Stats']);
+              setScreen('TournamentDetail');
+            }}
+          />
+        );
+      case 'PlayerDetail':
+        return (
+          <PlayerDetailScreen
+            teamProfileId={statsTeamProfileId}
+            teamName={statsTeamName}
+            shirt={playerDetailShirt}
+            initialName={playerDetailName}
+            onBack={goBack}
+          />
+        );
+      case 'TournamentDetail':
+        return (
+          <TournamentDetailScreen
+            teamProfileId={statsTeamProfileId}
+            teamName={statsTeamName}
+            tournamentName={tournamentDetailName}
+            matchIds={tournamentDetailMatchIds}
+            onBack={goBack}
+            onOpenPlayer={(shirt, name) => {
+              setPlayerDetailShirt(shirt);
+              setPlayerDetailName(name);
+              setScreenHistory((prev) => [...prev, 'TournamentDetail']);
+              setScreen('PlayerDetail');
+            }}
           />
         );
       case 'TeamNotes':
