@@ -405,7 +405,7 @@ export function HamburgerMenu({
                   {/* Tournaments (Manage Season) */}
                   <MenuRow
                     icon={'\u{1F5C2}'}
-                    label="Add Tournaments"
+                    label="Find or add tournaments"
                     subtitle="Add AES or Timu, refresh, browse"
                     available={true}
                     isCurrent={isCurrentScreen('AddTournaments')}

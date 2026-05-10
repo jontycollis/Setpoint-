@@ -52,6 +52,9 @@ interface Props {
    *  navigation paths as the full-screen GlobalSearchScreen. Optional —
    *  when omitted the search input hides entirely (legacy callers). */
   onSearchSelect?: (result: GlobalSearchResult) => void;
+  /** Tap the Timu discovery CTA. Routes to AddTournaments with the Timu
+   *  paste card focused so the user can drop in a link straight away. */
+  onOpenAddTimu?: () => void;
 }
 
 export function TournamentSelectScreen({
@@ -59,6 +62,7 @@ export function TournamentSelectScreen({
   initialRegistry,
   profile,
   onSearchSelect,
+  onOpenAddTimu,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -243,6 +247,13 @@ export function TournamentSelectScreen({
                 </TouchableOpacity>
               )}
             </View>
+            {/* Timu discovery escape hatch — visible directly under the
+                search input whenever the query is empty, and again as the
+                last row inside the results list (any count). Gives the
+                user a way out when AES search misses a Timu tournament. */}
+            {onOpenAddTimu && !querying && (
+              <TimuCtaCard onPress={onOpenAddTimu} colors={colors} />
+            )}
             {querying && (
               <View style={styles.searchResults}>
                 {filteredResults == null ? (
@@ -276,6 +287,9 @@ export function TournamentSelectScreen({
                       />
                     )}
                   />
+                )}
+                {onOpenAddTimu && filteredResults != null && (
+                  <TimuCtaCard onPress={onOpenAddTimu} colors={colors} inList />
                 )}
               </View>
             )}
@@ -445,6 +459,90 @@ export function TournamentSelectScreen({
     </View>
   );
 }
+
+// ── Timu discovery CTA ─────────────────────────────────────────────────────
+// Compact secondary-styled card pointing the user at the AddTournaments
+// paste-a-link flow with the Timu source pre-focused. Rendered twice on
+// the Browse tab: once below the search input (empty-state) and once as
+// the trailing row inside the results list (any result count, including
+// zero). The `inList` flag swaps the spacing/border so it sits flush with
+// preceding result rows rather than floating as its own card.
+function TimuCtaCard({
+  onPress,
+  colors,
+  inList,
+}: {
+  onPress: () => void;
+  colors: ThemeColors;
+  inList?: boolean;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[
+        inList ? timuCtaStyles.rowInList : timuCtaStyles.rowStandalone,
+        {
+          backgroundColor: colors.surface,
+          borderColor: colors.accent,
+        },
+      ]}
+    >
+      <View
+        style={[
+          timuCtaStyles.iconBubble,
+          { backgroundColor: colors.accent + '22' },
+        ]}
+      >
+        <Text style={[timuCtaStyles.iconText, { color: colors.accent }]}>
+          {'\u{1F517}'}
+        </Text>
+      </View>
+      <View style={timuCtaStyles.body}>
+        <Text style={[timuCtaStyles.title, { color: colors.text }]}>
+          Looking for a Timu tournament?
+        </Text>
+        <Text style={[timuCtaStyles.subtitle, { color: colors.textSecondary }]}>
+          Paste a link to add it →
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+const timuCtaStyles = StyleSheet.create({
+  rowStandalone: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+  },
+  rowInList: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderTopWidth: 1,
+    borderStyle: 'dashed',
+  },
+  iconBubble: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconText: { fontSize: 16 },
+  body: { flex: 1 },
+  title: { fontSize: fontSize.sm, fontWeight: '700' },
+  subtitle: { fontSize: fontSize.xs, marginTop: 2 },
+});
 
 // ── Inline search row ──────────────────────────────────────────────────────
 
