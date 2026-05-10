@@ -15,6 +15,8 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Match, MatchKind, MatchSource } from '../types/match';
+import type { TeamProfile } from '../types/profile';
+import { matchesAnyAlias } from './seasonTeamIdentity';
 
 const STORAGE_KEY = 'scored.matches.v1';
 
@@ -100,6 +102,54 @@ export async function deleteMatch(id: string): Promise<void> {
   if (!(id in blob)) return;
   delete blob[id];
   await writeBlob(blob);
+}
+
+/**
+ * One-shot migration for matches saved before MatchSetupScreen learned
+ * to write `meta.home.teamProfileId`. Walks every stored match and, for
+ * any whose home side has no team-profile foreign key, tries to match
+ * `meta.home.label` against the user's TeamProfiles by label + aliases
+ * using the project's shared `matchesAnyAlias` (case-insensitive,
+ * normalised exact match). Only writes back when at least one match
+ * was filled. Never touches `away` — opponents don't have profiles in v1.
+ *
+ * Returns counts so the caller can log a one-line summary in __DEV__.
+ */
+export async function backfillHomeTeamProfileIds(
+  teams: TeamProfile[]
+): Promise<{ backfilled: number; skipped: number }> {
+  if (teams.length === 0) return { backfilled: 0, skipped: 0 };
+  const blob = await readBlob();
+  let backfilled = 0;
+  let skipped = 0;
+  let mutated = false;
+  for (const id of Object.keys(blob)) {
+    const m = blob[id];
+    if (m.meta.home.teamProfileId) continue; // already linked
+    const label = m.meta.home.label;
+    if (!label) {
+      skipped++;
+      continue;
+    }
+    const team = teams.find((t) =>
+      matchesAnyAlias(label, [t.label, ...(t.aliases ?? [])])
+    );
+    if (!team) {
+      skipped++;
+      continue;
+    }
+    blob[id] = {
+      ...m,
+      meta: {
+        ...m.meta,
+        home: { ...m.meta.home, teamProfileId: team.id },
+      },
+    };
+    backfilled++;
+    mutated = true;
+  }
+  if (mutated) await writeBlob(blob);
+  return { backfilled, skipped };
 }
 
 /** Erase every stored match. Used by "Reset all data" affordances. */

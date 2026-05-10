@@ -44,7 +44,10 @@ import { MatchSetupScreen } from './src/screens/MatchSetupScreen';
 import { TeamRosterScreen } from './src/screens/TeamRosterScreen';
 import { MatchScoringScreen } from './src/screens/MatchScoringScreen';
 import type { Match as ScoredMatch } from './src/types/match';
-import { saveMatch as saveScoredMatch } from './src/utils/scoredMatchStore';
+import {
+  saveMatch as saveScoredMatch,
+  backfillHomeTeamProfileIds,
+} from './src/utils/scoredMatchStore';
 import { TimuTournamentScreen } from './src/screens/TimuTournamentScreen';
 import { TimuTeamDashboardScreen } from './src/screens/TimuTeamDashboardScreen';
 import { TimuOpponentScoutScreen } from './src/screens/TimuOpponentScoutScreen';
@@ -401,6 +404,21 @@ export default function App() {
         setThemeMode(savedTheme);
         setSavedTimuTournaments(timu);
         setUserProfile(profile);
+
+        // One-shot backfill for matches saved before MatchSetupScreen
+        // learned to populate `meta.home.teamProfileId`. Without this,
+        // pre-fix matches stay invisible to the analytics dashboard
+        // even though their home label matches a TeamProfile.
+        backfillHomeTeamProfileIds(profile.teams)
+          .then((res) => {
+            if (__DEV__) {
+              // eslint-disable-next-line no-console
+              console.log(
+                `[scoredMatchStore] teamProfileId backfill: ${res.backfilled} backfilled, ${res.skipped} skipped`
+              );
+            }
+          })
+          .catch(() => {});
 
         // Phase 4 boot decision: always land on MyHome.
         //   - Returning user with teams → MyHome shows their teams list.
