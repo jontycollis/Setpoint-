@@ -38,6 +38,8 @@ import type {
   Position,
   LineupEvent,
   PointEvent,
+  StatEvent,
+  CourtSnapshot,
   SubEvent,
   LiberoOnEvent,
   LiberoOffEvent,
@@ -124,6 +126,56 @@ export function replaceEvent(
   const next = match.events.slice();
   next[idx] = replacement;
   return { ...match, events: next, updatedAt: Date.now() };
+}
+
+// ─── Missed-serve bundle ──────────────────────────────────────────────────
+//
+// A missed (service) error is two events: a `stat` of category `error`
+// charged to the server (so per-player error totals reflect it) and a
+// `point` to the receiving side with `reason: 'opp-error'`. The server's
+// shirt is whatever `state.currentSet.serverShirt` resolves to — that
+// value already runs through `resolveServerShirt`, so it's the libero's
+// shirt when the libero-may-serve rule has put the libero into the
+// configured serve slot, and the regular's shirt otherwise.
+//
+// Returns null if there's no active set or no established server (in
+// which case the caller should not surface the action).
+
+export function recordMissedServe(state: MatchState): [StatEvent, PointEvent] | null {
+  const cs = state.currentSet;
+  if (!cs || !cs.server || cs.serverShirt == null || cs.serverShirt === 0) return null;
+
+  const serving: Side = cs.server;
+  const opponent: Side = serving === 'home' ? 'away' : 'home';
+  const ts = Date.now();
+  const snapshot: CourtSnapshot = {
+    homePositions: [...cs.rotation.home.positions] as Lineup,
+    awayPositions: [...cs.rotation.away.positions] as Lineup,
+    homeLiberosOnFloor: cs.rotation.home.liberoOnFloor,
+    awayLiberosOnFloor: cs.rotation.away.liberoOnFloor,
+    server: serving,
+    serverShirt: cs.serverShirt,
+  };
+  const statEv: StatEvent = {
+    id: makeEventId(),
+    ts,
+    setIndex: state.currentSetIndex,
+    type: 'stat',
+    team: serving,
+    shirt: cs.serverShirt,
+    category: 'error',
+    courtSnapshot: snapshot,
+  };
+  const pointEv: PointEvent = {
+    id: makeEventId(),
+    ts: ts + 1,
+    setIndex: state.currentSetIndex,
+    type: 'point',
+    scoringTeam: opponent,
+    reason: 'opp-error',
+    courtSnapshot: snapshot,
+  };
+  return [statEv, pointEv];
 }
 
 // ─── Rotation primitive ────────────────────────────────────────────────────

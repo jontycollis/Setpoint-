@@ -71,6 +71,7 @@ import {
   removeEventById,
   deriveMatchState,
   makeEventId,
+  recordMissedServe,
 } from '../utils/matchEngine';
 import { saveMatch, deleteMatch } from '../utils/scoredMatchStore';
 import { CourtDiagram } from '../components/CourtDiagram';
@@ -320,6 +321,22 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
       scoringTeam: team,
     };
     fire(ev);
+  }
+
+  /**
+   * Missed-serve action — bundles a `stat:error` against the server with
+   * a `point` (`reason: 'opp-error'`) for the receiving team. Engine
+   * helper resolves the server's shirt (libero or regular) for us.
+   */
+  function fireMissedServe() {
+    if (state.matchComplete || state.abandoned) return;
+    const events = recordMissedServe(state);
+    if (!events) return;
+    setMatch((m) => {
+      let next = m;
+      for (const ev of events) next = appendEvent(next, ev);
+      return next;
+    });
   }
 
   function undoLast() {
@@ -960,35 +977,51 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
           real estate (flex 2). Without explicit weights the panel ate
           almost the entire screen and the rotation strip was a sliver. */}
       <View style={[styles.boardRow, { flex: 3 }]}>
-        <ScorePanel
-          label={homeMeta.label}
-          color={homeColor}
-          score={score.home}
-          isServing={state.currentSet?.server === 'home'}
-          serverShirt={state.currentSet?.server === 'home' ? state.currentSet.serverShirt : null}
-          setsWon={state.setsWon.home}
-          onTap={() => tapScore('home')}
-          isWinner={winner === 'home'}
-          disabled={matchOver || !state.currentSet}
-          isLandscape={isLandscape}
-          colors={colors}
-          styles={styles}
-        />
+        <View style={styles.panelStack}>
+          <ScorePanel
+            label={homeMeta.label}
+            color={homeColor}
+            score={score.home}
+            isServing={state.currentSet?.server === 'home'}
+            serverShirt={state.currentSet?.server === 'home' ? state.currentSet.serverShirt : null}
+            setsWon={state.setsWon.home}
+            onTap={() => tapScore('home')}
+            isWinner={winner === 'home'}
+            disabled={matchOver || !state.currentSet}
+            isLandscape={isLandscape}
+            colors={colors}
+            styles={styles}
+          />
+          {!matchOver
+            && state.currentSet?.server === 'home'
+            && state.currentSet.serverShirt != null
+            && state.currentSet.serverShirt !== 0 ? (
+            <MissedServePill onPress={fireMissedServe} colors={colors} styles={styles} />
+          ) : null}
+        </View>
         <View style={styles.separator} />
-        <ScorePanel
-          label={awayMeta.label}
-          color={awayColor}
-          score={score.away}
-          isServing={state.currentSet?.server === 'away'}
-          serverShirt={state.currentSet?.server === 'away' ? state.currentSet.serverShirt : null}
-          setsWon={state.setsWon.away}
-          onTap={() => tapScore('away')}
-          isWinner={winner === 'away'}
-          disabled={matchOver || !state.currentSet}
-          isLandscape={isLandscape}
-          colors={colors}
-          styles={styles}
-        />
+        <View style={styles.panelStack}>
+          <ScorePanel
+            label={awayMeta.label}
+            color={awayColor}
+            score={score.away}
+            isServing={state.currentSet?.server === 'away'}
+            serverShirt={state.currentSet?.server === 'away' ? state.currentSet.serverShirt : null}
+            setsWon={state.setsWon.away}
+            onTap={() => tapScore('away')}
+            isWinner={winner === 'away'}
+            disabled={matchOver || !state.currentSet}
+            isLandscape={isLandscape}
+            colors={colors}
+            styles={styles}
+          />
+          {!matchOver
+            && state.currentSet?.server === 'away'
+            && state.currentSet.serverShirt != null
+            && state.currentSet.serverShirt !== 0 ? (
+            <MissedServePill onPress={fireMissedServe} colors={colors} styles={styles} />
+          ) : null}
+        </View>
       </View>
 
       {/* Rotation mini-court (indoor only — beach has no rotation).
@@ -1593,6 +1626,34 @@ function StatBar({
         </TouchableOpacity>
       </View>
     </View>
+  );
+}
+
+// ─── MissedServePill ───────────────────────────────────────────────────────
+//
+// Sits below the serving team's score-tap zone. Fires a stat:error
+// against the current server and a point for the receiving team in one
+// go. Rendered as a sibling of ScorePanel (not a nested touchable) so
+// taps never accidentally bleed into "tap to score".
+
+function MissedServePill({
+  onPress,
+  colors,
+  styles,
+}: {
+  onPress: () => void;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <TouchableOpacity
+      style={[styles.missedServePill, { borderColor: colors.error, backgroundColor: colors.error + '14' }]}
+      onPress={onPress}
+      activeOpacity={0.7}
+      accessibilityLabel="Record a missed serve — awards the rally to the opponent and charges a serve error to the current server"
+    >
+      <Text style={[styles.missedServePillText, { color: colors.error }]}>✕ Missed serve</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -3657,6 +3718,7 @@ function makeStyles(colors: ThemeColors) {
 
     boardRow: { flex: 1, flexDirection: 'row' },
     separator: { width: 1, backgroundColor: colors.border },
+    panelStack: { flex: 1, flexDirection: 'column' },
     panel: {
       flex: 1,
       alignItems: 'center',
@@ -3664,6 +3726,19 @@ function makeStyles(colors: ThemeColors) {
       paddingHorizontal: 4,
       backgroundColor: colors.surface,
       borderTopWidth: 6,
+    },
+    missedServePill: {
+      alignSelf: 'center',
+      marginVertical: spacing.xs,
+      paddingHorizontal: spacing.md,
+      paddingVertical: 6,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+    },
+    missedServePillText: {
+      fontSize: fontSize.sm,
+      fontWeight: '700',
+      letterSpacing: 0.3,
     },
     panelWinner: { backgroundColor: colors.primaryLight },
     teamName: {
