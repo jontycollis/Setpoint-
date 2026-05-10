@@ -406,6 +406,10 @@ export function MatchSetupScreen({
         label: home.label.trim(),
         colorHex: home.colorHex,
         liberoMayServe: home.liberoMayServe,
+        // Foreign key into TeamProfile. Without this, the analytics
+        // dashboard (which filters by `meta.home.teamProfileId`) can't
+        // find the match even though the user picked their team in setup.
+        teamProfileId: homeTeamProfile?.id,
       },
       away: {
         label: away.label.trim(),
