@@ -91,15 +91,18 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
     (team.roster ?? []).map(fromRosterPlayer)
   );
   const [showInactive, setShowInactive] = useState(false);
+  const [dirty, setDirty] = useState(false);
 
   const visiblePlayers = showInactive ? players : players.filter((p) => p.active);
 
   function patchPlayer(rowId: string, patch: Partial<DraftPlayer>) {
     setPlayers((prev) => prev.map((p) => (p.rowId === rowId ? { ...p, ...patch } : p)));
+    setDirty(true);
   }
 
   function addPlayer() {
     setPlayers((prev) => [...prev, emptyDraftPlayer()]);
+    setDirty(true);
   }
 
   function softDeletePlayer(rowId: string) {
@@ -115,6 +118,21 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
           style: 'destructive',
           onPress: () => patchPlayer(rowId, { active: false }),
         },
+      ]
+    );
+  }
+
+  function handleCancel() {
+    if (!dirty) {
+      onCancel();
+      return;
+    }
+    Alert.alert(
+      'Discard changes?',
+      'You have unsaved roster edits. Discarding will lose them.',
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: onCancel },
       ]
     );
   }
@@ -191,7 +209,7 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
     <View style={styles.container}>
       <View style={styles.topBar}>
         <TouchableOpacity
-          onPress={onCancel}
+          onPress={handleCancel}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
           <Text style={styles.backBtn}>{'< Cancel'}</Text>

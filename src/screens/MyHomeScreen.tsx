@@ -273,15 +273,13 @@ export function MyHomeScreen({
           <AddTeamRow onAddTeam={onAddTeam} />
         )}
 
-        {watchingTeams.length > 0 ? (
-          <WatchingSection
-            teams={watchingTeams}
-            upcomingByTeamId={upcomingByTeamId}
-            indicesLoaded={indices != null}
-            onOpenTeam={onOpenTeam}
-            onLongPressTeam={onLongPressTeam}
-          />
-        ) : null}
+        <WatchingSection
+          teams={watchingTeams}
+          upcomingByTeamId={upcomingByTeamId}
+          indicesLoaded={indices != null}
+          onOpenTeam={onOpenTeam}
+          onLongPressTeam={onLongPressTeam}
+        />
 
         {meTeams.length > 0 ? <CareerCard profile={profile} /> : null}
         {meTeams.length > 0 && onOpenAnalytics ? (
@@ -884,17 +882,25 @@ function WatchingSection({
       <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
         Watching
       </Text>
-      {teams.map((team) => (
-        <TeamCard
-          key={team.id}
-          team={team}
-          upcoming={upcomingByTeamId.get(team.id) ?? null}
-          indicesLoaded={indicesLoaded}
-          onOpen={() => onOpenTeam(team)}
-          onLongPress={onLongPressTeam ? () => onLongPressTeam(team) : undefined}
-          compact
-        />
-      ))}
+      {teams.length === 0 ? (
+        <View style={[styles.watchingEmpty, { borderColor: colors.divider }]}>
+          <Text style={[styles.watchingEmptyText, { color: colors.textSecondary }]}>
+            No teams you're watching. Browse tournaments and tap the star to follow a team.
+          </Text>
+        </View>
+      ) : (
+        teams.map((team) => (
+          <TeamCard
+            key={team.id}
+            team={team}
+            upcoming={upcomingByTeamId.get(team.id) ?? null}
+            indicesLoaded={indicesLoaded}
+            onOpen={() => onOpenTeam(team)}
+            onLongPress={onLongPressTeam ? () => onLongPressTeam(team) : undefined}
+            compact
+          />
+        ))
+      )}
     </View>
   );
 }
@@ -1456,6 +1462,19 @@ function makeStyles(colors: ThemeColors) {
   sectionHint: {
     fontSize: fontSize.xs,
     marginBottom: spacing.sm,
+  },
+
+  watchingEmpty: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    opacity: 0.6,
+  },
+  watchingEmptyText: {
+    fontSize: fontSize.sm,
+    lineHeight: 18,
   },
 
   emptyCard: { alignItems: 'flex-start' },

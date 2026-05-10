@@ -105,15 +105,29 @@ export function AddTournamentsScreen({ onBack, onOpenTid, focusSource }: Props) 
   const [highlightedCard, setHighlightedCard] = useState<'aes' | 'timu' | null>(
     focusSource ?? null
   );
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasScrolledToFocusRef = useRef(false);
   useEffect(() => {
     if (!focusSource) return;
-    // Wait for both layouts before scrolling (the matching y is the one
-    // we need; the other ensures intervening cards have been measured).
+    if (hasScrolledToFocusRef.current) return;
+    // Wait for the target card's layout before scrolling. Once we've
+    // scrolled and started the highlight timer, we don't re-trigger on
+    // subsequent layout changes — otherwise a re-measure would restart
+    // the 1.6s window and the highlight would linger.
     const targetY = focusSource === 'aes' ? aesCardY : timuCardY;
     if (targetY == null) return;
+    hasScrolledToFocusRef.current = true;
     scrollRef.current?.scrollTo({ y: Math.max(0, targetY - 16), animated: true });
-    const t = setTimeout(() => setHighlightedCard(null), 1600);
-    return () => clearTimeout(t);
+    highlightTimerRef.current = setTimeout(() => {
+      setHighlightedCard(null);
+      highlightTimerRef.current = null;
+    }, 1600);
+    return () => {
+      if (highlightTimerRef.current) {
+        clearTimeout(highlightTimerRef.current);
+        highlightTimerRef.current = null;
+      }
+    };
   }, [focusSource, aesCardY, timuCardY]);
 
   // ── Discovery state ─────────────────────────────────────────────────────

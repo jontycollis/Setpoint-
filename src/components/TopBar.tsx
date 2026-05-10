@@ -1,7 +1,9 @@
 // ── TopBar (active-team pill + search icon) ──────────────────────────────
 //
-// Floats above all screens, aligned to the LEFT of the safe-area top
-// (mirror of HamburgerMenu, which floats on the right). Two pieces:
+// Floats above all screens spanning the safe-area top. Three-cell layout:
+// search icon on the LEFT, active-team pill CENTRED, and a reserved
+// spacer on the RIGHT for the HamburgerMenu (rendered in a sibling
+// overlay in App.tsx). Two pieces live here:
 //
 //   - Active-team pill: visible whenever the user has an activeTeamId and
 //     the current screen is a "team context" screen. Tapping opens a
