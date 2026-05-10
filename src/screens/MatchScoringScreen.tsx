@@ -152,6 +152,16 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
     posIdx: number;
   } | null>(null);
 
+  // ── Libero placement mode ──────────────────────────────────────────────
+  // Tapping a libero chip in the LiberoBar above the mini-court enters this
+  // mode. The next tap on a back-row cell of the matching team brings the
+  // libero on (replacing the player there). Tapping the chip again, or a
+  // cell of the opposite team, cancels.
+  const [liberoPlacement, setLiberoPlacement] = useState<{
+    team: Side;
+    libero: number;
+  } | null>(null);
+
   // Persist on every mutation. Synchronous-looking from the UI's POV
   // but actually fire-and-forget to AsyncStorage.
   useEffect(() => {
@@ -751,8 +761,16 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
    * which aren't legal volleyball anyway. Libero changes are handled
    * separately by the auto-pop libero modals.
    */
-  function applyMidSetLineupChange(team: Side, oldOnFloor: number[], newOnFloor: number[]) {
-    if (oldOnFloor.length !== 6 || newOnFloor.length !== 6) return;
+  /**
+   * Returns true if the change went through (events fired or no-op),
+   * false if it was rejected with an Alert (illegal position swap).
+   * Caller is responsible for closing the modal — this function used to
+   * close on success, but a libero-only mid-set save would short-circuit
+   * the no-changes branch and the modal would stay open with the user
+   * thinking nothing happened.
+   */
+  function applyMidSetLineupChange(team: Side, oldOnFloor: number[], newOnFloor: number[]): boolean {
+    if (oldOnFloor.length !== 6 || newOnFloor.length !== 6) return true;
     const oldSet = new Set(oldOnFloor);
     const newSet = new Set(newOnFloor);
     const subs: Array<{ out: number; in: number }> = [];
@@ -765,16 +783,16 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
         // The new shirt was already on the floor (different position) — that's
         // a position swap, not a sub. Refuse.
         Alert.alert('Position swap not allowed mid-set', 'Players cannot exchange positions on the floor mid-set. Only bench-substitutions are legal.');
-        return;
+        return false;
       }
       if (newSet.has(oldShirt)) {
         // The old shirt is still on the floor (moved elsewhere via paired diff) — also a swap.
         Alert.alert('Position swap not allowed mid-set', 'Players cannot exchange positions on the floor mid-set.');
-        return;
+        return false;
       }
       subs.push({ out: oldShirt, in: newShirt });
     }
-    if (subs.length === 0) return;
+    if (subs.length === 0) return true;
     setMatch((m) => {
       let next = m;
       const baseTs = Date.now();
@@ -792,7 +810,7 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
       });
       return next;
     });
-    setActiveAction(null);
+    return true;
   }
 
   /**
@@ -1033,6 +1051,19 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
           the user. Home's right-back is BOTTOM-RIGHT.  */}
       {!isBeach && state.currentSet ? (
         <View style={[styles.miniCourtWrap, { flex: 2 }]}>
+          <LiberoBar
+            homeRot={state.currentSet.rotation.home}
+            awayRot={state.currentSet.rotation.away}
+            placement={liberoPlacement}
+            onPlace={(team, libero) => {
+              setStatSelection(null);
+              setLiberoPlacement({ team, libero });
+            }}
+            onCancel={() => setLiberoPlacement(null)}
+            onLiberoOff={(team, libero, replacedBy) => fireLiberoOff(team, libero, replacedBy)}
+            colors={colors}
+            styles={styles}
+          />
           <CourtRotationView
             homeLabel={homeMeta.label}
             awayLabel={awayMeta.label}
@@ -1045,12 +1076,34 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
             awayServerShirt={state.currentSet.server === 'away' ? state.currentSet.serverShirt : null}
             selectedCell={statSelection ? { team: statSelection.team, posIdx: statSelection.posIdx } : undefined}
             onCellPress={(team, posIdx) => {
-              // Determine the shirt # at this position
               const rot = team === 'home'
                 ? state.currentSet!.rotation.home
                 : state.currentSet!.rotation.away;
               const shirt = rot.positions[posIdx];
               if (shirt == null || shirt === 0) return;
+
+              // Libero placement mode interception. The user tapped a
+              // libero chip in the LiberoBar; the next back-row cell tap
+              // of that same team fires `libero-on`. A tap on the other
+              // team or an empty cell cancels the placement.
+              if (liberoPlacement) {
+                if (team !== liberoPlacement.team) {
+                  setLiberoPlacement(null);
+                  return;
+                }
+                const isBackRow = posIdx === 0 || posIdx === 4 || posIdx === 5;
+                if (!isBackRow) {
+                  Alert.alert(
+                    'Back row only',
+                    'Liberos can only replace back-row players (positions I, V, VI). Tap a back-row cell, or tap the L chip again to cancel.'
+                  );
+                  return;
+                }
+                fireLiberoOn(team, liberoPlacement.libero, shirt);
+                setLiberoPlacement(null);
+                return;
+              }
+
               // Toggle stat selection: if already selected, deselect;
               // if a different player, switch to them.
               if (statSelection && statSelection.team === team && statSelection.posIdx === posIdx) {
@@ -1370,8 +1423,11 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
                 }
                 return positions;
               }
-              applyMidSetLineupChange('home', unsub(cs.rotation.home), [...homeLineup]);
-              applyMidSetLineupChange('away', unsub(cs.rotation.away), [...awayLineup]);
+              const homeOk2 = applyMidSetLineupChange('home', unsub(cs.rotation.home), [...homeLineup]);
+              const awayOk2 = applyMidSetLineupChange('away', unsub(cs.rotation.away), [...awayLineup]);
+              // If either side rejected with an alert (illegal position
+              // swap), keep the modal open so the user can fix it.
+              if (!homeOk2 || !awayOk2) return;
               const beforeHomeLib: LiberoOnIntent | null =
                 cs.rotation.home.liberoOnFloor != null && cs.rotation.home.liberoReplacesShirt != null
                   ? { libero: cs.rotation.home.liberoOnFloor, replaces: cs.rotation.home.liberoReplacesShirt }
@@ -1385,6 +1441,7 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
                 applyLiberoIntentDiff('away', beforeAwayLib, awayLiberoOn);
               }, 0);
             }
+            setActiveAction(null);
             setEditLineupSelected(undefined);
           }}
           onFirstServerChange={(fs) => applyFirstServerOverride(state.currentSetIndex, fs)}
@@ -1610,7 +1667,7 @@ function StatBar({
         {/* Non-scoring stats */}
         <TouchableOpacity style={styles.statBtn} onPress={() => onStat('assist')} activeOpacity={0.7}>
           <Text style={styles.statBtnEmoji}>🤝</Text>
-          <Text style={styles.statBtnLabel}>Assist</Text>
+          <Text style={styles.statBtnLabel} numberOfLines={1} adjustsFontSizeToFit>Asst</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.statBtn} onPress={() => onStat('dig')} activeOpacity={0.7}>
           <Text style={styles.statBtnEmoji}>🏊</Text>
@@ -1705,6 +1762,132 @@ function ScorePanel(props: {
       {!disabled ? <Text style={styles.tapHint}>Tap to score</Text> : null}
       {isWinner ? <Text style={styles.winnerBadge}>WINNER</Text> : null}
     </TouchableOpacity>
+  );
+}
+
+// ─── LiberoBar — quick libero swap on the main scoring screen ─────────────
+//
+// Sits between the score panels and the rotation court. Renders a small
+// chip per designated libero per team. Tapping a chip is the fast path
+// the user expects: bring the libero on without going through the lineup
+// editor.
+//
+// Visibility / behavior per chip:
+//   • This libero is on the floor → chip "L#X · ↓ off"; tap fires libero-off
+//     (engine reverts to the originally replaced player).
+//   • This libero is off the floor AND no other libero is on → chip
+//     "L#X · ↑"; tap enters placement mode for THIS libero. Next back-row
+//     cell tap (handled in the main onCellPress) fires libero-on.
+//   • This libero is off but a DIFFERENT libero is on → chip is dimmed
+//     (only one libero may be on at a time).
+//
+// The middle of the bar shows a brief prompt while placement mode is
+// active, so the scorer knows what to tap next.
+function LiberoBar({
+  homeRot,
+  awayRot,
+  placement,
+  onPlace,
+  onCancel,
+  onLiberoOff,
+  colors,
+  styles,
+}: {
+  homeRot: RotationState;
+  awayRot: RotationState;
+  placement: { team: Side; libero: number } | null;
+  onPlace: (team: Side, libero: number) => void;
+  onCancel: () => void;
+  onLiberoOff: (team: Side, libero: number, replacedBy: number) => void;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  function renderTeamChips(team: Side) {
+    const rot = team === 'home' ? homeRot : awayRot;
+    if (rot.liberos.length === 0) return null;
+    return rot.liberos.map((libShirt) => {
+      const isOn = rot.liberoOnFloor === libShirt;
+      const otherLiberoOn = !isOn && rot.liberoOnFloor != null;
+      const isPlacingThis =
+        placement != null && placement.team === team && placement.libero === libShirt;
+      const lockedOut = rot.lockedOut.includes(libShirt);
+
+      if (isOn) {
+        // Active libero — chip pulls them off.
+        return (
+          <TouchableOpacity
+            key={libShirt}
+            style={[styles.liberoQuickChip, styles.liberoQuickChipOn]}
+            onPress={() => {
+              if (rot.liberoReplacesShirt != null) {
+                onLiberoOff(team, libShirt, rot.liberoReplacesShirt);
+              }
+            }}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.liberoQuickChipText, { color: '#fff' }]}>L #{libShirt} ↓</Text>
+          </TouchableOpacity>
+        );
+      }
+      if (lockedOut) {
+        // Officially replaced earlier in the set — can't return.
+        return (
+          <View key={libShirt} style={[styles.liberoQuickChip, { opacity: 0.35 }]}>
+            <Text style={styles.liberoQuickChipText}>L #{libShirt} ✕</Text>
+          </View>
+        );
+      }
+      if (otherLiberoOn) {
+        // The other designated libero is on the floor; this one can't go
+        // on at the same time.
+        return (
+          <View key={libShirt} style={[styles.liberoQuickChip, { opacity: 0.35 }]}>
+            <Text style={styles.liberoQuickChipText}>L #{libShirt}</Text>
+          </View>
+        );
+      }
+      // Off the floor and eligible — chip enters placement mode.
+      return (
+        <TouchableOpacity
+          key={libShirt}
+          style={[
+            styles.liberoQuickChip,
+            isPlacingThis && styles.liberoQuickChipPlacing,
+          ]}
+          onPress={() => (isPlacingThis ? onCancel() : onPlace(team, libShirt))}
+          activeOpacity={0.7}
+        >
+          <Text
+            style={[
+              styles.liberoQuickChipText,
+              isPlacingThis && { color: '#fff' },
+            ]}
+          >
+            L #{libShirt} {isPlacingThis ? '·' : '↑'}
+          </Text>
+        </TouchableOpacity>
+      );
+    });
+  }
+
+  const homeChips = renderTeamChips('home');
+  const awayChips = renderTeamChips('away');
+  // Don't render the bar at all if neither team has liberos designated —
+  // saves the 24px of vertical real estate for the court.
+  if (!homeChips && !awayChips) return null;
+
+  return (
+    <View style={styles.liberoBar}>
+      <View style={styles.liberoBarTeam}>{homeChips}</View>
+      <View style={styles.liberoBarMiddle}>
+        {placement ? (
+          <Text style={styles.liberoBarPrompt} numberOfLines={1}>
+            Tap a back-row player → L #{placement.libero} on
+          </Text>
+        ) : null}
+      </View>
+      <View style={styles.liberoBarTeam}>{awayChips}</View>
+    </View>
   );
 }
 
@@ -3798,6 +3981,57 @@ function makeStyles(colors: ThemeColors) {
       justifyContent: 'space-between',
       paddingHorizontal: spacing.xs,
       paddingVertical: 2,
+    },
+
+    /* Libero quick-swap bar above the mini-court. Renders a chip per
+       designated libero per side; tapping enters placement mode (handled
+       by the main scoring screen's onCellPress override). */
+    liberoBar: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.xs,
+      paddingTop: 2,
+      paddingBottom: 4,
+      gap: 6,
+    },
+    liberoBarTeam: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    liberoBarMiddle: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: 4,
+    },
+    liberoBarPrompt: {
+      fontSize: fontSize.xs,
+      fontWeight: '700',
+      color: colors.accent,
+    },
+    liberoQuickChip: {
+      borderWidth: 1,
+      borderColor: colors.accent,
+      borderRadius: borderRadius.sm,
+      paddingVertical: 3,
+      paddingHorizontal: 7,
+      backgroundColor: colors.background,
+    },
+    liberoQuickChipOn: {
+      backgroundColor: colors.accent,
+      borderColor: colors.accent,
+    },
+    liberoQuickChipPlacing: {
+      backgroundColor: colors.accent,
+      borderColor: colors.accent,
+    },
+    liberoQuickChipText: {
+      fontSize: fontSize.xs,
+      fontWeight: '800',
+      color: colors.accent,
+      letterSpacing: 0.3,
     },
     courtTeamHeader: {
       flexDirection: 'row',
