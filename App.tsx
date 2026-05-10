@@ -1741,6 +1741,11 @@ export default function App() {
               initialRegistry={discoveredRegistry}
               profile={userProfile}
               onSearchSelect={handleGlobalSearchSelect}
+              onOpenAddTimu={() => {
+                setAddTournamentsFocusSource('timu');
+                setScreenHistory((prev) => [...prev, screen]);
+                setScreen('AddTournaments');
+              }}
             />
           );
         }
@@ -1878,6 +1883,11 @@ export default function App() {
             initialRegistry={discoveredRegistry}
             profile={userProfile}
             onSearchSelect={handleGlobalSearchSelect}
+            onOpenAddTimu={() => {
+              setAddTournamentsFocusSource('timu');
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTournaments');
+            }}
           />
         );
       case 'EventEntry':
