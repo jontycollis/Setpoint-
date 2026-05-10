@@ -41,6 +41,24 @@ const PROFILE_KEY = 'vbplus.userProfile.v1';
 // ── Pure helpers ──────────────────────────────────────────────────────────
 
 /**
+ * Find the TeamProfile in `profile` whose aliases match `alias`. Uses the
+ * shared `matchesAnyAlias` comparator (same normalization the season-history
+ * + auto-discover paths apply) so a single helper anchors every "which of
+ * the user's teams does this name belong to?" lookup. Returns the first
+ * match in profile order, or null if `profile` is null/empty or `alias` is
+ * empty/unmatched.
+ */
+export function findTeamProfileByAlias(
+  profile: UserProfile | null | undefined,
+  alias: string | null | undefined
+): TeamProfile | null {
+  if (!profile || !alias) return null;
+  return (
+    profile.teams.find((t) => matchesAnyAlias(alias, t.aliases)) ?? null
+  );
+}
+
+/**
  * Build a stable-ish id for a TeamProfile. Phase 1 doesn't need
  * cryptographic randomness — collision risk on a single device with a
  * handful of teams is negligible. Format: `tp_<base36-time>_<random>`.

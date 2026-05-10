@@ -74,7 +74,6 @@ import {
   saveSavedEvents,
   loadFavoriteTeams,
   saveFavoriteTeams,
-  loadMyTeam,
   saveMyTeam,
   loadThemeMode,
   saveThemeMode,
@@ -84,6 +83,7 @@ import {
 import {
   loadOrMigrateUserProfile,
   saveUserProfile,
+  findTeamProfileByAlias,
 } from './src/utils/userProfile';
 import {
   loadSeasonIndex,
@@ -161,6 +161,15 @@ type Screen =
   | 'PlayerDetail'
   | 'TournamentDetail'
   | 'GlobalSearch';
+
+// AES navigation scope: an event can stand alone (DivisionSelect view), an
+// event+division is the standard tournament context, and event+division+team
+// is the team-detail context. Stored as one shape to keep transitions atomic.
+type AesScope = {
+  event: AESEvent;
+  division: AESDivision | null;
+  team: AESTeamAssignment | null;
+};
 
 // ── Bottom tab routing ─────────────────────────────────────────────────────
 //
@@ -286,13 +295,17 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('TournamentSelect');
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
 
-  const [currentEvent, setCurrentEvent] = useState<AESEvent | null>(null);
-  const [currentDivision, setCurrentDivision] = useState<AESDivision | null>(
-    null
-  );
-  const [currentTeam, setCurrentTeam] = useState<AESTeamAssignment | null>(
-    null
-  );
+  // ── AES navigation scope ────────────────────────────────────────────────
+  // Three nested selections (event → division → team) move together: an
+  // AES screen is meaningless without an event, division-only without
+  // team is valid (DivisionSelect → TeamSelect transition), and a team
+  // implies both. They were previously three useState values updated in
+  // lockstep at every transition; bundling them removes the "set two,
+  // forget the third" risk and makes intermediate-render guards trivial.
+  const [aesScope, setAesScope] = useState<AesScope | null>(null);
+  const currentEvent = aesScope?.event ?? null;
+  const currentDivision = aesScope?.division ?? null;
+  const currentTeam = aesScope?.team ?? null;
   // Tournament selection context
   const [selectedCountry, setSelectedCountry] = useState<Country | null>(null);
   const [selectedTournament, setSelectedTournament] = useState<Tournament | null>(null);
@@ -300,11 +313,19 @@ export default function App() {
 
   const [savedEvents, setSavedEvents] = useState<SavedEvent[]>([]);
   const [favoriteTeams, setFavoriteTeams] = useState<FavoriteTeam[]>([]);
-  const [myTeam, setMyTeam] = useState<FavoriteTeam | null>(null);
-  // Phase 2/3: profile-and-teams layer. Legacy `myTeam` is still the
-  // primary read path for existing screens; we keep `userProfile` in
-  // lockstep on every set so both stay correct during the transition.
+  // Profile-and-teams layer. `myTeam` (below) is derived from this.
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  // Derived "my team" — single source of truth is the active TeamProfile's
+  // primaryRef. The legacy `aes.myTeam` AsyncStorage key is still mirrored
+  // by the persistence effect below so other readers (AddTournamentsScreen
+  // seeds aliases from it) keep working unchanged.
+  const myTeam = useMemo<FavoriteTeam | null>(() => {
+    if (!userProfile?.activeTeamId) return null;
+    const active = userProfile.teams.find(
+      (t) => t.id === userProfile.activeTeamId
+    );
+    return active?.primaryRef ?? null;
+  }, [userProfile]);
   const [scoutParams, setScoutParams] = useState<{
     opponentTeamId: number;
     opponentName: string;
@@ -390,17 +411,15 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
-        const [events, favs, saved, savedTheme, timu, profile] = await Promise.all([
+        const [events, favs, savedTheme, timu, profile] = await Promise.all([
           loadSavedEvents(),
           loadFavoriteTeams(),
-          loadMyTeam(),
           loadThemeMode(),
           loadSavedTimuTournaments(),
           loadOrMigrateUserProfile(),
         ]);
         setSavedEvents(events);
         setFavoriteTeams(favs);
-        setMyTeam(saved);
         setThemeMode(savedTheme);
         setSavedTimuTournaments(timu);
         setUserProfile(profile);
@@ -624,10 +643,11 @@ export default function App() {
     if (!userProfile) return;
     const aliasSet = currentHistoryAliases || [currentHistoryTeamName].filter(Boolean) as string[];
     if (!aliasSet.length) return;
-    const lower = aliasSet.map((a) => a.toLowerCase().trim());
-    const match = userProfile.teams.find((t) =>
-      t.aliases.some((a) => lower.includes(a.toLowerCase().trim()))
-    );
+    let match: TeamProfile | null = null;
+    for (const a of aliasSet) {
+      match = findTeamProfileByAlias(userProfile, a);
+      if (match) break;
+    }
     if (!match) {
       Alert.alert(
         'No team profile found',
@@ -709,26 +729,10 @@ export default function App() {
                   return true;
                 });
               });
-              // If this team was the singular MyTeam, clear it.
-              setMyTeam((prev) => {
-                if (!prev) return prev;
-                if (
-                  team.primaryRef &&
-                  team.primaryRef.source === prev.source &&
-                  team.primaryRef.eventKey === prev.eventKey &&
-                  team.primaryRef.teamId === prev.teamId
-                ) {
-                  return null;
-                }
-                const myName = (prev.teamText || prev.teamName || '').toLowerCase().trim();
-                if (
-                  myName &&
-                  team.aliases.some((a) => a.toLowerCase().trim() === myName)
-                ) {
-                  return null;
-                }
-                return prev;
-              });
+              // The derived `myTeam` updates automatically: removeTeamProfile
+              // reassigns `activeTeamId` (to the next remaining team or null
+              // when the removed team was active), so no separate clear is
+              // needed here.
             },
           },
         ]
@@ -782,10 +786,7 @@ export default function App() {
         primary = opts.fav.teamText || opts.fav.teamName || '';
         // Try to find the matching TeamProfile so we can use its full alias
         // set (handles spelling drift like "Defensa U18 Rob" vs "Defensa Rob").
-        const lower = primary.toLowerCase().trim();
-        const match = userProfile?.teams.find((t) =>
-          t.aliases.some((a) => a.toLowerCase().trim() === lower)
-        );
+        const match = findTeamProfileByAlias(userProfile, primary);
         aliases = match?.aliases ?? null;
       } else if (opts.fallbackName) {
         primary = opts.fallbackName;
@@ -846,12 +847,11 @@ export default function App() {
 
   // ── Profile/MyTeam sync ─────────────────────────────────────────────────
   //
-  // setMyTeamAndProfile wraps the legacy `setMyTeam` so every call site
-  // that pins a team also creates/updates the matching TeamProfile and
-  // sets it as active. Existing screens still call this with their
-  // FavoriteTeam shape; the user-profile layer just rides along.
+  // Pin a FavoriteTeam as the user's active team. The derived `myTeam`
+  // memo above tracks `userProfile.activeTeamId` so this writer only
+  // needs to touch `userProfile` — no separate myTeam state to keep in
+  // lockstep.
   const setMyTeamAndProfile = useCallback((fav: FavoriteTeam | null) => {
-    setMyTeam(fav);
     setUserProfile((prev) => {
       if (!prev) return prev;
       if (fav == null) {
@@ -873,21 +873,11 @@ export default function App() {
     });
   }, [handleAutoDiscoverTeam]);
 
-  // Switching the active team via the new MyHome / HamburgerMenu UI:
-  // updates profile, then mirrors into legacy `myTeam` so existing
-  // screens (TeamDashboard, etc.) stay correct without code changes.
+  // Switching the active team via the new MyHome / HamburgerMenu UI.
+  // The derived `myTeam` updates automatically off `activeTeamId`.
   const handleSwitchActiveTeam = useCallback(
     (teamId: string) => {
-      setUserProfile((prev) => {
-        if (!prev) return prev;
-        const next = setActiveTeamId(prev, teamId);
-        const team = next.teams.find((t) => t.id === teamId);
-        if (team?.primaryRef) {
-          // Primary ref exists — sync legacy myTeam.
-          setMyTeam(team.primaryRef);
-        }
-        return next;
-      });
+      setUserProfile((prev) => (prev ? setActiveTeamId(prev, teamId) : prev));
     },
     []
   );
@@ -896,9 +886,7 @@ export default function App() {
 
   const onTimuLoaded = useCallback((tid: number) => {
     setCurrentTimuTid(tid);
-    setCurrentEvent(null);
-    setCurrentDivision(null);
-    setCurrentTeam(null);
+    setAesScope(null);
     setScreenHistory((prev) => [...prev, 'TournamentSelect']);
     setScreen('TimuTournament');
     pushRecentlyViewedAndNotify({
@@ -1088,21 +1076,16 @@ export default function App() {
   // Clear context whenever we navigate back to higher-level screens
   useEffect(() => {
     if (screen === 'TournamentSelect') {
-      setCurrentEvent(null);
-      setCurrentDivision(null);
-      setCurrentTeam(null);
+      setAesScope(null);
       setSelectedCountry(null);
       setSelectedTournament(null);
       setSelectedTournamentYear(null);
     }
     if (screen === 'EventEntry') {
-      setCurrentEvent(null);
-      setCurrentDivision(null);
-      setCurrentTeam(null);
+      setAesScope(null);
     }
     if (screen === 'DivisionSelect') {
-      setCurrentDivision(null);
-      setCurrentTeam(null);
+      setAesScope((prev) => (prev ? { ...prev, division: null, team: null } : prev));
     }
   }, [screen]);
 
@@ -1135,9 +1118,7 @@ export default function App() {
 
   const onEventLoaded = useCallback(
     (event: AESEvent) => {
-      setCurrentEvent(event);
-      setCurrentDivision(null);
-      setCurrentTeam(null);
+      setAesScope({ event, division: null, team: null });
       setSavedEvents((prev) => {
         if (prev.some((e) => e.key === event.Key)) return prev;
         return [
@@ -1165,8 +1146,7 @@ export default function App() {
 
   const onDivisionSelected = useCallback(
     (division: AESDivision) => {
-      setCurrentDivision(division);
-      setCurrentTeam(null);
+      setAesScope((prev) => (prev ? { ...prev, division, team: null } : prev));
       navigate('TeamSelect');
     },
     [navigate]
@@ -1174,7 +1154,7 @@ export default function App() {
 
   const onTeamSelected = useCallback(
     (team: AESTeamAssignment) => {
-      setCurrentTeam(team);
+      setAesScope((prev) => (prev ? { ...prev, team } : prev));
       navigate('TeamDashboard');
       if (currentEvent && currentDivision) {
         pushRecentlyViewedAndNotify({
@@ -1218,7 +1198,7 @@ export default function App() {
           Alert.alert('Error', `Could not load ${teamName}`);
           return;
         }
-        setCurrentTeam(teamAssignment);
+        setAesScope((prev) => (prev ? { ...prev, team: teamAssignment } : prev));
         navigate('TeamDashboard');
       } catch (err: any) {
         Alert.alert('Error', err.message || 'Failed to load team');
@@ -1264,8 +1244,9 @@ export default function App() {
           Alert.alert('Error', `Could not find team: ${teamText}`);
           return;
         }
-        setCurrentDivision(division);
-        setCurrentTeam(teamAssignment);
+        setAesScope((prev) =>
+          prev ? { ...prev, division, team: teamAssignment } : prev
+        );
         navigate('TeamDashboard');
       } catch (err: any) {
         Alert.alert('Error', err.message || 'Failed to load team');
@@ -1288,9 +1269,7 @@ export default function App() {
         }
         setCurrentTimuTid(tid);
         setCurrentTimuTeamName(fav.teamName);
-        setCurrentEvent(null);
-        setCurrentDivision(null);
-        setCurrentTeam(null);
+        setAesScope(null);
         setScreenHistory((prev) => [...prev, screen]);
         setScreen('TimuTeamDashboard');
         pushRecentlyViewedAndNotify({
@@ -1350,9 +1329,7 @@ export default function App() {
 
         // Now apply all state updates together in a single batch so the
         // TeamDashboard never sees a half-updated event/division/team combo.
-        setCurrentEvent(event);
-        setCurrentDivision(division);
-        setCurrentTeam(teamAssignment);
+        setAesScope({ event, division, team: teamAssignment });
         setScreenHistory((prev) => [...prev, screen]);
         setScreen('TeamDashboard');
 
@@ -1398,9 +1375,7 @@ export default function App() {
           // with teams is reachable via the dedicated MyHome destination.
           setScreen('TournamentSelect');
           setScreenHistory([]);
-          setCurrentEvent(null);
-          setCurrentDivision(null);
-          setCurrentTeam(null);
+          setAesScope(null);
           setSelectedCountry(null);
           setSelectedTournament(null);
           setSelectedTournamentYear(null);
@@ -1408,9 +1383,7 @@ export default function App() {
         case 'MyHome':
           setScreen('MyHome');
           setScreenHistory([]);
-          setCurrentEvent(null);
-          setCurrentDivision(null);
-          setCurrentTeam(null);
+          setAesScope(null);
           break;
         case 'AddTeamChooser':
           setScreenHistory((prev) => [...prev, screen]);
@@ -1574,9 +1547,7 @@ export default function App() {
   // the screen to the matching home destination.
   const handleTabSelect = useCallback((tab: TabKey) => {
     setScreenHistory([]);
-    setCurrentEvent(null);
-    setCurrentDivision(null);
-    setCurrentTeam(null);
+    setAesScope(null);
     setSelectedCountry(null);
     setSelectedTournament(null);
     setSelectedTournamentYear(null);
@@ -1606,17 +1577,13 @@ export default function App() {
       } else if (item.kind === 'team-timu') {
         setCurrentTimuTid(item.tid);
         setCurrentTimuTeamName(item.teamName);
-        setCurrentEvent(null);
-        setCurrentDivision(null);
-        setCurrentTeam(null);
+        setAesScope(null);
         setScreenHistory((prev) => [...prev, screen]);
         setScreen('TimuTeamDashboard');
       } else if (item.kind === 'tournament-aes') {
         try {
           const event = await getEvent(item.eventKey);
-          setCurrentEvent(event);
-          setCurrentDivision(null);
-          setCurrentTeam(null);
+          setAesScope({ event, division: null, team: null });
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('DivisionSelect');
         } catch (err: any) {
@@ -1652,9 +1619,7 @@ export default function App() {
       } else if (result.kind === 'timu-team') {
         setCurrentTimuTid(result.tid);
         setCurrentTimuTeamName(result.teamName);
-        setCurrentEvent(null);
-        setCurrentDivision(null);
-        setCurrentTeam(null);
+        setAesScope(null);
         setScreenHistory([]);
         setScreen('TimuTeamDashboard');
         pushRecentlyViewedAndNotify({
@@ -1938,8 +1903,9 @@ export default function App() {
           <TeamSearchScreen
             event={currentEvent!}
             onTeamSelected={(division, team) => {
-              setCurrentDivision(division);
-              setCurrentTeam(team);
+              setAesScope((prev) =>
+                prev ? { ...prev, division, team } : prev
+              );
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('TeamDashboard');
             }}
@@ -2001,12 +1967,8 @@ export default function App() {
               // alias overlap on TeamText/TeamName so a freshly-followed
               // team is reachable on the same render.
               if (!userProfile || !currentTeam) return undefined;
-              const lower = (currentTeam.TeamText || currentTeam.TeamName || '')
-                .toLowerCase()
-                .trim();
-              const profileMatch = userProfile.teams.find((t) =>
-                t.aliases.some((a) => a.toLowerCase().trim() === lower)
-              );
+              const candidate = currentTeam.TeamText || currentTeam.TeamName || '';
+              const profileMatch = findTeamProfileByAlias(userProfile, candidate);
               if (!profileMatch || profileMatch.kind !== 'me') return undefined;
               return () => handleOpenRosterEditor(profileMatch);
             })()}
@@ -2094,17 +2056,7 @@ export default function App() {
         const teamName =
           currentTeam?.TeamName ?? currentTimuTeamName ?? null;
         const teamText = currentTeam?.TeamText ?? null;
-        const profileMatch = teamName
-          ? userProfile?.teams.find((t) => {
-              const lower = teamName.toLowerCase().trim();
-              return (
-                t.label.toLowerCase().trim() === lower ||
-                t.aliases.some(
-                  (a) => a.toLowerCase().trim() === lower
-                )
-              );
-            })
-          : null;
+        const profileMatch = findTeamProfileByAlias(userProfile, teamName);
         const aliases =
           profileMatch?.aliases?.length
             ? profileMatch.aliases
@@ -2338,10 +2290,7 @@ export default function App() {
             }
             onManageRoster={(() => {
               if (!userProfile) return undefined;
-              const lower = currentTimuTeamName.toLowerCase().trim();
-              const profileMatch = userProfile.teams.find((t) =>
-                t.aliases.some((a) => a.toLowerCase().trim() === lower)
-              );
+              const profileMatch = findTeamProfileByAlias(userProfile, currentTimuTeamName);
               if (!profileMatch || profileMatch.kind !== 'me') return undefined;
               return () => handleOpenRosterEditor(profileMatch);
             })()}
@@ -2432,8 +2381,7 @@ export default function App() {
                     teamId = myTeam.teamId;
                   }
                   if (!teamId) {
-                    setCurrentEvent(event);
-                    setCurrentDivision(division);
+                    setAesScope({ event, division, team: null });
                     setScreenHistory((prev) => [...prev, screen]);
                     setScreen('TeamSelect');
                     return;
@@ -2441,15 +2389,12 @@ export default function App() {
                   const teams = await getTeamAssignments(eventKey, divisionId, null, [teamId]);
                   const teamAssignment = teams.find((t) => t.TeamId === teamId);
                   if (!teamAssignment) {
-                    setCurrentEvent(event);
-                    setCurrentDivision(division);
+                    setAesScope({ event, division, team: null });
                     setScreenHistory((prev) => [...prev, screen]);
                     setScreen('TeamSelect');
                     return;
                   }
-                  setCurrentEvent(event);
-                  setCurrentDivision(division);
-                  setCurrentTeam(teamAssignment);
+                  setAesScope({ event, division, team: teamAssignment });
                   setScreenHistory((prev) => [...prev, screen]);
                   setScreen('TeamDashboard');
                 } catch (err: any) {
@@ -2470,11 +2415,11 @@ export default function App() {
             onFindMoreTournaments={handleFindMoreForCurrentTeam}
             lastDiscoveryAt={(() => {
               if (!userProfile || !currentHistoryAliases) return undefined;
-              const lower = currentHistoryAliases.map((a) => a.toLowerCase().trim());
-              const match = userProfile.teams.find((t) =>
-                t.aliases.some((a) => lower.includes(a.toLowerCase().trim()))
-              );
-              return match?.lastDiscoveryAt;
+              for (const a of currentHistoryAliases) {
+                const match = findTeamProfileByAlias(userProfile, a);
+                if (match) return match.lastDiscoveryAt;
+              }
+              return undefined;
             })()}
             discoveringTeamLabel={discoveringTeamLabel}
             discoveryProgress={discoveryProgress}

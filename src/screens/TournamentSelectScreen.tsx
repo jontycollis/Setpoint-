@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -22,11 +22,7 @@ import type {
   Tournament,
   TournamentYear,
 } from '../config/tournaments';
-import {
-  fetchCanadianEvents,
-  groupIntoTournaments,
-  mergeDiscoveredEvents,
-} from '../api/aesClient';
+import { loadDiscoveredRegistry } from '../api/aesClient';
 import {
   buildGlobalSearchCorpus,
   matchesQuery,
@@ -71,8 +67,12 @@ export function TournamentSelectScreen({
   const [selectedTournament, setSelectedTournament] =
     useState<Tournament | null>(null);
   const [registry, setRegistry] = useState<Country[]>(initialRegistry ?? TOURNAMENT_REGISTRY);
+  // Discovery surfaces three distinct UI states: in-flight ("checking…"),
+  // succeeded (silent — registry just updated), or failed (banner + tap-to-
+  // retry). The previous boolean pair couldn't carry the failure message
+  // and had no path back to a successful retry.
   const [discoveryLoading, setDiscoveryLoading] = useState(!initialRegistry);
-  const [discoveryError, setDiscoveryError] = useState(false);
+  const [discoveryError, setDiscoveryError] = useState<string | null>(null);
 
   // ── Search-first state ───────────────────────────────────────────────
   // Corpus is built once on mount; the FlatList below filters live as
@@ -118,24 +118,36 @@ export function TournamentSelectScreen({
     }
   }, [initialRegistry]);
 
-  // Fetch and merge dynamic events on mount (only if no pre-fetched data)
+  // Fetch and merge dynamic events on mount (only if no pre-fetched data).
+  // The loader returns a tagged result so we can show a retry surface on
+  // failure rather than silently falling back to the static registry.
+  const runDiscovery = useCallback(async () => {
+    setDiscoveryLoading(true);
+    setDiscoveryError(null);
+    const result = await loadDiscoveredRegistry(TOURNAMENT_REGISTRY);
+    if (result.status === 'ok') {
+      setRegistry(result.data);
+      setDiscoveryError(null);
+    } else if (result.status === 'error') {
+      setDiscoveryError(result.message);
+    }
+    setDiscoveryLoading(false);
+  }, []);
+
   useEffect(() => {
     if (initialRegistry) return; // App.tsx already ran discovery
     let cancelled = false;
     (async () => {
-      try {
-        const caEvents = await fetchCanadianEvents();
-        const grouped = groupIntoTournaments(caEvents);
-        if (!cancelled) {
-          setRegistry((prev) => mergeDiscoveredEvents(prev, grouped));
-          setDiscoveryError(false);
-        }
-      } catch (err) {
-        console.warn('Tournament discovery failed:', err);
-        if (!cancelled) setDiscoveryError(true);
-      } finally {
-        if (!cancelled) setDiscoveryLoading(false);
+      const result = await loadDiscoveredRegistry(TOURNAMENT_REGISTRY);
+      if (cancelled) return;
+      if (result.status === 'ok') {
+        setRegistry(result.data);
+        setDiscoveryError(null);
+      } else if (result.status === 'error') {
+        console.warn('Tournament discovery failed:', result.message);
+        setDiscoveryError(result.message);
       }
+      setDiscoveryLoading(false);
     })();
     return () => { cancelled = true; };
   }, [initialRegistry]);
@@ -309,11 +321,15 @@ export function TournamentSelectScreen({
                 </View>
               )}
               {discoveryError && !discoveryLoading && (
-                <View style={styles.discoveryRow}>
+                <TouchableOpacity
+                  style={styles.discoveryRetryRow}
+                  onPress={runDiscovery}
+                  activeOpacity={0.7}
+                >
                   <Text style={styles.discoveryErrorText}>
-                    Could not check for new events — showing saved tournaments
+                    Failed to load. Tap to retry.
                   </Text>
-                </View>
+                </TouchableOpacity>
               )}
               {registry.map((country) => (
                 <TouchableOpacity
@@ -742,6 +758,18 @@ function makeStyles(colors: ThemeColors) {
   discoveryErrorText: {
     fontSize: fontSize.sm,
     color: colors.warning,
+    fontWeight: '600',
+  },
+  discoveryRetryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.sm,
+    marginBottom: spacing.sm,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    backgroundColor: colors.surface,
   },
   hintSection: {
     paddingHorizontal: spacing.xxl,
