@@ -38,7 +38,8 @@ export type MenuDestination =
   | 'CacConnection'
   | 'Scoreboard'
   | 'MatchList'
-  | 'TeamAnalytics';
+  | 'TeamAnalytics'
+  | 'StorageSnapshot';
 
 /**
  * The hamburger renders different items depending on whether the user is
@@ -644,6 +645,14 @@ export function HamburgerMenu({
                     </View>
                   </TouchableOpacity>
                 ) : null}
+                <MenuRow
+                  icon={'\u{1F501}'}
+                  label="Restore from backup"
+                  subtitle="Roll back to a recent storage snapshot"
+                  available={true}
+                  isCurrent={isCurrentScreen('StorageSnapshot')}
+                  onPress={() => handleSelect('StorageSnapshot')}
+                />
               </View>
 
 
