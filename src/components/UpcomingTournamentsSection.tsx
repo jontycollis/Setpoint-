@@ -77,7 +77,7 @@ export function UpcomingTournamentsSection({
       <Text style={styles.sectionLabel}>UPCOMING TOURNAMENTS</Text>
       {upcoming.length === 0 ? (
         <Text style={styles.emptyText}>
-          No upcoming tournaments scheduled. Pull-to-refresh after registering for a new event.
+          No upcoming tournaments scheduled. Pull down to refresh after registering for a new event.
         </Text>
       ) : (
         upcoming.map((entry) => (

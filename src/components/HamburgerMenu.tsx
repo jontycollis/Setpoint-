@@ -907,7 +907,7 @@ function MenuRow({
         >
           {label}
         </Text>
-        {subtitle && available && (
+        {subtitle && (
           <Text style={styles.menuSubtitle} numberOfLines={1}>
             {subtitle}
           </Text>
