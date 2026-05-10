@@ -72,6 +72,7 @@ import {
   deriveMatchState,
   makeEventId,
   recordMissedServe,
+  canApplySub,
 } from '../utils/matchEngine';
 import { saveMatch, deleteMatch } from '../utils/scoredMatchStore';
 import { CourtDiagram } from '../components/CourtDiagram';
@@ -304,6 +305,10 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
     const key = cs.rallyCount;
     if (autoLibOnSuggested && autoLibOnSuggested.team === team && autoLibOnSuggested.rallyKey === key) return;
     setAutoLibOnSuggested({ team, rallyKey: key });
+    // Libero placement supersedes any in-progress stat tagging — clear
+    // the StatBar selection so the user isn't looking at two competing
+    // surfaces when the modal pops.
+    setStatSelection(null);
     // Open the libero-on modal pre-populated. The modal already defaults
     // to libero #liberos[0] and lets the user pick the back-row player.
     setActionTeam(team);
@@ -1128,6 +1133,40 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
           teamColor={statSelection.team === 'home' ? homeColor : awayColor}
           onStat={fireStat}
           onPassWithQuality={firePassStat}
+          onSub={(benchShirt) => {
+            const team = statSelection.team;
+            const outShirt = statSelection.shirt;
+            // Validate against engine rules (sub cap, locked-out re-entry,
+            // etc.) before firing. If anything's wrong, surface as an
+            // Alert and abort — same UX as the other action modals.
+            const ev: SubEvent = {
+              id: makeEventId(),
+              ts: Date.now(),
+              setIndex: state.currentSetIndex,
+              type: 'sub',
+              team,
+              out: outShirt,
+              in: benchShirt,
+            };
+            const validation = canApplySub(state, ev, match.rosters, subRule);
+            if (validation.warnings.length > 0) {
+              Alert.alert(
+                'Substitution not allowed',
+                validation.warnings.join('\n')
+              );
+              return;
+            }
+            fireSub(team, outShirt, benchShirt);
+            setStatSelection(null);
+          }}
+          benchShirts={(() => {
+            const rot = state.currentSet!.rotation[statSelection.team];
+            const onFloor = rot.positions;
+            const roster = match.rosters[statSelection.team];
+            return roster
+              .filter((p) => p.active && !p.isLibero && !onFloor.includes(p.shirt))
+              .map((p) => p.shirt);
+          })()}
           onDismiss={() => setStatSelection(null)}
           onEditLineup={() => {
             setEditLineupSelected({ team: statSelection.team, posIdx: statSelection.posIdx });
@@ -1581,6 +1620,8 @@ function StatBar({
   teamColor,
   onStat,
   onPassWithQuality,
+  onSub,
+  benchShirts,
   onDismiss,
   onEditLineup,
   colors,
@@ -1593,12 +1634,56 @@ function StatBar({
   teamColor: string;
   onStat: (category: StatCategory) => void;
   onPassWithQuality: (quality: 0 | 1 | 2 | 3) => void;
+  onSub: (benchShirt: number) => void;
+  benchShirts: number[];
   onDismiss: () => void;
   onEditLineup: () => void;
   colors: ThemeColors;
   styles: ReturnType<typeof makeStyles>;
 }) {
   const [showPassGrades, setShowPassGrades] = useState(false);
+  const [showSubBench, setShowSubBench] = useState(false);
+  // Reset both sub-modes whenever the selected player changes so the
+  // bar comes back as the regular stat picker on the next selection.
+  useEffect(() => {
+    setShowPassGrades(false);
+    setShowSubBench(false);
+  }, [team, shirt]);
+
+  if (showSubBench) {
+    return (
+      <View style={[styles.statBarContainer, { borderColor: teamColor }]}>
+        <View style={styles.statBarHeader}>
+          <Text style={styles.statBarPlayerText}>
+            <Text style={{ color: teamColor, fontWeight: '800' }}>#{shirt}</Text>
+            {' '}{pName} · Sub for…
+          </Text>
+          <TouchableOpacity onPress={() => setShowSubBench(false)} activeOpacity={0.6}>
+            <Text style={styles.statBarDismiss}>‹ Back</Text>
+          </TouchableOpacity>
+        </View>
+        {benchShirts.length === 0 ? (
+          <Text style={[styles.fieldHint, { paddingHorizontal: spacing.sm, paddingBottom: spacing.sm }]}>
+            No bench players available.
+          </Text>
+        ) : (
+          <View style={styles.statBarButtons}>
+            {benchShirts.map((bShirt) => (
+              <TouchableOpacity
+                key={bShirt}
+                style={[styles.statBtn, { backgroundColor: teamColor + '22', borderColor: teamColor, borderWidth: 1.5 }]}
+                onPress={() => onSub(bShirt)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.statBtnEmoji, { color: teamColor, fontWeight: '800' }]}>#{bShirt}</Text>
+                <Text style={styles.statBtnLabel}>Sub in</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  }
 
   if (showPassGrades) {
     return (
@@ -1680,6 +1765,14 @@ function StatBar({
         <TouchableOpacity style={[styles.statBtn, { backgroundColor: colors.error + '22' }]} onPress={() => onStat('error')} activeOpacity={0.7}>
           <Text style={styles.statBtnEmoji}>✕</Text>
           <Text style={styles.statBtnLabel}>Error</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.statBtn, { backgroundColor: colors.accent + '22', borderColor: colors.accent, borderWidth: 1 }]}
+          onPress={() => setShowSubBench(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.statBtnEmoji}>⇄</Text>
+          <Text style={styles.statBtnLabel}>Sub →</Text>
         </TouchableOpacity>
       </View>
     </View>

@@ -55,6 +55,7 @@ import { AddTournamentsScreen } from './src/screens/AddTournamentsScreen';
 import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
 import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
+import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
 import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
@@ -85,6 +86,10 @@ import {
   saveUserProfile,
   findTeamProfileByAlias,
 } from './src/utils/userProfile';
+import {
+  takePreMigrationSnapshot,
+  pruneSnapshots,
+} from './src/utils/storageSnapshot';
 import {
   loadSeasonIndex,
   findStaleTids,
@@ -160,7 +165,8 @@ type Screen =
   | 'Stats'
   | 'PlayerDetail'
   | 'TournamentDetail'
-  | 'GlobalSearch';
+  | 'GlobalSearch'
+  | 'StorageSnapshot';
 
 // AES navigation scope: an event can stand alone (DivisionSelect view), an
 // event+division is the standard tournament context, and event+division+team
@@ -256,6 +262,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'EventEntry':
     case 'OvaRankings':
     case 'GlobalSearch':
+    case 'StorageSnapshot':
       return 'home';
     default:
       return 'team';
@@ -276,6 +283,35 @@ const SEARCH_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'Scoreboard',
   'GlobalSearch',
 ]);
+
+// ── Pre-migration snapshot guard ──────────────────────────────────────────
+// Module-scoped so a hot-reload or a re-render can't cause a second
+// snapshot during a single launch. A single snapshot per cold-start is
+// the contract the rollback affordance relies on.
+let preMigrationSnapshotRan = false;
+async function runPreMigrationSnapshotOnce(): Promise<void> {
+  if (preMigrationSnapshotRan) return;
+  preMigrationSnapshotRan = true;
+  try {
+    const info = await takePreMigrationSnapshot();
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[storageSnapshot] took pre-migration snapshot ${info.snapshotKey} — ${info.keys.length} keys, ${info.totalBytes} bytes`
+      );
+    }
+    const deleted = await pruneSnapshots(2);
+    if (__DEV__ && deleted > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[storageSnapshot] pruned ${deleted} old snapshot(s)`);
+    }
+  } catch (err) {
+    if (__DEV__) {
+      // eslint-disable-next-line no-console
+      console.warn('[storageSnapshot] failed:', err);
+    }
+  }
+}
 
 export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('light');
@@ -411,6 +447,11 @@ export default function App() {
   useEffect(() => {
     (async () => {
       try {
+        // Pre-migration snapshot — defensive backup BEFORE any code that
+        // may re-shape persisted state. Wrapped in try/catch internally
+        // so a failure can never block boot. Awaited here because a
+        // migration could otherwise race the snapshot read.
+        await runPreMigrationSnapshotOnce();
         const [events, favs, savedTheme, timu, profile] = await Promise.all([
           loadSavedEvents(),
           loadFavoriteTeams(),
@@ -1537,6 +1578,10 @@ export default function App() {
           }
           break;
         }
+        case 'StorageSnapshot':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('StorageSnapshot');
+          break;
       }
     },
     [screen, currentEvent, currentDivision, currentTeam, currentTimuTid, currentTimuTeamName, myTeam, userProfile]
@@ -2346,6 +2391,8 @@ export default function App() {
             initialGender={ovaInitialDivision?.gender}
           />
         );
+      case 'StorageSnapshot':
+        return <StorageSnapshotScreen onBack={goBack} />;
       case 'SeasonHistory':
         if (!currentHistoryTeamName) return null;
         return (
