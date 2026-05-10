@@ -10,6 +10,8 @@ import type {
 import { cachedFetch } from '../utils/apiCache';
 import type { CacheFetchOptions } from '../utils/apiCache';
 import type { Country } from '../config/tournaments';
+import type { LoaderResult } from '../utils/loaderResult';
+import { errorMessage } from '../utils/loaderResult';
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1247,4 +1249,59 @@ export function mergeDiscoveredEvents(
   }
 
   return registry;
+}
+
+// ── Screen-level typed loaders ───────────────────────────────────────────
+//
+// Wrap the throwing primitives above in tagged-union LoaderResult shapes so
+// callers can render distinct empty / error UI without duplicating
+// try/catch boilerplate. See src/utils/loaderResult.ts for the shape.
+
+/**
+ * Run AES discovery and merge the results onto `base`. Returns:
+ *   - { status: 'ok',    data }    — at least one new event merged in
+ *   - { status: 'empty' }          — discovery succeeded but added nothing
+ *   - { status: 'error', message } — fetch / parse failure
+ *
+ * Callers display the same `base` registry regardless of outcome, but the
+ * 'error' branch lets them surface a retry affordance instead of silently
+ * showing the static fallback.
+ */
+export async function loadDiscoveredRegistry(
+  base: Country[]
+): Promise<LoaderResult<Country[]>> {
+  try {
+    const events = await fetchCanadianEvents();
+    const grouped = groupIntoTournaments(events);
+    if (grouped.length === 0) {
+      return { status: 'empty' };
+    }
+    const merged = mergeDiscoveredEvents(base, grouped);
+    return { status: 'ok', data: merged };
+  } catch (err) {
+    return { status: 'error', message: errorMessage(err, 'Could not check for new tournaments.') };
+  }
+}
+
+/**
+ * Fetch the team assignments for a specific event/division. Returns a
+ * tagged result so the AddTournaments AES picker can distinguish "no
+ * teams yet in this division" (the registration was published without
+ * roster yet) from "the request failed" — the latter gets a retry
+ * affordance instead of a blank list.
+ */
+export async function loadDivisionTeams(
+  eventKey: string,
+  divisionId: number
+): Promise<LoaderResult<AESTeamAssignment[]>> {
+  try {
+    const teams = await getTeamAssignments(eventKey, divisionId, null, []);
+    if (teams.length === 0) return { status: 'empty' };
+    return { status: 'ok', data: teams };
+  } catch (err) {
+    return {
+      status: 'error',
+      message: errorMessage(err, 'Could not load teams for this division.'),
+    };
+  }
 }

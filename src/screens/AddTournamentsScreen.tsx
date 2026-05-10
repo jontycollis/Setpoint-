@@ -58,7 +58,8 @@ import {
 } from '../utils/seasonTeamIdentity';
 import { loadMyTeam } from '../utils/storage';
 import { listSeasons, type Season } from '../utils/season';
-import { getEvent, getTeamAssignments } from '../api/aesClient';
+import { getEvent, loadDivisionTeams } from '../api/aesClient';
+import type { LoaderResult } from '../utils/loaderResult';
 import {
   loadAesSeasonIndex,
   indexAesSnapshot,
@@ -136,6 +137,12 @@ export function AddTournamentsScreen({ onBack, onOpenTid, focusSource }: Props) 
   const [aesSelectedDivisionId, setAesSelectedDivisionId] = useState<number | null>(null);
   const [aesDivisionTeams, setAesDivisionTeams] = useState<AESTeamAssignment[]>([]);
   const [aesDivisionTeamsLoading, setAesDivisionTeamsLoading] = useState(false);
+  // Tagged-union result for the team-assignment fetch. Lets the picker
+  // distinguish "no teams in this division" from "the request failed" —
+  // the latter shows a tap-to-retry surface instead of an empty list.
+  const [aesDivisionTeamsResult, setAesDivisionTeamsResult] = useState<
+    LoaderResult<AESTeamAssignment[]> | null
+  >(null);
   const [aesSelectedTeamId, setAesSelectedTeamId] = useState<number | null>(null);
   const [aesAdding, setAesAdding] = useState(false);
 
@@ -374,42 +381,39 @@ export function AddTournamentsScreen({ onBack, onOpenTid, focusSource }: Props) 
 
   // Whenever the user picks a division, fetch its team assignments. We
   // also auto-select the team if any of the user's aliases matches.
+  // The loader returns a tagged result (ok/empty/error); we keep the raw
+  // team list in `aesDivisionTeams` for the picker rendering and surface
+  // the error variant separately so the user gets a retry affordance.
+  const fetchAesDivisionTeams = useCallback(async () => {
+    if (!aesEvent || aesSelectedDivisionId == null) return;
+    setAesDivisionTeamsLoading(true);
+    setAesSelectedTeamId(null);
+    setAesDivisionTeamsResult(null);
+    const result = await loadDivisionTeams(aesEvent.Key, aesSelectedDivisionId);
+    setAesDivisionTeamsResult(result);
+    if (result.status === 'ok') {
+      setAesDivisionTeams(result.data);
+      const aliasMatch = result.data.find(
+        (t) =>
+          matchesAnyAlias(t.TeamName, aliases) ||
+          matchesAnyAlias(t.TeamText, aliases)
+      );
+      if (aliasMatch) setAesSelectedTeamId(aliasMatch.TeamId);
+    } else {
+      setAesDivisionTeams([]);
+    }
+    setAesDivisionTeamsLoading(false);
+  }, [aesEvent, aesSelectedDivisionId, aliases]);
+
   useEffect(() => {
     if (!aesEvent || aesSelectedDivisionId == null) {
       setAesDivisionTeams([]);
       setAesSelectedTeamId(null);
+      setAesDivisionTeamsResult(null);
       return;
     }
-    let cancelled = false;
-    setAesDivisionTeamsLoading(true);
-    setAesSelectedTeamId(null);
-    (async () => {
-      try {
-        const teams = await getTeamAssignments(
-          aesEvent.Key,
-          aesSelectedDivisionId,
-          null,
-          []
-        );
-        if (cancelled) return;
-        setAesDivisionTeams(teams);
-        // Try to pre-select using current aliases.
-        const aliasMatch = teams.find(
-          (t) =>
-            matchesAnyAlias(t.TeamName, aliases) ||
-            matchesAnyAlias(t.TeamText, aliases)
-        );
-        if (aliasMatch) setAesSelectedTeamId(aliasMatch.TeamId);
-      } catch {
-        if (!cancelled) setAesDivisionTeams([]);
-      } finally {
-        if (!cancelled) setAesDivisionTeamsLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [aesEvent, aesSelectedDivisionId, aliases]);
+    fetchAesDivisionTeams();
+  }, [aesEvent, aesSelectedDivisionId, fetchAesDivisionTeams]);
 
   const onAddAesEvent = useCallback(async () => {
     if (!aesEvent || aesSelectedDivisionId == null || aesSelectedTeamId == null) {
@@ -768,6 +772,16 @@ export function AddTournamentsScreen({ onBack, onOpenTid, focusSource }: Props) 
                       <ActivityIndicator size="small" color={colors.primary} />
                       <Text style={styles.progressText}>Loading teams…</Text>
                     </View>
+                  ) : aesDivisionTeamsResult?.status === 'error' ? (
+                    <TouchableOpacity
+                      style={styles.aesTeamsRetry}
+                      onPress={fetchAesDivisionTeams}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.aesTeamsRetryText}>
+                        Failed to load. Tap to retry.
+                      </Text>
+                    </TouchableOpacity>
                   ) : aesDivisionTeams.length === 0 ? (
                     <Text style={styles.emptyText}>
                       No teams listed in this division yet.
@@ -1496,6 +1510,20 @@ function makeStyles(colors: ThemeColors) {
   },
   aesDivisionList: {},
   aesTeamList: {},
+  aesTeamsRetry: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.warning,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+  },
+  aesTeamsRetryText: {
+    color: colors.warning,
+    fontSize: fontSize.sm,
+    fontWeight: '600',
+  },
   aesPickerRow: {
     flexDirection: 'row',
     alignItems: 'center',
