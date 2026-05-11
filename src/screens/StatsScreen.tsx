@@ -46,6 +46,11 @@ import {
   type SeasonGlance,
   type TournamentRollup,
 } from '../utils/analytics';
+import {
+  aggregateServerSplits,
+  type ServerSplitSummary,
+  type ServerSplitLine,
+} from '../utils/serverSplits';
 
 type KindFilter = 'all' | MatchKind;
 type SortKey = 'kills' | 'blocks' | 'aces' | 'assists' | 'digs' | 'passAvg' | 'errors' | 'totalPoints';
@@ -134,6 +139,14 @@ export function StatsScreen({
   const tournamentRollups: TournamentRollup[] = useMemo(
     () =>
       aggregateTournamentRollups(filteredMatches, teamProfileId, {
+        respectIncludeInStats: false,
+      }),
+    [filteredMatches, teamProfileId]
+  );
+
+  const serverSplits: ServerSplitSummary = useMemo(
+    () =>
+      aggregateServerSplits(filteredMatches, teamProfileId, {
         respectIncludeInStats: false,
       }),
     [filteredMatches, teamProfileId]
@@ -306,6 +319,13 @@ export function StatsScreen({
                   ))
               )}
             </View>
+
+            {/* Side-out & serving conversion */}
+            <ServerSplitsCard
+              splits={serverSplits}
+              colors={colors}
+              styles={styles}
+            />
 
             {/* Per-tournament rollup */}
             {tournamentRollups.length > 0 ? (
@@ -586,6 +606,301 @@ function TrendChart({
       })}
     </View>
   );
+}
+
+// ── Side-out & serving card ─────────────────────────────────────────────
+
+function ServerSplitsCard({
+  splits,
+  colors,
+  styles,
+}: {
+  splits: ServerSplitSummary;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const [view, setView] = useState<'oncourt' | 'personal'>('oncourt');
+  const t = splits.team;
+  if (t.recvRallies === 0 && t.serveRallies === 0) return null;
+
+  // Filter to players who actually contributed to the slice — the on-court
+  // view wants anyone with rallies, personal view wants anyone who served.
+  const rows: ServerSplitLine[] =
+    view === 'oncourt'
+      ? splits.players.filter((p) => p.recvRallies + p.serveRallies > 0)
+      : splits.players
+          .filter((p) => p.personalServes > 0)
+          .slice()
+          .sort((a, b) => b.personalServes - a.personalServes || a.shirt - b.shirt);
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.kicker}>SIDE-OUT &amp; SERVING</Text>
+      <Text style={styles.cardSubtitle}>
+        Side-Out % = rallies won when receiving · Serve Pt % = rallies won
+        when serving
+      </Text>
+
+      {/* Team totals strip */}
+      <View
+        style={{
+          flexDirection: 'row',
+          marginTop: spacing.sm,
+          marginBottom: spacing.md,
+        }}
+      >
+        <TeamMetric
+          label="Side-Out %"
+          pct={t.recvPct}
+          counts={`${t.recvWon} / ${t.recvRallies}`}
+          colors={colors}
+        />
+        <View style={{ width: spacing.md }} />
+        <TeamMetric
+          label="Serve Pt %"
+          pct={t.servePct}
+          counts={`${t.serveWon} / ${t.serveRallies}`}
+          colors={colors}
+        />
+      </View>
+
+      {/* View toggle */}
+      <View style={{ flexDirection: 'row', marginBottom: spacing.sm }}>
+        <TouchableOpacity
+          onPress={() => setView('oncourt')}
+          activeOpacity={0.7}
+          style={[
+            styles.sortBtn,
+            view === 'oncourt' && styles.sortBtnActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.sortBtnText,
+              view === 'oncourt' && styles.sortBtnTextActive,
+            ]}
+          >
+            On-court
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setView('personal')}
+          activeOpacity={0.7}
+          style={[
+            styles.sortBtn,
+            view === 'personal' && styles.sortBtnActive,
+          ]}
+        >
+          <Text
+            style={[
+              styles.sortBtnText,
+              view === 'personal' && styles.sortBtnTextActive,
+            ]}
+          >
+            Personal serve
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Header row */}
+      {view === 'oncourt' ? (
+        <View style={styles.tableHeader}>
+          <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
+          <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
+          <Text style={styles.headerCell}>SO%</Text>
+          <Text style={styles.headerCell}>SP%</Text>
+          <Text style={styles.headerCell}>Rec</Text>
+          <Text style={styles.headerCell}>Srv</Text>
+        </View>
+      ) : (
+        <View style={styles.tableHeader}>
+          <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
+          <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
+          <Text style={styles.headerCell}>Srv</Text>
+          <Text style={styles.headerCell}>Won</Text>
+          <Text style={styles.headerCell}>Aces</Text>
+          <Text style={styles.headerCell}>Pt%</Text>
+        </View>
+      )}
+
+      {rows.length === 0 ? (
+        <Text style={styles.empty}>No qualifying data in this view.</Text>
+      ) : view === 'oncourt' ? (
+        rows.map((p) => (
+          <ServerOnCourtRow
+            key={p.shirt}
+            line={p}
+            teamSidePct={t.recvPct}
+            teamServePct={t.servePct}
+            colors={colors}
+            styles={styles}
+          />
+        ))
+      ) : (
+        rows.map((p) => (
+          <ServerPersonalRow
+            key={p.shirt}
+            line={p}
+            colors={colors}
+            styles={styles}
+          />
+        ))
+      )}
+
+      {splits.team.ambiguousRallies > 0 ? (
+        <Text
+          style={{
+            fontSize: fontSize.xs,
+            color: colors.textLight,
+            marginTop: spacing.xs,
+            fontStyle: 'italic',
+          }}
+        >
+          {splits.team.ambiguousRallies} rallies not classified (missing
+          lineup data).
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function TeamMetric({
+  label,
+  pct,
+  counts,
+  colors,
+}: {
+  label: string;
+  pct: number;
+  counts: string;
+  colors: ThemeColors;
+}) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: colors.surfaceElevated,
+        borderRadius: borderRadius.md,
+        padding: spacing.md,
+        borderWidth: 1,
+        borderColor: colors.border,
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 10,
+          fontWeight: '700',
+          color: colors.textLight,
+          letterSpacing: 1,
+        }}
+      >
+        {label.toUpperCase()}
+      </Text>
+      <Text
+        style={{
+          fontSize: fontSize.xxl,
+          fontWeight: '900',
+          color: colors.primary,
+          marginTop: 2,
+        }}
+      >
+        {Number.isFinite(pct) ? `${(pct * 100).toFixed(1)}%` : '—'}
+      </Text>
+      <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary }}>
+        {counts}
+      </Text>
+    </View>
+  );
+}
+
+function ServerOnCourtRow({
+  line,
+  teamSidePct,
+  teamServePct,
+  colors,
+  styles,
+}: {
+  line: ServerSplitLine;
+  teamSidePct: number;
+  teamServePct: number;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const soDelta = line.recvRallies > 0 ? line.recvPct - teamSidePct : NaN;
+  const spDelta = line.serveRallies > 0 ? line.servePct - teamServePct : NaN;
+  return (
+    <View style={styles.tableRow}>
+      <Text style={[styles.cell, { flex: 2, fontWeight: '800' }]}>{line.shirt}</Text>
+      <Text
+        style={[styles.cell, { flex: 4, textAlign: 'left', paddingLeft: spacing.xs }]}
+        numberOfLines={1}
+      >
+        {line.name}
+      </Text>
+      <Text
+        style={[
+          styles.cell,
+          { color: deltaColor(soDelta, colors), fontWeight: '700' },
+        ]}
+      >
+        {Number.isFinite(line.recvPct) ? `${(line.recvPct * 100).toFixed(0)}` : '—'}
+      </Text>
+      <Text
+        style={[
+          styles.cell,
+          { color: deltaColor(spDelta, colors), fontWeight: '700' },
+        ]}
+      >
+        {Number.isFinite(line.servePct) ? `${(line.servePct * 100).toFixed(0)}` : '—'}
+      </Text>
+      <Text style={styles.cell}>{line.recvRallies || '—'}</Text>
+      <Text style={styles.cell}>{line.serveRallies || '—'}</Text>
+    </View>
+  );
+}
+
+function ServerPersonalRow({
+  line,
+  colors,
+  styles,
+}: {
+  line: ServerSplitLine;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <View style={styles.tableRow}>
+      <Text style={[styles.cell, { flex: 2, fontWeight: '800' }]}>{line.shirt}</Text>
+      <Text
+        style={[styles.cell, { flex: 4, textAlign: 'left', paddingLeft: spacing.xs }]}
+        numberOfLines={1}
+      >
+        {line.name}
+      </Text>
+      <Text style={styles.cell}>{line.personalServes || '—'}</Text>
+      <Text style={styles.cell}>{line.personalServeWon || '—'}</Text>
+      <Text style={[styles.cell, { color: colors.accent, fontWeight: '700' }]}>
+        {line.personalServeAces || '—'}
+      </Text>
+      <Text
+        style={[
+          styles.cell,
+          { fontWeight: '800', color: colors.primary },
+        ]}
+      >
+        {Number.isFinite(line.personalServePct)
+          ? `${(line.personalServePct * 100).toFixed(0)}`
+          : '—'}
+      </Text>
+    </View>
+  );
+}
+
+function deltaColor(delta: number, colors: ThemeColors): string {
+  if (!Number.isFinite(delta)) return colors.text;
+  if (delta >= 0.03) return colors.success;
+  if (delta <= -0.03) return colors.error;
+  return colors.text;
 }
 
 // ── Player row ───────────────────────────────────────────────────────────
