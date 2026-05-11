@@ -43,16 +43,30 @@ import {
   aggregateTournamentRollups,
   buildSeasonGlance,
   presentSplitKeys,
+  getMatchPhase,
   type SeasonGlance,
   type TournamentRollup,
+  type Phase,
 } from '../utils/analytics';
 import {
   aggregateServerSplits,
   type ServerSplitSummary,
   type ServerSplitLine,
 } from '../utils/serverSplits';
+import {
+  aggregateOnCourtStats,
+  type OnCourtSummary,
+  type OnCourtPlayerLine,
+} from '../utils/onCourtStats';
+import {
+  aggregateLineupCombos,
+  topCombosByRallyWinPct,
+  topCombosBySetDomination,
+  type LineupComboLine,
+} from '../utils/lineupCombos';
 
 type KindFilter = 'all' | MatchKind;
+type PhaseFilter = 'all' | Phase;
 type SortKey = 'kills' | 'blocks' | 'aces' | 'assists' | 'digs' | 'passAvg' | 'errors' | 'totalPoints';
 
 interface Props {
@@ -83,6 +97,7 @@ export function StatsScreen({
   const [loading, setLoading] = useState(true);
   const [allMatches, setAllMatches] = useState<Match[]>([]);
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
   const [sortKey, setSortKey] = useState<SortKey>('totalPoints');
 
   useEffect(() => {
@@ -117,13 +132,31 @@ export function StatsScreen({
       if (kindFilter !== 'all' && (m.meta.matchKind ?? 'standalone') !== kindFilter) {
         return false;
       }
+      if (phaseFilter !== 'all' && getMatchPhase(m) !== phaseFilter) {
+        return false;
+      }
       return true;
     });
-  }, [allMatches, kindFilter]);
+  }, [allMatches, kindFilter, phaseFilter]);
 
   const presentKinds = useMemo(
     () => presentSplitKeys(allMatches, teamProfileId, 'matchKind', { respectIncludeInStats: true }),
     [allMatches, teamProfileId]
+  );
+
+  // Phase chips only show when the current kind slice has identifiable
+  // pool/playoff data. Computed against the kind-filtered (but not
+  // phase-filtered) set so toggling phase doesn't make the chips disappear.
+  const kindFilteredMatches = useMemo(() => {
+    return allMatches.filter((m) => {
+      if (m.meta.includeInStats === false) return false;
+      if (kindFilter !== 'all' && (m.meta.matchKind ?? 'standalone') !== kindFilter) return false;
+      return true;
+    });
+  }, [allMatches, kindFilter]);
+  const presentPhases = useMemo(
+    () => presentSplitKeys(kindFilteredMatches, teamProfileId, 'phase', { respectIncludeInStats: false }),
+    [kindFilteredMatches, teamProfileId]
   );
 
   const glance: SeasonGlance = useMemo(
@@ -147,6 +180,22 @@ export function StatsScreen({
   const serverSplits: ServerSplitSummary = useMemo(
     () =>
       aggregateServerSplits(filteredMatches, teamProfileId, {
+        respectIncludeInStats: false,
+      }),
+    [filteredMatches, teamProfileId]
+  );
+
+  const onCourtSummary: OnCourtSummary = useMemo(
+    () =>
+      aggregateOnCourtStats(filteredMatches, teamProfileId, {
+        respectIncludeInStats: false,
+      }),
+    [filteredMatches, teamProfileId]
+  );
+
+  const lineupCombos = useMemo(
+    () =>
+      aggregateLineupCombos(filteredMatches, teamProfileId, {
         respectIncludeInStats: false,
       }),
     [filteredMatches, teamProfileId]
@@ -239,6 +288,40 @@ export function StatsScreen({
               />
             ) : null}
           </ScrollView>
+
+          {/* Sub-stripe: Pool / Playoff. Only shown when the current
+              kind slice actually has identifiable phase data — otherwise
+              it'd be a confusing dead chip row. */}
+          {(presentPhases.has('pool') || presentPhases.has('playoff')) && (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={[styles.stripeRow, { paddingTop: 0 }]}
+            >
+              <Chip
+                label="All phases"
+                active={phaseFilter === 'all'}
+                onPress={() => setPhaseFilter('all')}
+                colors={colors}
+              />
+              {presentPhases.has('pool') ? (
+                <Chip
+                  label="Pool"
+                  active={phaseFilter === 'pool'}
+                  onPress={() => setPhaseFilter('pool')}
+                  colors={colors}
+                />
+              ) : null}
+              {presentPhases.has('playoff') ? (
+                <Chip
+                  label="Playoff"
+                  active={phaseFilter === 'playoff'}
+                  onPress={() => setPhaseFilter('playoff')}
+                  colors={colors}
+                />
+              ) : null}
+            </ScrollView>
+          )}
         </View>
 
         {noMatchesInSlice ? (
@@ -320,9 +403,23 @@ export function StatsScreen({
               )}
             </View>
 
+            {/* On-court & set wins */}
+            <OnCourtStatsCard
+              summary={onCourtSummary}
+              colors={colors}
+              styles={styles}
+            />
+
             {/* Side-out & serving conversion */}
             <ServerSplitsCard
               splits={serverSplits}
+              colors={colors}
+              styles={styles}
+            />
+
+            {/* Lineup combinations */}
+            <LineupCombosCard
+              summary={lineupCombos}
               colors={colors}
               styles={styles}
             />
@@ -604,6 +701,277 @@ function TrendChart({
           </View>
         );
       })}
+    </View>
+  );
+}
+
+// ── On-court / set wins card ─────────────────────────────────────────────
+
+function OnCourtStatsCard({
+  summary,
+  colors,
+  styles,
+}: {
+  summary: OnCourtSummary;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const t = summary.team;
+  if (t.rallies === 0 && t.setsPlayed === 0) return null;
+  const players = summary.players.filter((p) => p.rallies > 0);
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.kicker}>ON-COURT &amp; SET WINS</Text>
+      <Text style={styles.cardSubtitle}>
+        Rally win % = % of on-court rallies the team won · Set win % = % of
+        sets won when player was on court
+      </Text>
+
+      {/* Team totals strip */}
+      <View
+        style={{
+          flexDirection: 'row',
+          marginTop: spacing.sm,
+          marginBottom: spacing.md,
+        }}
+      >
+        <TeamMetric
+          label="Rally Win %"
+          pct={t.rallyWinPct}
+          counts={`${t.ralliesWon} / ${t.rallies}`}
+          colors={colors}
+        />
+        <View style={{ width: spacing.md }} />
+        <TeamMetric
+          label="Set Win %"
+          pct={t.setWinPct}
+          counts={`${t.setsWon} / ${t.setsPlayed}`}
+          colors={colors}
+        />
+      </View>
+
+      {/* Header row */}
+      <View style={styles.tableHeader}>
+        <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
+        <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
+        <Text style={styles.headerCell}>M</Text>
+        <Text style={styles.headerCell}>Set%</Text>
+        <Text style={styles.headerCell}>Rly%</Text>
+        <Text style={styles.headerCell}>On</Text>
+      </View>
+
+      {players.length === 0 ? (
+        <Text style={styles.empty}>No qualifying data in this view.</Text>
+      ) : (
+        players.map((p) => (
+          <OnCourtPlayerRow
+            key={p.shirt}
+            line={p}
+            teamSetPct={t.setWinPct}
+            teamRallyPct={t.rallyWinPct}
+            colors={colors}
+            styles={styles}
+          />
+        ))
+      )}
+
+      {summary.ambiguousRallies > 0 ? (
+        <Text
+          style={{
+            fontSize: fontSize.xs,
+            color: colors.textLight,
+            marginTop: spacing.xs,
+            fontStyle: 'italic',
+          }}
+        >
+          {summary.ambiguousRallies} rallies not classified (missing
+          lineup data).
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function OnCourtPlayerRow({
+  line,
+  teamSetPct,
+  teamRallyPct,
+  colors,
+  styles,
+}: {
+  line: OnCourtPlayerLine;
+  teamSetPct: number;
+  teamRallyPct: number;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const setDelta = line.setsAppeared > 0 ? line.setWinPct - teamSetPct : NaN;
+  const rallyDelta = line.rallies > 0 ? line.rallyWinPct - teamRallyPct : NaN;
+  return (
+    <View style={styles.tableRow}>
+      <Text style={[styles.cell, { flex: 2, fontWeight: '800' }]}>{line.shirt}</Text>
+      <Text
+        style={[styles.cell, { flex: 4, textAlign: 'left', paddingLeft: spacing.xs }]}
+        numberOfLines={1}
+      >
+        {line.name}
+      </Text>
+      <Text style={styles.cell}>{line.matchesAppeared || '—'}</Text>
+      <Text
+        style={[
+          styles.cell,
+          { color: deltaColor(setDelta, colors), fontWeight: '700' },
+        ]}
+      >
+        {Number.isFinite(line.setWinPct) ? `${(line.setWinPct * 100).toFixed(0)}` : '—'}
+      </Text>
+      <Text
+        style={[
+          styles.cell,
+          { color: deltaColor(rallyDelta, colors), fontWeight: '700' },
+        ]}
+      >
+        {Number.isFinite(line.rallyWinPct) ? `${(line.rallyWinPct * 100).toFixed(0)}` : '—'}
+      </Text>
+      <Text style={styles.cell}>{line.rallies || '—'}</Text>
+    </View>
+  );
+}
+
+// ── Lineup combinations card ─────────────────────────────────────────────
+
+function LineupCombosCard({
+  summary,
+  colors,
+  styles,
+}: {
+  summary: { combos: LineupComboLine[]; totalRallies: number };
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const [view, setView] = useState<'rally' | 'dominant'>('rally');
+  if (summary.totalRallies === 0) return null;
+
+  const rows =
+    view === 'rally'
+      ? topCombosByRallyWinPct(summary, 30, 10)
+      : topCombosBySetDomination(summary, 3, 10);
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.kicker}>LINEUP COMBINATIONS</Text>
+      <Text style={styles.cardSubtitle}>
+        {view === 'rally'
+          ? 'Top 6-player combos by rally win % (min 30 rallies together)'
+          : 'Top 6-player combos by set win % when they dominated the set (min 3 dominated sets)'}
+      </Text>
+
+      {/* View toggle */}
+      <View style={{ flexDirection: 'row', marginTop: spacing.sm, marginBottom: spacing.sm }}>
+        <TouchableOpacity
+          onPress={() => setView('rally')}
+          activeOpacity={0.7}
+          style={[styles.sortBtn, view === 'rally' && styles.sortBtnActive]}
+        >
+          <Text
+            style={[styles.sortBtnText, view === 'rally' && styles.sortBtnTextActive]}
+          >
+            Rally win %
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => setView('dominant')}
+          activeOpacity={0.7}
+          style={[styles.sortBtn, view === 'dominant' && styles.sortBtnActive]}
+        >
+          <Text
+            style={[styles.sortBtnText, view === 'dominant' && styles.sortBtnTextActive]}
+          >
+            Set win % when dominant
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {rows.length === 0 ? (
+        <Text style={styles.empty}>
+          Not enough data — need 6 distinct players playing
+          {view === 'rally' ? ' ≥30 rallies' : ' as the primary 6 for ≥3 sets'}{' '}
+          together.
+        </Text>
+      ) : (
+        rows.map((c) => (
+          <LineupComboRow
+            key={c.comboKey}
+            combo={c}
+            view={view}
+            colors={colors}
+            styles={styles}
+          />
+        ))
+      )}
+    </View>
+  );
+}
+
+function LineupComboRow({
+  combo,
+  view,
+  colors,
+  styles,
+}: {
+  combo: LineupComboLine;
+  view: 'rally' | 'dominant';
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const pct = view === 'rally' ? combo.rallyWinPct : combo.setDominatedWinPct;
+  const primaryText =
+    view === 'rally'
+      ? `${combo.rallies} rallies · ${combo.ralliesWon} won`
+      : `${combo.setsDominated} dominated · ${combo.setsDominatedWon} won`;
+  return (
+    <View
+      style={{
+        paddingVertical: spacing.sm,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.divider,
+      }}
+    >
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+        <View style={{ flex: 1, paddingRight: spacing.sm }}>
+          <Text
+            style={{
+              fontSize: fontSize.sm,
+              fontWeight: '600',
+              color: colors.text,
+              lineHeight: 18,
+            }}
+          >
+            {combo.playerNames.join(', ')}
+          </Text>
+          <Text
+            style={{
+              fontSize: fontSize.xs,
+              color: colors.textSecondary,
+              marginTop: 2,
+            }}
+          >
+            {primaryText}
+          </Text>
+        </View>
+        <Text
+          style={{
+            fontSize: fontSize.xl,
+            fontWeight: '900',
+            color: colors.primary,
+            minWidth: 56,
+            textAlign: 'right',
+          }}
+        >
+          {Number.isFinite(pct) ? `${(pct * 100).toFixed(0)}%` : '—'}
+        </Text>
+      </View>
     </View>
   );
 }
