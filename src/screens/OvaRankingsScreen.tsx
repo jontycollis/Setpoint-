@@ -34,6 +34,23 @@ interface Props {
   /** Optional initial filters (e.g., from a tap on a team-dashboard rank badge). */
   initialDivisionKey?: string;
   initialGender?: OvaGender;
+  /**
+   * Tap-a-team handler. When set, ranking rows become tappable and call
+   * back with the team's name + division label so the parent can create
+   * a TeamProfile and kick off auto-discovery. When undefined, the screen
+   * falls back to the read-only browse behaviour (no row tap).
+   *
+   * The parent decides what to render after — typically an Alert
+   * confirmation, then a navigation to the team's dashboard.
+   */
+  onFollowTeam?: (params: {
+    teamName: string;
+    divisionLabel: string;
+    /** True when the team already alias-matches one of the user's
+     *  TeamProfiles — caller can offer "re-run discovery" rather than
+     *  create a duplicate. */
+    alreadyFollowed: boolean;
+  }) => void;
 }
 
 const ALL_DIVISION_KEYS = ['18U', '17U', '16U', '15U', 'TLS', '6v6', '4v4'] as const;
@@ -42,6 +59,7 @@ export function OvaRankingsScreen({
   onBack,
   initialDivisionKey,
   initialGender,
+  onFollowTeam,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -323,20 +341,9 @@ export function OvaRankingsScreen({
 
           {filteredTeams.map((team) => {
             const isMine =
-              myTeamMatch && team.teamName === myTeamMatch.teamName;
-            return (
-              <View
-                key={`${team.rank}-${team.teamName}`}
-                onLayout={(e) => {
-                  if (isMine) {
-                    myRowOffsetRef.current = e.nativeEvent.layout.y;
-                  }
-                }}
-                style={[
-                  styles.tableRow,
-                  isMine && styles.tableRowMine,
-                ]}
-              >
+              !!myTeamMatch && team.teamName === myTeamMatch.teamName;
+            const rowInner = (
+              <>
                 <Text style={[styles.tableCell, styles.rankCol, styles.rankText]}>
                   {team.rank}
                 </Text>
@@ -363,6 +370,55 @@ export function OvaRankingsScreen({
                     {team.stats[c] || ''}
                   </Text>
                 ))}
+                {onFollowTeam ? (
+                  <Text
+                    style={[
+                      styles.followChevron,
+                      isMine && { color: colors.primary },
+                    ]}
+                  >
+                    {'›'}
+                  </Text>
+                ) : null}
+              </>
+            );
+            const onLayout = (e: { nativeEvent: { layout: { y: number } } }) => {
+              if (isMine) {
+                myRowOffsetRef.current = e.nativeEvent.layout.y;
+              }
+            };
+            const rowStyle = [
+              styles.tableRow,
+              isMine && styles.tableRowMine,
+            ];
+            if (onFollowTeam) {
+              return (
+                <TouchableOpacity
+                  key={`${team.rank}-${team.teamName}`}
+                  onLayout={onLayout}
+                  style={rowStyle}
+                  activeOpacity={0.6}
+                  onPress={() =>
+                    onFollowTeam({
+                      teamName: team.teamName,
+                      divisionLabel:
+                        activeDivision?.divisionLabel ||
+                        `${activeDivision?.divisionKey ?? ''} ${gender === 'girls' ? 'Girls' : 'Boys'}`.trim(),
+                      alreadyFollowed: isMine,
+                    })
+                  }
+                >
+                  {rowInner}
+                </TouchableOpacity>
+              );
+            }
+            return (
+              <View
+                key={`${team.rank}-${team.teamName}`}
+                onLayout={onLayout}
+                style={rowStyle}
+              >
+                {rowInner}
               </View>
             );
           })}
@@ -589,6 +645,15 @@ function makeStyles(colors: ThemeColors) {
   teamCol: { flex: 1, paddingRight: spacing.xs },
   statCol: { width: 60, textAlign: 'center', fontVariant: ['tabular-nums'] },
   tableTextMine: { color: colors.primary, fontWeight: '700' },
+  followChevron: {
+    color: colors.textLight,
+    fontSize: 22,
+    lineHeight: 22,
+    fontWeight: '700',
+    marginLeft: spacing.xs,
+    width: 16,
+    textAlign: 'right',
+  },
 
   fullStatsCard: { marginTop: spacing.md },
   fullStatsTitle: {

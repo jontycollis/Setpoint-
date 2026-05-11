@@ -1,21 +1,24 @@
 // ── AddTeamChooserScreen ──────────────────────────────────────────────────
 //
-// Tiny intermediate screen reached from the "+ Add team" CTA on
-// MyHomeScreen. Two buttons:
+// Reached from the "+ Add team" CTA on MyHome. Three options:
 //
-//   AES tournament  → routes through TournamentSelect → EventEntry →
-//                     DivisionSelect → TeamSelect → Set As My Team.
-//                     The existing flow's "Set As My Team" now
-//                     upserts a TeamProfile (Phase 2 wiring).
+//   1. **Find your OVA team** (primary) → OVA Rankings screen.
+//      Tap a row → confirm follow → app creates a TeamProfile and
+//      kicks off the auto-discovery scan that finds the team's AES +
+//      Timu tournaments by name. This is the path most users want.
 //
-//   Timu tournament → routes through AddTournaments where the user
-//                     pastes a Timu URL/tid → indexed → tap into
-//                     tournament → tap their team → Set As My Team.
-//                     Same upsert wiring lands them on Home with the
-//                     team appended to MY TEAMS.
+//   2. AES tournament (secondary) → TournamentSelect → EventEntry →
+//      DivisionSelect → TeamSelect → Set As My Team. Use case:
+//      Ontario teams travelling to US AES events whose name doesn't
+//      match an OVA ranking.
 //
-// The page itself is pure choice; the heavy lifting lives in those
-// downstream flows. Two buttons + a back affordance is enough.
+//   3. Timu tournament (secondary) → AddTournaments where the user
+//      pastes a Timu URL/tid. Use case: niche Timu tournaments not
+//      auto-discovered by the OVA path.
+//
+// Forward-looking: this screen is also the natural home for a future
+// "pick team roster from a tournament for a scoring session" affordance
+// (filter by match type / competition / stage), per Jon's note.
 // ────────────────────────────────────────────────────────────────────────────
 
 import React, { useMemo } from 'react';
@@ -32,12 +35,14 @@ import type { ThemeColors } from '../utils/theme';
 
 interface Props {
   onBack: () => void;
+  onChooseOvaRankings: () => void;
   onChooseAes: () => void;
   onChooseTimu: () => void;
 }
 
 export function AddTeamChooserScreen({
   onBack,
+  onChooseOvaRankings,
   onChooseAes,
   onChooseTimu,
 }: Props) {
@@ -54,50 +59,87 @@ export function AddTeamChooserScreen({
         </TouchableOpacity>
         <Text style={styles.heroTitle}>Add a team</Text>
         <Text style={styles.heroSubtitle}>
-          Where will you find your team?
+          Pick your team from the OVA rankings — the rest is automatic.
         </Text>
       </View>
       <ScrollView contentContainerStyle={styles.body}>
+        {/* Primary — featured */}
+        <FeaturedCard
+          title="Find your OVA team"
+          subtitle="Recommended"
+          body="Browse the OVA rankings by gender and age group, then tap your team. We'll search AES and Timu for their tournaments automatically."
+          accent={colors.primary}
+          onPress={onChooseOvaRankings}
+        />
+
+        <Text style={styles.sectionLabel}>OR ADD ANOTHER WAY</Text>
+
         <ChoiceCard
           title="AES tournament"
-          subtitle="Advanced Event Systems — most US tournaments and major Canadian events."
-          hint="Pick a country, year, then your tournament. Find your team and tap 'Set As My Team'."
+          subtitle="For US events or Canadian tournaments not yet in OVA rankings — paste the AES event."
           accent={colors.primary}
           accentLabel="AES"
           onPress={onChooseAes}
         />
         <ChoiceCard
           title="Timu tournament"
-          subtitle="OVA-hosted tournaments and most Ontario events."
-          hint="Paste the Timu URL (or tid). Open the tournament, find your team, tap 'Set As My Team'."
+          subtitle="For Timu tournaments outside the OVA rankings system — paste the URL or tid."
           accent={colors.accent}
           accentLabel="TIMU"
           onPress={onChooseTimu}
         />
-        <Card variant="outlined" style={styles.helpCard}>
-          <Text style={styles.helpText}>
-            Not sure which? AES events live at{' '}
-            <Text style={styles.helpEm}>results.advancedeventsystems.com</Text>.
-            Timu lives at <Text style={styles.helpEm}>timu.ca/scoreboards</Text>.
-            If your team's URL matches one of those, that's the one.
-          </Text>
-        </Card>
       </ScrollView>
     </View>
+  );
+}
+
+function FeaturedCard({
+  title,
+  subtitle,
+  body,
+  accent,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  body: string;
+  accent: string;
+  onPress: () => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <TouchableOpacity onPress={onPress} activeOpacity={0.7}>
+      <View
+        style={[
+          styles.featuredCard,
+          { borderColor: accent, backgroundColor: colors.primaryLight },
+        ]}
+      >
+        <View style={[styles.featuredBadge, { backgroundColor: accent }]}>
+          <Text style={styles.featuredBadgeText}>{subtitle.toUpperCase()}</Text>
+        </View>
+        <Text style={styles.featuredTitle}>{title}</Text>
+        <Text style={styles.featuredBody}>{body}</Text>
+        <View style={styles.featuredFooter}>
+          <Text style={[styles.featuredCta, { color: accent }]}>
+            Open OVA Rankings →
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
   );
 }
 
 function ChoiceCard({
   title,
   subtitle,
-  hint,
   accent,
   accentLabel,
   onPress,
 }: {
   title: string;
   subtitle: string;
-  hint: string;
   accent: string;
   accentLabel: string;
   onPress: () => void;
@@ -114,7 +156,6 @@ function ChoiceCard({
           <Text style={styles.choiceTitle}>{title}</Text>
         </View>
         <Text style={styles.choiceSubtitle}>{subtitle}</Text>
-        <Text style={styles.choiceHint}>{hint}</Text>
         <View style={styles.choiceFooter}>
           <Text style={[styles.choiceCta, { color: accent }]}>Continue →</Text>
         </View>
@@ -125,64 +166,106 @@ function ChoiceCard({
 
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  hero: {
-    backgroundColor: colors.primary,
-    padding: spacing.xxl,
-    paddingBottom: spacing.lg,
-  },
-  heroBack: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: fontSize.md,
-    fontWeight: '600',
-    marginBottom: spacing.sm,
-  },
-  heroTitle: {
-    color: colors.textOnPrimary,
-    fontSize: fontSize.xxl,
-    fontWeight: '800',
-  },
-  heroSubtitle: {
-    color: 'rgba(255,255,255,0.85)',
-    fontSize: fontSize.md,
-    marginTop: 2,
-  },
-  body: { padding: spacing.lg, paddingBottom: spacing.xxxl },
+    container: { flex: 1, backgroundColor: colors.background },
+    hero: {
+      backgroundColor: colors.primary,
+      padding: spacing.xxl,
+      paddingBottom: spacing.lg,
+    },
+    heroBack: {
+      color: 'rgba(255,255,255,0.9)',
+      fontSize: fontSize.md,
+      fontWeight: '600',
+      marginBottom: spacing.sm,
+    },
+    heroTitle: {
+      color: colors.textOnPrimary,
+      fontSize: fontSize.xxl,
+      fontWeight: '800',
+    },
+    heroSubtitle: {
+      color: 'rgba(255,255,255,0.85)',
+      fontSize: fontSize.md,
+      marginTop: 2,
+    },
+    body: { padding: spacing.lg, paddingBottom: spacing.xxxl },
 
-  choiceCard: { marginBottom: spacing.md },
-  choiceHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  choiceTitle: { fontSize: fontSize.lg, fontWeight: '800', color: colors.text },
-  choiceSubtitle: {
-    fontSize: fontSize.sm,
-    color: colors.textSecondary,
-    marginTop: 2,
-    marginBottom: spacing.sm,
-  },
-  choiceHint: { fontSize: fontSize.xs, color: colors.textLight, lineHeight: 18 },
-  choiceFooter: { marginTop: spacing.sm, alignItems: 'flex-end' },
-  choiceCta: { fontSize: fontSize.sm, fontWeight: '700' },
+    featuredCard: {
+      borderRadius: borderRadius.md,
+      borderWidth: 2,
+      padding: spacing.lg,
+      marginBottom: spacing.lg,
+    },
+    featuredBadge: {
+      alignSelf: 'flex-start',
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      borderRadius: borderRadius.sm,
+      marginBottom: spacing.sm,
+    },
+    featuredBadgeText: {
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    featuredTitle: {
+      fontSize: fontSize.xxl,
+      fontWeight: '800',
+      color: colors.text,
+      marginBottom: spacing.xs,
+    },
+    featuredBody: {
+      fontSize: fontSize.sm,
+      color: colors.text,
+      lineHeight: 20,
+    },
+    featuredFooter: {
+      marginTop: spacing.md,
+      alignItems: 'flex-end',
+    },
+    featuredCta: {
+      fontSize: fontSize.md,
+      fontWeight: '800',
+    },
 
-  sourceBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: borderRadius.sm,
-    minWidth: 36,
-    alignItems: 'center',
-  },
-  sourceBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
+    sectionLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textLight,
+      letterSpacing: 1,
+      marginBottom: spacing.sm,
+      marginTop: spacing.sm,
+    },
 
-  helpCard: { marginTop: spacing.md },
-  helpText: { fontSize: fontSize.xs, color: colors.textSecondary, lineHeight: 18 },
-  helpEm: { fontWeight: '700', color: colors.text },
-});
+    choiceCard: { marginBottom: spacing.md },
+    choiceHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.sm,
+      marginBottom: spacing.xs,
+    },
+    choiceTitle: { fontSize: fontSize.lg, fontWeight: '800', color: colors.text },
+    choiceSubtitle: {
+      fontSize: fontSize.sm,
+      color: colors.textSecondary,
+      marginTop: 2,
+    },
+    choiceFooter: { marginTop: spacing.sm, alignItems: 'flex-end' },
+    choiceCta: { fontSize: fontSize.sm, fontWeight: '700' },
+
+    sourceBadge: {
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      borderRadius: borderRadius.sm,
+      minWidth: 36,
+      alignItems: 'center',
+    },
+    sourceBadgeText: {
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+  });
 }
