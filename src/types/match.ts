@@ -355,6 +355,12 @@ export interface MatchMeta {
    * are normalised to `'tier2-live'` on read.
    */
   source?: MatchSource;
+  /**
+   * Link back to the match's recording / play-by-play on its source
+   * platform (e.g. Sideline HD's match page). Optional — populated by
+   * the Sideline HD importer; left blank for live-scored matches.
+   */
+  videoUrl?: string;
 }
 
 // ── Event log (append-only) ────────────────────────────────────────────────
