@@ -39,7 +39,8 @@ export type MenuDestination =
   | 'Scoreboard'
   | 'MatchList'
   | 'TeamAnalytics'
-  | 'StorageSnapshot';
+  | 'StorageSnapshot'
+  | 'HistoricalImport';
 
 /**
  * The hamburger renders different items depending on whether the user is
@@ -645,6 +646,14 @@ export function HamburgerMenu({
                     </View>
                   </TouchableOpacity>
                 ) : null}
+                <MenuRow
+                  icon={'\u{1F4E5}'}
+                  label="Import historical matches"
+                  subtitle="Bundled Sideline HD season data"
+                  available={true}
+                  isCurrent={isCurrentScreen('HistoricalImport')}
+                  onPress={() => handleSelect('HistoricalImport')}
+                />
                 <MenuRow
                   icon={'\u{1F501}'}
                   label="Restore from backup"

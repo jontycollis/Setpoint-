@@ -56,6 +56,7 @@ import { SeasonHistoryScreen } from './src/screens/SeasonHistoryScreen';
 import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
+import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
 import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
 import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
@@ -166,7 +167,8 @@ type Screen =
   | 'PlayerDetail'
   | 'TournamentDetail'
   | 'GlobalSearch'
-  | 'StorageSnapshot';
+  | 'StorageSnapshot'
+  | 'HistoricalImport';
 
 // AES navigation scope: an event can stand alone (DivisionSelect view), an
 // event+division is the standard tournament context, and event+division+team
@@ -263,6 +265,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'OvaRankings':
     case 'GlobalSearch':
     case 'StorageSnapshot':
+    case 'HistoricalImport':
       return 'home';
     default:
       return 'team';
@@ -1582,6 +1585,10 @@ export default function App() {
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('StorageSnapshot');
           break;
+        case 'HistoricalImport':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('HistoricalImport');
+          break;
       }
     },
     [screen, currentEvent, currentDivision, currentTeam, currentTimuTid, currentTimuTeamName, myTeam, userProfile]
@@ -2403,6 +2410,13 @@ export default function App() {
         );
       case 'StorageSnapshot':
         return <StorageSnapshotScreen onBack={goBack} />;
+      case 'HistoricalImport':
+        return (
+          <HistoricalImportScreen
+            userProfile={userProfile}
+            onBack={goBack}
+          />
+        );
       case 'SeasonHistory':
         if (!currentHistoryTeamName) return null;
         return (
