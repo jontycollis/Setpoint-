@@ -89,6 +89,14 @@ interface Props {
   onOpenTeam: (team: TeamProfile) => void;
   /** Tap "+ Add team" CTA. */
   onAddTeam: () => void;
+  /**
+   * Direct path to OVA Rankings as the primary discovery surface for
+   * users with zero teams. When set, the no-teams empty state's
+   * primary CTA routes here instead of through AddTeamChooser. R3
+   * restructure: OVA Rankings drives most team discovery.
+   * Optional — when undefined, falls back to onAddTeam.
+   */
+  onFindInOvaRankings?: () => void;
   /** Browse tournaments — used by lead-card secondary CTA and as a
    *  fallback when no team has any upcoming event. */
   onBrowseTournaments?: () => void;
@@ -130,6 +138,7 @@ export function MyHomeScreen({
   profile,
   onOpenTeam,
   onAddTeam,
+  onFindInOvaRankings,
   onBrowseTournaments,
   onScoreAMatch,
   onResumeMatch,
@@ -247,6 +256,7 @@ export function MyHomeScreen({
           onOpenTeam={onOpenTeam}
           onResumeMatch={onResumeMatch}
           onAddTeam={onAddTeam}
+          onFindInOvaRankings={onFindInOvaRankings}
           onBrowseTournaments={onBrowseTournaments}
           onScoreAMatch={onScoreAMatch}
           scorerMode={profile.scorerMode === true}
@@ -467,6 +477,7 @@ function RightNowCard({
   onOpenTeam,
   onResumeMatch,
   onAddTeam,
+  onFindInOvaRankings,
   onBrowseTournaments,
   onScoreAMatch,
   scorerMode,
@@ -477,6 +488,7 @@ function RightNowCard({
   onOpenTeam: (team: TeamProfile) => void;
   onResumeMatch?: (match: Match) => void;
   onAddTeam: () => void;
+  onFindInOvaRankings?: () => void;
   onBrowseTournaments?: () => void;
   onScoreAMatch?: () => void;
   scorerMode: boolean;
@@ -492,6 +504,7 @@ function RightNowCard({
     onOpenTeam,
     onResumeMatch,
     onAddTeam,
+    onFindInOvaRankings,
     onBrowseTournaments,
     onScoreAMatch,
     scorerMode,
@@ -569,6 +582,7 @@ interface RenderableArgs {
   onOpenTeam: (team: TeamProfile) => void;
   onResumeMatch?: (match: Match) => void;
   onAddTeam: () => void;
+  onFindInOvaRankings?: () => void;
   onBrowseTournaments?: () => void;
   onScoreAMatch?: () => void;
   scorerMode: boolean;
@@ -652,13 +666,21 @@ function renderableFor(state: RightNowState, args: RenderableArgs): Renderable {
       };
     }
     case 'no-teams': {
+      // R3: OVA Rankings is the primary discovery surface. Falls back to
+      // AddTeamChooser when the OVA path isn't wired in (defensive).
+      const primary = args.onFindInOvaRankings
+        ? { label: 'Find my OVA team', onPress: args.onFindInOvaRankings }
+        : { label: 'Add a team', onPress: args.onAddTeam };
+      const secondary = args.onFindInOvaRankings
+        ? { label: 'Add another way', onPress: args.onAddTeam }
+        : args.onBrowseTournaments
+        ? { label: 'Browse tournaments', onPress: args.onBrowseTournaments }
+        : null;
       return {
         headline: 'Welcome to Setpoint',
-        subhead: 'Add a team to follow tournaments, score matches, and track stats.',
-        primary: { label: 'Add a team', onPress: args.onAddTeam },
-        secondary: args.onBrowseTournaments
-          ? { label: 'Browse tournaments', onPress: args.onBrowseTournaments }
-          : null,
+        subhead: 'Pick your team from the OVA rankings to follow their tournaments, score matches, and track stats.',
+        primary,
+        secondary,
       };
     }
   }

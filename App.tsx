@@ -86,6 +86,8 @@ import {
   loadOrMigrateUserProfile,
   saveUserProfile,
   findTeamProfileByAlias,
+  makeTeamProfileId,
+  dedupeAliases,
 } from './src/utils/userProfile';
 import {
   takePreMigrationSnapshot,
@@ -678,6 +680,73 @@ export default function App() {
     const t = setTimeout(() => setDiscoveryResult(null), 30 * 1000);
     return () => clearTimeout(t);
   }, [discoveryResult]);
+
+  // ── R1: Follow a team picked from OVA Rankings ──────────────────────────
+  // Tapping a row on the rankings screen calls back here. If the team
+  // alias-matches an existing TeamProfile we offer a re-run instead of
+  // a duplicate; otherwise we create a fresh `kind: 'me'` profile and
+  // kick off the same auto-discovery flow used by AddTeamChooser.
+  const handleFollowOvaRankedTeam = useCallback(
+    (params: {
+      teamName: string;
+      divisionLabel: string;
+      alreadyFollowed: boolean;
+    }) => {
+      if (!userProfile) return;
+      const existing = findTeamProfileByAlias(userProfile, params.teamName);
+      if (existing) {
+        Alert.alert(
+          'Already followed',
+          `You already follow ${existing.label}. Re-run the AES + Timu tournament search?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Re-run search',
+              onPress: () => handleAutoDiscoverTeam(existing, { force: true }),
+            },
+          ]
+        );
+        return;
+      }
+      Alert.alert(
+        `Follow ${params.teamName}?`,
+        `We'll add this team and search AES and Timu by name to find their tournaments. This usually takes a couple of minutes and downloads a few MB.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Follow',
+            onPress: () => {
+              const now = Date.now();
+              const id = makeTeamProfileId(now);
+              const aliases = dedupeAliases([params.teamName]);
+              const created: TeamProfile = {
+                id,
+                label: params.teamName,
+                source: 'aes',
+                kind: 'me',
+                aliases,
+                seasonLabel: params.divisionLabel || undefined,
+                createdAt: now,
+                updatedAt: now,
+              };
+              const nextProfile: UserProfile = {
+                ...userProfile,
+                teams: [...userProfile.teams, created],
+                activeTeamId: id,
+                updatedAt: now,
+              };
+              setUserProfile(nextProfile);
+              saveUserProfile(nextProfile).catch(() => {});
+              // Kick off discovery immediately. The user can navigate away
+              // and a notification fires on completion.
+              handleAutoDiscoverTeam(created);
+            },
+          },
+        ]
+      );
+    },
+    [userProfile, handleAutoDiscoverTeam]
+  );
 
   // Manual re-run from Season History's "Find more tournaments" button.
   // Forces past the 6h throttle so users can re-scan after a tournament
@@ -1814,6 +1883,14 @@ export default function App() {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('AddTeamChooser');
             }}
+            onFindInOvaRankings={() => {
+              // R3: primary discovery path for zero-team users — opens
+              // OVA Rankings directly. Tap a ranked team → confirm →
+              // app creates TeamProfile + runs auto-discovery.
+              setOvaInitialDivision(null);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('OvaRankings');
+            }}
             onBrowseTournaments={() => {
               setScreenHistory([]);
               setScreen('TournamentSelect');
@@ -1844,6 +1921,14 @@ export default function App() {
         return (
           <AddTeamChooserScreen
             onBack={goBack}
+            onChooseOvaRankings={() => {
+              // Featured path — OVA rankings drive most users' team
+              // discovery. Picking a row creates a TeamProfile and
+              // kicks off auto-discovery via handleFollowOvaRankedTeam.
+              setOvaInitialDivision(null);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('OvaRankings');
+            }}
             onChooseAes={() => {
               // AES path → existing TournamentSelect → EventEntry → ...
               // After the user picks a team, "Set As My Team" upserts
@@ -2406,6 +2491,7 @@ export default function App() {
             onBack={goBack}
             initialDivisionKey={ovaInitialDivision?.key}
             initialGender={ovaInitialDivision?.gender}
+            onFollowTeam={handleFollowOvaRankedTeam}
           />
         );
       case 'StorageSnapshot':
