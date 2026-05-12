@@ -20,6 +20,7 @@ import type { Match } from '../types/match';
 import type { UserProfile, TeamProfile } from '../types/profile';
 import { findTeamProfileByAlias } from './userProfile';
 import { loadMatches, saveMatch } from './scoredMatchStore';
+import { inferMatchCategoryFromEventName } from './matchMetaPure';
 
 /** Placeholder that bundled records use for the home team profile id. */
 const PVC_PLACEHOLDER_TEAM_PROFILE_ID = '__SETPOINT_PVC_PROFILE_ID__';
@@ -134,6 +135,13 @@ export async function runHistoricalImport(
 
       // Substitute the placeholder team-profile id on the home side.
       const homeProfileId = raw.meta.home?.teamProfileId;
+      // Populate the workbook category from the event name if not already
+      // set on the bundle record. Lets the analytics splits axis surface
+      // these matches under the same labels the workbook tabs use.
+      const inferredCategory =
+        raw.meta.matchCategory ??
+        inferMatchCategoryFromEventName(raw.meta.eventName) ??
+        undefined;
       const next: Match = {
         ...raw,
         meta: {
@@ -145,6 +153,7 @@ export async function runHistoricalImport(
                 ? targetTeamId
                 : homeProfileId ?? targetTeamId,
           },
+          matchCategory: inferredCategory,
         },
       };
 

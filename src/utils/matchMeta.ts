@@ -52,6 +52,8 @@ export {
   applyTimuLink,
   applyUnlink,
   defaultIncludeInStats,
+  inferMatchCategoryFromEventName,
+  matchCategoryLabel,
   normaliseMatch,
   normaliseMatchMeta,
 } from './matchMetaPure';

@@ -24,15 +24,53 @@ import {
 } from 'react-native';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
-import type { Match, MatchKind } from '../types/match';
+import type { Match, MatchCategory, MatchKind } from '../types/match';
 import { loadMatches } from '../utils/scoredMatchStore';
+import { matchCategoryLabel } from '../utils/matchMetaPure';
 import {
   aggregatePlayerCareer,
+  computeOnCourtPercent,
   sliceHasPhaseInfo,
+  teamSide,
+  type PerMatchOnCourt,
   type Phase,
   type PlayerCareerStats,
   type PlayerMatchEntry,
 } from '../utils/analytics';
+
+type PlayerPositionCode = 'S' | 'OH' | 'MB' | 'OPP' | 'L' | 'DS';
+
+/**
+ * Look up the position to attribute to this player in this match. Per-
+ * match override (set by the analytics tagger UI when it lands) wins
+ * over the default `position` field on the roster snapshot. Returns
+ * `null` when neither is set.
+ */
+function resolvePositionForMatch(
+  match: Match,
+  teamProfileId: string,
+  shirt: number
+): PlayerPositionCode | null {
+  const side = teamSide(match, teamProfileId);
+  if (!side) return null;
+  const roster = side === 'home' ? match.rosters.home : match.rosters.away;
+  const entry = roster.find((p) => p.shirt === shirt);
+  if (!entry) return null;
+  const override = entry.perMatchPositionOverrides?.[match.id];
+  if (override) return override;
+  return (entry.position as PlayerPositionCode | undefined) ?? null;
+}
+
+function positionLabel(code: PlayerPositionCode): string {
+  switch (code) {
+    case 'S': return 'Setter';
+    case 'OH': return 'Outside Hitter';
+    case 'MB': return 'Middle Blocker';
+    case 'OPP': return 'Opposite';
+    case 'L': return 'Libero';
+    case 'DS': return 'Defensive Specialist';
+  }
+}
 
 interface Props {
   teamProfileId: string;
@@ -59,6 +97,7 @@ export function PlayerDetailScreen({
   const [allMatches, setAllMatches] = useState<Match[]>([]);
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [phaseFilter, setPhaseFilter] = useState<'all' | Phase>('all');
+  const [positionSplit, setPositionSplit] = useState<PlayerPositionCode | 'all'>('all');
 
   useEffect(() => {
     let cancelled = false;
@@ -88,6 +127,33 @@ export function PlayerDetailScreen({
     if (kindFilter !== 'aes') setPhaseFilter('all');
   }, [kindFilter]);
 
+  // Build a per-match position map (matchId → position). When the user
+  // has tagged the player's per-match position (or set a default on the
+  // roster snapshot), the screen can split the season totals by it.
+  const positionByMatchId = useMemo(() => {
+    const m = new Map<string, PlayerPositionCode>();
+    for (const match of allMatches) {
+      const pos = resolvePositionForMatch(match, teamProfileId, shirt);
+      if (pos) m.set(match.id, pos);
+    }
+    return m;
+  }, [allMatches, teamProfileId, shirt]);
+
+  // Distinct positions seen across this player's matches — empty / single
+  // entry means we don't render the position split picker.
+  const positionsSeen = useMemo(() => {
+    const seen = new Set<PlayerPositionCode>();
+    for (const pos of positionByMatchId.values()) seen.add(pos);
+    return Array.from(seen);
+  }, [positionByMatchId]);
+
+  // Match slice with active filters applied. The position-split filter
+  // narrows below the kindFilter/phaseFilter slice.
+  const matchesForCareer = useMemo(() => {
+    if (positionSplit === 'all') return allMatches;
+    return allMatches.filter((m) => positionByMatchId.get(m.id) === positionSplit);
+  }, [allMatches, positionSplit, positionByMatchId]);
+
   // Build player career rollup against the filtered slice.
   const career: PlayerCareerStats = useMemo(() => {
     const filter = {
@@ -97,8 +163,35 @@ export function PlayerDetailScreen({
         | undefined,
       phase: phaseFilter === 'all' ? undefined : phaseFilter,
     };
-    return aggregatePlayerCareer(allMatches, teamProfileId, shirt, filter);
-  }, [allMatches, teamProfileId, shirt, kindFilter, phaseFilter]);
+    return aggregatePlayerCareer(matchesForCareer, teamProfileId, shirt, filter);
+  }, [matchesForCareer, teamProfileId, shirt, kindFilter, phaseFilter]);
+
+  // Per-match on-court % for this player in the current slice (workbook
+  // "On-Court %" column at match grain).
+  const onCourtPerMatch: PerMatchOnCourt[] = useMemo(() => {
+    const filter = {
+      respectIncludeInStats: true as const,
+      matchKind: (kindFilter === 'all' ? undefined : kindFilter) as
+        | MatchKind
+        | undefined,
+      phase: phaseFilter === 'all' ? undefined : phaseFilter,
+    };
+    return computeOnCourtPercent(matchesForCareer, teamProfileId, shirt, filter);
+  }, [matchesForCareer, teamProfileId, shirt, kindFilter, phaseFilter]);
+  const onCourtByMatchId = useMemo(() => {
+    const m = new Map<string, PerMatchOnCourt>();
+    for (const r of onCourtPerMatch) m.set(r.matchId, r);
+    return m;
+  }, [onCourtPerMatch]);
+  const seasonOnCourtPct = useMemo(() => {
+    let totalRallies = 0;
+    let onCourtRallies = 0;
+    for (const r of onCourtPerMatch) {
+      totalRallies += r.rallies;
+      onCourtRallies += r.ralliesOnCourt;
+    }
+    return totalRallies > 0 ? onCourtRallies / totalRallies : NaN;
+  }, [onCourtPerMatch]);
 
   // Phase sub-stripe is only meaningful when AES is selected and at
   // least one AES match in the slice has phase info.
@@ -160,6 +253,34 @@ export function PlayerDetailScreen({
               <Chip label="Playoff" active={phaseFilter === 'playoff'} onPress={() => setPhaseFilter('playoff')} colors={colors} small />
             </ScrollView>
           ) : null}
+          {/* Position split — only renders when this player has played
+              multiple positions across their matches. Lets the user view
+              e.g. "Abby (Left)" vs "Abby (Libero)" splits independently. */}
+          {positionsSeen.length >= 2 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={[styles.stripeRow, styles.subStripe]}
+            >
+              <Chip
+                label={`All positions (${positionsSeen.length})`}
+                active={positionSplit === 'all'}
+                onPress={() => setPositionSplit('all')}
+                colors={colors}
+                small
+              />
+              {positionsSeen.map((pos) => (
+                <Chip
+                  key={pos}
+                  label={positionLabel(pos)}
+                  active={positionSplit === pos}
+                  onPress={() => setPositionSplit(pos)}
+                  colors={colors}
+                  small
+                />
+              ))}
+            </ScrollView>
+          ) : null}
         </View>
 
         {appearedMatches.length === 0 ? (
@@ -196,6 +317,11 @@ export function PlayerDetailScreen({
                   colors={colors}
                 />
                 <StatCell label="Errors" value={career.totals.errors} colors={colors} bad={career.totals.errors > 0} />
+                <StatCell
+                  label="On-court %"
+                  value={isNaN(seasonOnCourtPct) ? '—' : (seasonOnCourtPct * 100).toFixed(0) + '%'}
+                  colors={colors}
+                />
               </View>
             </View>
 
@@ -208,11 +334,21 @@ export function PlayerDetailScreen({
             <View style={styles.card}>
               <Text style={styles.cardKicker}>MATCH BY MATCH</Text>
               <Text style={styles.cardSubtitle}>
-                Most recent first · tap a row for the team-level recap
+                Most recent first · "On" = on-court % for that match
               </Text>
-              {appearedMatches.map((entry) => (
-                <MatchRow key={entry.matchId} entry={entry} colors={colors} styles={styles} />
-              ))}
+              {appearedMatches.map((entry) => {
+                const match = allMatches.find((m) => m.id === entry.matchId);
+                return (
+                  <MatchRow
+                    key={entry.matchId}
+                    entry={entry}
+                    onCourt={onCourtByMatchId.get(entry.matchId) ?? null}
+                    category={match?.meta.matchCategory ?? null}
+                    colors={colors}
+                    styles={styles}
+                  />
+                );
+              })}
             </View>
           </>
         )}
@@ -407,10 +543,14 @@ function PillStat({
 
 function MatchRow({
   entry,
+  onCourt,
+  category,
   colors,
   styles,
 }: {
   entry: PlayerMatchEntry;
+  onCourt: PerMatchOnCourt | null;
+  category: MatchCategory | null;
   colors: ThemeColors;
   styles: ReturnType<typeof makeStyles>;
 }) {
@@ -423,6 +563,23 @@ function MatchRow({
           </Text>
           <KindBadge kind={entry.matchKind} colors={colors} />
           {entry.phase !== 'unknown' ? <PhaseBadge phase={entry.phase} colors={colors} /> : null}
+          {category ? (
+            <View
+              style={{
+                backgroundColor: colors.background,
+                paddingHorizontal: 5,
+                paddingVertical: 1,
+                borderRadius: borderRadius.sm,
+                marginLeft: 4,
+                borderWidth: 1,
+                borderColor: colors.border,
+              }}
+            >
+              <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary }}>
+                {matchCategoryLabel(category).toUpperCase()}
+              </Text>
+            </View>
+          ) : null}
           {entry.source === 'sideline-hd-import' ? (
             <View style={{ backgroundColor: colors.accentLight, paddingHorizontal: 6, paddingVertical: 1, borderRadius: borderRadius.sm, marginLeft: 4 }}>
               <Text style={{ fontSize: 9, fontWeight: '800', color: colors.accent }}>IMPORTED</Text>
@@ -437,6 +594,9 @@ function MatchRow({
           {entry.line.assists > 0 ? ` · Ast ${entry.line.assists}` : ''}
           {entry.line.digs > 0 ? ` · D ${entry.line.digs}` : ''}
           {entry.line.errors > 0 ? ` · E ${entry.line.errors}` : ''}
+          {onCourt && Number.isFinite(onCourt.onCourtPct)
+            ? ` · On ${(onCourt.onCourtPct * 100).toFixed(0)}%`
+            : ''}
         </Text>
       </View>
       <View style={styles.matchResult}>

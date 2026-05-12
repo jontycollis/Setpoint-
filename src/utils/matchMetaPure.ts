@@ -12,6 +12,7 @@
 import type {
   AesEventLink,
   Match,
+  MatchCategory,
   MatchKind,
   MatchMeta,
   MatchSource,
@@ -34,6 +35,71 @@ export function defaultIncludeInStats(matchKind: MatchKind): boolean {
       return true;
     case 'standalone':
       return false;
+  }
+}
+
+// ── Workbook category inference ───────────────────────────────────────────
+
+/**
+ * Map a free-text `eventName` to one of the five workbook category labels.
+ * Returns `null` when no rule matches — the caller leaves `matchCategory`
+ * unset rather than guessing. Rules cover every distinct `eventName` seen
+ * in the bundled PVC historical import, with permissive fallbacks for
+ * variations the user might add later (e.g. "OVA Champs", "OVA Provincials"
+ * → `'ova-champs'`).
+ *
+ * Match precedence is most-specific-first:
+ *   1. Scrimmage ("Scrimmage" / "Intra-squad") — wins over Non-OVA so
+ *      "Scrimmage / Non-OVA" is tagged as a scrimmage rather than a
+ *      tournament, which matches the user's workbook intent.
+ *   2. Championships ("Champ" / "Provincial" / "Nationals")
+ *   3. Non-OVA tournament ("Non-OVA")
+ *   4. OVA tournament (any "OVA" + "Tournament" combo)
+ *   5. Women's Sunday League ("Sunday League" / "Women's Sunday")
+ */
+export function inferMatchCategoryFromEventName(
+  eventName: string | undefined | null
+): MatchCategory | null {
+  if (!eventName) return null;
+  const s = eventName.toLowerCase();
+  if (s.includes('scrimmage') || s.includes('intra-squad') || s.includes('intra squad')) {
+    return 'scrimmage';
+  }
+  if (
+    s.includes('champ') ||
+    s.includes('provincial') ||
+    s.includes('national')
+  ) {
+    return 'ova-champs';
+  }
+  if (s.includes('non-ova') || s.includes('non ova') || s.includes('nonova')) {
+    return 'non-ova-tournament';
+  }
+  if (s.includes('ova') && s.includes('tournament')) {
+    return 'ova-tournament';
+  }
+  if (s.includes('sunday league') || s.includes("women's sunday") || s.includes('womens sunday')) {
+    return 'womens-sunday-league';
+  }
+  return null;
+}
+
+/**
+ * Human-readable label for a category, used by the StatsScreen splits
+ * stripe and badge renderers. Mirrors the workbook's printed tab names.
+ */
+export function matchCategoryLabel(c: MatchCategory): string {
+  switch (c) {
+    case 'ova-champs':
+      return 'OVA Champs';
+    case 'ova-tournament':
+      return 'OVA Tournament';
+    case 'non-ova-tournament':
+      return 'Non-OVA Tournament';
+    case 'scrimmage':
+      return 'Scrimmage';
+    case 'womens-sunday-league':
+      return "Women's Sunday League";
   }
 }
 
