@@ -22,6 +22,7 @@ import { loadMatches } from '../utils/scoredMatchStore';
 import { aggregateSeasonStats } from '../utils/statAggregator';
 import { computeServeStats, computeSetWinPercentByAthlete } from '../utils/analytics';
 import { aggregateOnCourtStats } from '../utils/onCourtStats';
+import { ColumnKey } from '../components/ColumnKey';
 
 interface Props {
   teamProfileId: string;
@@ -174,7 +175,10 @@ export function TournamentDetailScreen({
         {/* Per-athlete set win % — workbook tab #2 */}
         {setWinByAthlete.length > 0 ? (
           <View style={styles.card}>
-            <Text style={styles.kicker}>SET WIN % BY ATHLETE</Text>
+            <View style={styles.kickerRow}>
+              <Text style={styles.kicker}>SET WIN % BY ATHLETE</Text>
+              <ColumnKey />
+            </View>
             <Text style={styles.cardSubtitle}>% of sets won when on the floor for any rally</Text>
             <View style={styles.tableHeader}>
               <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
@@ -209,7 +213,10 @@ export function TournamentDetailScreen({
         {/* Per-player table */}
         {summary.players.length > 0 ? (
           <View style={styles.card}>
-            <Text style={styles.kicker}>PLAYERS</Text>
+            <View style={styles.kickerRow}>
+              <Text style={styles.kicker}>PLAYERS</Text>
+              <ColumnKey />
+            </View>
             <Text style={styles.cardSubtitle}>Tap a row for full season detail</Text>
             <View style={styles.tableHeader}>
               <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
@@ -386,6 +393,11 @@ function makeStyles(colors: ThemeColors) {
       borderColor: colors.border,
     },
     kicker: { fontSize: 11, fontWeight: '800', color: colors.textLight, letterSpacing: 1 },
+    kickerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
     cardSubtitle: {
       fontSize: fontSize.xs,
       color: colors.textSecondary,
