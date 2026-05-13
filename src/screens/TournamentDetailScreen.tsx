@@ -20,6 +20,7 @@ import type { ThemeColors } from '../utils/theme';
 import type { Match } from '../types/match';
 import { loadMatches } from '../utils/scoredMatchStore';
 import { aggregateSeasonStats } from '../utils/statAggregator';
+import { ColumnKey } from '../components/ColumnKey';
 
 interface Props {
   teamProfileId: string;
@@ -120,7 +121,10 @@ export function TournamentDetailScreen({
         {/* Per-player table */}
         {summary.players.length > 0 ? (
           <View style={styles.card}>
-            <Text style={styles.kicker}>PLAYERS</Text>
+            <View style={styles.kickerRow}>
+              <Text style={styles.kicker}>PLAYERS</Text>
+              <ColumnKey />
+            </View>
             <Text style={styles.cardSubtitle}>Tap a row for full season detail</Text>
             <View style={styles.tableHeader}>
               <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
@@ -264,6 +268,11 @@ function makeStyles(colors: ThemeColors) {
       borderColor: colors.border,
     },
     kicker: { fontSize: 11, fontWeight: '800', color: colors.textLight, letterSpacing: 1 },
+    kickerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
     cardSubtitle: {
       fontSize: fontSize.xs,
       color: colors.textSecondary,

@@ -33,6 +33,7 @@ import {
   type PlayerCareerStats,
   type PlayerMatchEntry,
 } from '../utils/analytics';
+import { ColumnKey } from '../components/ColumnKey';
 
 interface Props {
   teamProfileId: string;
@@ -175,7 +176,10 @@ export function PlayerDetailScreen({
           <>
             {/* Totals card */}
             <View style={styles.card}>
-              <Text style={styles.cardKicker}>SEASON TOTALS</Text>
+              <View style={styles.kickerRow}>
+                <Text style={styles.cardKicker}>SEASON TOTALS</Text>
+                <ColumnKey />
+              </View>
               <Text style={styles.cardSubtitle}>
                 {appearedMatches.length} match{appearedMatches.length === 1 ? '' : 'es'} in this view
               </Text>
@@ -275,6 +279,9 @@ function Chip({
     <TouchableOpacity
       onPress={onPress}
       activeOpacity={0.7}
+      hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
       style={[
         {
           paddingHorizontal: small ? spacing.sm : spacing.md,
@@ -562,6 +569,11 @@ function makeStyles(colors: ThemeColors) {
       fontWeight: '800',
       color: colors.textLight,
       letterSpacing: 1,
+    },
+    kickerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
     cardSubtitle: {
       fontSize: fontSize.xs,
