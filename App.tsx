@@ -2232,8 +2232,26 @@ export default function App() {
               setScreen('MatchScoring');
             }}
             onOpenStats={(profileId, name) => {
-              setStatsTeamProfileId(profileId);
-              setStatsTeamName(name);
+              // MatchListScreen falls back to `match.id` when neither
+              // home nor away has a teamProfileId set — that fallback
+              // would pass a match id to StatsScreen, which then
+              // filters out every match and shows the empty state.
+              // Prefer the user's active team profile whenever we have
+              // one; only honour MatchListScreen's pick if no active
+              // team is set (rare since the button needs matches to
+              // exist, which usually means a team profile exists).
+              const activeTeam = userProfile?.activeTeamId
+                ? userProfile.teams.find(
+                    (t) => t.id === userProfile.activeTeamId
+                  ) ?? null
+                : null;
+              if (activeTeam) {
+                setStatsTeamProfileId(activeTeam.id);
+                setStatsTeamName(activeTeam.label);
+              } else {
+                setStatsTeamProfileId(profileId);
+                setStatsTeamName(name);
+              }
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('Stats');
             }}
@@ -2299,11 +2317,24 @@ export default function App() {
             }}
           />
         );
-      case 'Stats':
+      case 'Stats': {
+        // Aliases for the active stats team. Used as a fallback inside
+        // StatsScreen for legacy matches whose `meta.home.teamProfileId`
+        // didn't get populated (older matches + label spellings that
+        // slipped past the boot-time backfill's alias matcher).
+        const statsTeam = userProfile?.teams.find(
+          (t) => t.id === statsTeamProfileId
+        );
+        const statsAliases = statsTeam
+          ? statsTeam.aliases && statsTeam.aliases.length > 0
+            ? statsTeam.aliases
+            : [statsTeam.label]
+          : undefined;
         return (
           <StatsScreen
             teamProfileId={statsTeamProfileId}
             teamName={statsTeamName}
+            teamAliases={statsAliases}
             onBack={goBack}
             onOpenPlayer={(shirt, name) => {
               setPlayerDetailShirt(shirt);
@@ -2319,6 +2350,7 @@ export default function App() {
             }}
           />
         );
+      }
       case 'PlayerDetail':
         return (
           <PlayerDetailScreen
