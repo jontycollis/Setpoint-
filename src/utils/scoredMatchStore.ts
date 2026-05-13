@@ -111,7 +111,12 @@ export async function deleteMatch(id: string): Promise<void> {
  * `meta.home.label` against the user's TeamProfiles by label + aliases
  * using the project's shared `matchesAnyAlias` (case-insensitive,
  * normalised exact match). Only writes back when at least one match
- * was filled. Never touches `away` — opponents don't have profiles in v1.
+ * was filled.
+ *
+ * Also tries the away side: a few flows (imports, opponent-as-home
+ * setups) leave the user's team on the away header — without this
+ * second pass those matches stay invisible to analytics even though
+ * the label aliases cleanly onto a known TeamProfile.
  *
  * Returns counts so the caller can log a one-line summary in __DEV__.
  */
@@ -125,24 +130,36 @@ export async function backfillHomeTeamProfileIds(
   let mutated = false;
   for (const id of Object.keys(blob)) {
     const m = blob[id];
-    if (m.meta.home.teamProfileId) continue; // already linked
-    const label = m.meta.home.label;
-    if (!label) {
+    const homeNeedsFill = !m.meta.home.teamProfileId;
+    const awayNeedsFill = !m.meta.away.teamProfileId;
+    if (!homeNeedsFill && !awayNeedsFill) continue;
+
+    const findByLabel = (label: string | undefined) => {
+      if (!label) return null;
+      return (
+        teams.find((t) =>
+          matchesAnyAlias(label, [t.label, ...(t.aliases ?? [])])
+        ) ?? null
+      );
+    };
+
+    const homeMatch = homeNeedsFill ? findByLabel(m.meta.home.label) : null;
+    const awayMatch = awayNeedsFill ? findByLabel(m.meta.away.label) : null;
+    if (!homeMatch && !awayMatch) {
       skipped++;
       continue;
     }
-    const team = teams.find((t) =>
-      matchesAnyAlias(label, [t.label, ...(t.aliases ?? [])])
-    );
-    if (!team) {
-      skipped++;
-      continue;
-    }
+
     blob[id] = {
       ...m,
       meta: {
         ...m.meta,
-        home: { ...m.meta.home, teamProfileId: team.id },
+        home: homeMatch
+          ? { ...m.meta.home, teamProfileId: homeMatch.id }
+          : m.meta.home,
+        away: awayMatch
+          ? { ...m.meta.away, teamProfileId: awayMatch.id }
+          : m.meta.away,
       },
     };
     backfilled++;

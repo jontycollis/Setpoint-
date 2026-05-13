@@ -34,6 +34,7 @@ import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import type { Match, MatchKind } from '../types/match';
 import { loadMatches } from '../utils/scoredMatchStore';
+import { matchesAnyAlias } from '../utils/seasonTeamIdentity';
 import {
   aggregateSeasonStats,
   type PlayerStatLine,
@@ -82,6 +83,16 @@ interface Props {
     tournamentName: string,
     matchIds: string[]
   ) => void;
+  /**
+   * Aliases for the active team. Used as a fallback when a match has no
+   * `meta.home.teamProfileId` (i.e. it predates the foreign-key fix and
+   * the boot-time backfill couldn't pin it down — typically because the
+   * label normalisation didn't quite match an alias). Falling back to a
+   * label alias-match means a legacy match still rolls up here as soon
+   * as the user views their dashboard, instead of being silently
+   * orphaned until they edit the alias list.
+   */
+  teamAliases?: string[];
 }
 
 export function StatsScreen({
@@ -90,6 +101,7 @@ export function StatsScreen({
   onBack,
   onOpenPlayer,
   onOpenTournament,
+  teamAliases,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -106,11 +118,63 @@ export function StatsScreen({
       try {
         const matches = await loadMatches();
         if (cancelled) return;
-        const teamMatches = matches.filter(
-          (m) =>
-            m.meta.home.teamProfileId === teamProfileId ||
-            m.meta.away.teamProfileId === teamProfileId
-        );
+        const aliases = teamAliases && teamAliases.length > 0 ? teamAliases : [];
+        const teamMatches = matches.filter((m) => {
+          if (m.meta.home.teamProfileId === teamProfileId) return true;
+          if (m.meta.away.teamProfileId === teamProfileId) return true;
+          // Fallback: legacy matches saved before MatchSetupScreen wrote
+          // `meta.home.teamProfileId`, where the boot-time backfill also
+          // failed to pin them down (label slightly off from any alias).
+          // If the user's TeamProfile aliases match either side's label,
+          // count the match. Avoids silent orphaning until the user
+          // manually edits aliases or re-imports.
+          if (aliases.length > 0) {
+            if (matchesAnyAlias(m.meta.home.label, aliases)) return true;
+            if (matchesAnyAlias(m.meta.away.label, aliases)) return true;
+          }
+          return false;
+        });
+        if (__DEV__) {
+          const idFail = matches.filter(
+            (m) =>
+              m.meta.home.teamProfileId !== teamProfileId &&
+              m.meta.away.teamProfileId !== teamProfileId
+          );
+          const aliasRescue = idFail.filter(
+            (m) =>
+              aliases.length > 0 &&
+              (matchesAnyAlias(m.meta.home.label, aliases) ||
+                matchesAnyAlias(m.meta.away.label, aliases))
+          );
+          // eslint-disable-next-line no-console
+          console.log(
+            '[StatsScreen] filter trace',
+            JSON.stringify(
+              {
+                teamProfileId,
+                aliasCount: aliases.length,
+                aliases,
+                totalStored: matches.length,
+                passedIdMatch: matches.length - idFail.length,
+                rescuedByAlias: aliasRescue.length,
+                totalAfterFilter: teamMatches.length,
+                stored: matches.map((m) => ({
+                  id: m.id,
+                  status: m.status,
+                  includeInStats: m.meta.includeInStats,
+                  matchKind: m.meta.matchKind,
+                  source: m.meta.source,
+                  homeLabel: m.meta.home.label,
+                  homeProfileId: m.meta.home.teamProfileId,
+                  awayLabel: m.meta.away.label,
+                  awayProfileId: m.meta.away.teamProfileId,
+                })),
+              },
+              null,
+              2
+            )
+          );
+        }
         setAllMatches(teamMatches);
       } catch (err) {
         if (!cancelled) console.warn('[StatsScreen] load failed', err);
@@ -121,7 +185,7 @@ export function StatsScreen({
     return () => {
       cancelled = true;
     };
-  }, [teamProfileId]);
+  }, [teamProfileId, teamAliases]);
 
   // Apply includeInStats + matchKind filter once. Everything below
   // (glance, season totals, tournament rollup) is built from this
