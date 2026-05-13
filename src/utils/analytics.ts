@@ -15,17 +15,20 @@
 
 import type {
   Match,
+  MatchCategory,
   MatchKind,
   MatchSource,
   PointEvent,
   Side,
 } from '../types/match';
+import { matchCategoryLabel } from './matchMetaPure';
 import {
   aggregateMatchStats,
   buildMatchStatSummary,
   type PlayerStatLine,
   type TeamMatchStatSummary,
 } from './statAggregator';
+import { walkTeamRallies } from './teamRallyWalk';
 
 // ── Phase classification ─────────────────────────────────────────────────
 
@@ -100,6 +103,10 @@ export interface MatchFilter {
   matchKind?: MatchKind | 'all';
   source?: MatchSource | 'all';
   phase?: Phase | 'all';
+  /** Workbook category — `'unknown'` matches the bucket of records that
+   *  don't have `matchCategory` set (e.g. live-scored matches the user
+   *  hasn't tagged yet). */
+  matchCategory?: MatchCategory | 'all' | 'unknown';
   /** When true, drop matches where `meta.includeInStats === false`. */
   respectIncludeInStats?: boolean;
 }
@@ -115,6 +122,14 @@ export function matchPassesFilter(match: Match, f: MatchFilter): boolean {
   }
   if (f.phase && f.phase !== 'all') {
     if (getMatchPhase(match) !== f.phase) return false;
+  }
+  if (f.matchCategory && f.matchCategory !== 'all') {
+    const cat = meta.matchCategory;
+    if (f.matchCategory === 'unknown') {
+      if (cat) return false;
+    } else if (cat !== f.matchCategory) {
+      return false;
+    }
   }
   return true;
 }
@@ -612,7 +627,7 @@ export function buildSeasonGlance(
 
 // ── Season totals split by dimension ─────────────────────────────────────
 
-export type SplitDimension = 'matchKind' | 'source' | 'phase';
+export type SplitDimension = 'matchKind' | 'source' | 'phase' | 'matchCategory';
 
 /**
  * Returns split labels present in the slice (e.g. {'aes', 'standalone'}
@@ -637,5 +652,216 @@ export function splitKeyOf(match: Match, dim: SplitDimension): string {
   const meta = match.meta;
   if (dim === 'matchKind') return meta.matchKind ?? 'standalone';
   if (dim === 'source') return meta.source ?? 'tier2-live';
+  if (dim === 'matchCategory') return meta.matchCategory ?? 'unknown';
   return getMatchPhase(match);
+}
+
+/**
+ * Display label for a split key on a given axis. Wraps the category
+ * labeller for the workbook axis; falls back to the raw key for the
+ * other axes (the UI already renders those as short tokens like "AES").
+ */
+export function splitKeyLabel(dim: SplitDimension, key: string): string {
+  if (dim === 'matchCategory') {
+    if (key === 'unknown') return 'Untagged';
+    return matchCategoryLabel(key as MatchCategory);
+  }
+  if (dim === 'matchKind') {
+    if (key === 'aes') return 'AES';
+    if (key === 'timu') return 'Timu';
+    if (key === 'standalone') return 'Standalone';
+    if (key === 'imported') return 'Imported';
+  }
+  if (dim === 'phase') {
+    if (key === 'pool') return 'Pool';
+    if (key === 'playoff') return 'Playoff';
+    if (key === 'unknown') return 'Phase: untagged';
+  }
+  if (dim === 'source') {
+    if (key === 'tier2-live') return 'Live-scored';
+    if (key === 'sideline-hd-import') return 'Imported (Sideline)';
+    if (key === 'manual-entry') return 'Manual entry';
+  }
+  return key;
+}
+
+/**
+ * Bucket a slice of matches by a chosen split axis. The single home for
+ * "give me one bucket per X". The map's keys are stable (`splitKeyOf`)
+ * so adding another axis is one place — extend `SplitDimension` plus
+ * `splitKeyOf` and every consumer picks it up.
+ */
+export function splitMatches(
+  matches: Match[],
+  axis: SplitDimension
+): Map<string, Match[]> {
+  const out = new Map<string, Match[]>();
+  for (const match of matches) {
+    const key = splitKeyOf(match, axis);
+    const bucket = out.get(key);
+    if (bucket) bucket.push(match);
+    else out.set(key, [match]);
+  }
+  return out;
+}
+
+// ── On-court % per match (workbook "On-Court %" column) ──────────────────
+
+export interface PerMatchOnCourt {
+  matchId: string;
+  matchLabel: string;
+  opponent: string;
+  dateMs: number;
+  /** Total rallies the walker could classify in this match. */
+  rallies: number;
+  /** Rallies this player was on the floor for. */
+  ralliesOnCourt: number;
+  /** Of those rallies, how many our team won. */
+  ralliesOnCourtWon: number;
+  /** ralliesOnCourt / rallies. NaN when rallies=0. */
+  onCourtPct: number;
+}
+
+/**
+ * Per-player, per-match on-court fraction. Mirrors the workbook's
+ * "On-Court %" column at the row-per-match grain. Aggregating to season
+ * level is just `sum(ralliesOnCourt) / sum(rallies)` — which is exactly
+ * what `aggregateOnCourtStats` already returns as `shareOfRallies`.
+ *
+ * Returned newest-first for direct rendering in PlayerDetailScreen.
+ */
+export function computeOnCourtPercent(
+  matches: Match[],
+  teamProfileId: string,
+  shirt: number,
+  filter: MatchFilter = { respectIncludeInStats: true }
+): PerMatchOnCourt[] {
+  const out: PerMatchOnCourt[] = [];
+  for (const match of matches) {
+    if (!matchPassesFilter(match, filter)) continue;
+    const side = teamSide(match, teamProfileId);
+    if (!side) continue;
+    const walk = walkTeamRallies(match, side);
+    if (!walk.contributedAny) continue;
+    let onCourt = 0;
+    let onCourtWon = 0;
+    for (const rally of walk.rallies) {
+      if (rally.ourOnCourt.includes(shirt)) {
+        onCourt++;
+        if (rally.scoringTeam === side) onCourtWon++;
+      }
+    }
+    if (onCourt === 0) continue; // skip matches where the player never took the floor
+    const summary = buildMatchStatSummary(match, side);
+    out.push({
+      matchId: match.id,
+      matchLabel: match.meta.matchLabel || match.meta.eventName || 'Match',
+      opponent: summary.opponent,
+      dateMs: match.meta.dateMs,
+      rallies: walk.rallies.length,
+      ralliesOnCourt: onCourt,
+      ralliesOnCourtWon: onCourtWon,
+      onCourtPct: walk.rallies.length > 0 ? onCourt / walk.rallies.length : NaN,
+    });
+  }
+  out.sort((a, b) => b.dateMs - a.dateMs);
+  return out;
+}
+
+// ── Convenience re-exports for the workbook-parity metric names ─────────
+//
+// The four helpers below name the workbook metrics directly so callers
+// can read the dashboard wiring left-to-right without chasing through
+// `onCourtStats` / `serverSplits` / `lineupCombos`. Internally they
+// just delegate to those modules. New work should consume these names.
+
+import { aggregateOnCourtStats, type OnCourtPlayerLine, type OnCourtSummary } from './onCourtStats';
+import { aggregateLineupCombos, type LineupComboLine, type LineupCombosSummary } from './lineupCombos';
+import { aggregateServerSplits, type ServerSplitLine, type ServerSplitSummary } from './serverSplits';
+
+/**
+ * Workbook tab #2: "Set Win % by Athlete" — per-player set-win rate
+ * computed against every set the player took the floor for any rally
+ * of. Delegates to `aggregateOnCourtStats` which already produces the
+ * right shape; this name re-anchors the call site to the workbook.
+ */
+export function computeSetWinPercentByAthlete(
+  matches: Match[],
+  teamProfileId: string,
+  filter: MatchFilter = { respectIncludeInStats: true }
+): OnCourtPlayerLine[] {
+  return aggregateOnCourtStats(matches, teamProfileId, filter).players;
+}
+
+/**
+ * Workbook tab #3: "Lineup Combinations" — 6-player on-court groupings
+ * with rally win %, set win %, rally count, set count. Threshold and
+ * topN configurable; caller picks the workbook defaults.
+ */
+export function findLineupCombinations(
+  matches: Match[],
+  teamProfileId: string,
+  filter: MatchFilter = { respectIncludeInStats: true }
+): LineupCombosSummary {
+  return aggregateLineupCombos(matches, teamProfileId, filter);
+}
+
+/**
+ * Workbook tabs "Side-out %" + "Serve-win %" — per-team and per-server.
+ * `serveWin% = rallies won while serving / total serves`,
+ * `sideOut% = rallies won while receiving / total receives`. Per-player
+ * lines include the "this player was the actual server" view too.
+ */
+export function computeServeStats(
+  matches: Match[],
+  teamProfileId: string,
+  filter: MatchFilter = { respectIncludeInStats: true }
+): ServerSplitSummary {
+  return aggregateServerSplits(matches, teamProfileId, filter);
+}
+
+// Re-export the row types so consumers don't need to learn the
+// underlying module names.
+export type {
+  OnCourtPlayerLine,
+  OnCourtSummary,
+  LineupComboLine,
+  LineupCombosSummary,
+  ServerSplitLine,
+  ServerSplitSummary,
+};
+
+// ── Player-table query with positionFilter (plumbing) ────────────────────
+
+/**
+ * Reserved query parameter for league-wide views. Not yet wired into the
+ * UI as a user-facing control — the StatsScreen ships with a disabled
+ * "Filter by position" dropdown so a future iteration can flip it on
+ * without touching the analytics layer. Accepts a position code; passes
+ * through the existing season summary by filtering players whose roster
+ * entry (or per-match override) matches.
+ */
+export interface PlayerTableQuery {
+  matches: Match[];
+  teamProfileId: string;
+  /** When set, only return player rows whose default position matches.
+   *  `null` = no filter. */
+  positionFilter?: 'S' | 'OH' | 'MB' | 'OPP' | 'L' | 'DS' | null;
+  filter?: MatchFilter;
+}
+
+/**
+ * Filter `PlayerStatLine[]` by position. Pure helper — the UI passes
+ * the season-summary's `players` array plus the chosen position; we
+ * read each player's `position` (from the roster, captured at aggregate
+ * time) and keep only matches. Players whose `position` is undefined
+ * are filtered out when a positionFilter is active so we don't claim
+ * coverage we don't have.
+ */
+export function filterPlayersByPosition(
+  players: PlayerStatLine[],
+  position: PlayerTableQuery['positionFilter']
+): PlayerStatLine[] {
+  if (!position) return players;
+  return players.filter((p) => p.position === position);
 }

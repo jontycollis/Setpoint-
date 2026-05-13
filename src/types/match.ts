@@ -71,6 +71,17 @@ export interface RosterPlayer {
    * rosterUpdatedAt on TeamProfile and tags incoming entries 'mrs-api'.
    */
   source?: 'manual' | 'mrs-api';
+  /**
+   * Per-match position override map keyed by match id. For multi-position
+   * athletes (e.g. someone who alternates Outside Hitter and Libero across
+   * matches) this lets the analytics layer attribute their stats to the
+   * specific role they played that day. Read-only as far as v1 ships —
+   * the UI for editing entries lands in a follow-up iteration; today the
+   * field is populated manually (or via a future per-match position
+   * tagger) and `PlayerDetailScreen` reads it to render the position
+   * split view when at least one entry exists.
+   */
+  perMatchPositionOverrides?: { [matchId: string]: 'S' | 'OH' | 'MB' | 'OPP' | 'L' | 'DS' };
 }
 
 // ── Header ─────────────────────────────────────────────────────────────────
@@ -228,6 +239,31 @@ export type MatchAgeCategory =
 export type MatchKind = 'aes' | 'timu' | 'standalone' | 'imported';
 
 /**
+ * Workbook-aligned semantic category labels. Distinct from `MatchKind` —
+ * `MatchKind` answers "where did the data come from" (AES / Timu /
+ * standalone / imported), while `MatchCategory` answers "what kind of
+ * competition was this" using the labels the user already maintains in
+ * the PVC_3D_Titanium_Stats_FINAL workbook splits. Five values, all
+ * derived from the bundled imports' `meta.eventName`:
+ *
+ *   • `'ova-champs'`           — "Age Group - OVA Championships"
+ *   • `'ova-tournament'`       — "Age Group - OVA Tournament"
+ *   • `'non-ova-tournament'`   — "Age Group - Non-OVA Tournament"
+ *   • `'scrimmage'`            — "Scrimmage / Non-OVA", "Scrimmage (intra-squad)"
+ *   • `'womens-sunday-league'` — "Women's Sunday League"
+ *
+ * Optional on `MatchMeta` — live-scored matches default to `null` and the
+ * user can tag later from the match-detail screens (UI for tagging ships
+ * with the next iteration; today the workbook importer is the only writer).
+ */
+export type MatchCategory =
+  | 'ova-champs'
+  | 'ova-tournament'
+  | 'non-ova-tournament'
+  | 'scrimmage'
+  | 'womens-sunday-league';
+
+/**
  * How the match data entered storage. Distinct from `MatchKind`:
  * a `matchKind: 'aes'` match could have been `'tier2-live'` (scored
  * at the gym) or `'sideline-hd-import'` (post-tournament workbook
@@ -361,6 +397,13 @@ export interface MatchMeta {
    * the Sideline HD importer; left blank for live-scored matches.
    */
   videoUrl?: string;
+  /**
+   * Workbook-aligned competition category. Additive, optional — leave
+   * undefined for live-scored matches the user hasn't tagged yet. The
+   * historical importer populates this from `eventName` at import time;
+   * see `inferMatchCategoryFromEventName` in `matchMetaPure.ts`.
+   */
+  matchCategory?: MatchCategory;
 }
 
 // ── Event log (append-only) ────────────────────────────────────────────────

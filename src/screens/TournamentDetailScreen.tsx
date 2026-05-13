@@ -20,6 +20,8 @@ import type { ThemeColors } from '../utils/theme';
 import type { Match } from '../types/match';
 import { loadMatches } from '../utils/scoredMatchStore';
 import { aggregateSeasonStats } from '../utils/statAggregator';
+import { computeServeStats, computeSetWinPercentByAthlete } from '../utils/analytics';
+import { aggregateOnCourtStats } from '../utils/onCourtStats';
 
 interface Props {
   teamProfileId: string;
@@ -72,6 +74,21 @@ export function TournamentDetailScreen({
     [matches, teamProfileId]
   );
 
+  const onCourt = useMemo(
+    () =>
+      aggregateOnCourtStats(matches, teamProfileId, { respectIncludeInStats: false }),
+    [matches, teamProfileId]
+  );
+  const serveStats = useMemo(
+    () => computeServeStats(matches, teamProfileId, { respectIncludeInStats: false }),
+    [matches, teamProfileId]
+  );
+  const setWinByAthlete = useMemo(
+    () =>
+      computeSetWinPercentByAthlete(matches, teamProfileId, { respectIncludeInStats: false }),
+    [matches, teamProfileId]
+  );
+
   if (loading) {
     return (
       <View style={styles.container}>
@@ -115,7 +132,79 @@ export function TournamentDetailScreen({
               <Text style={styles.recordLabel}>Sets</Text>
             </View>
           </View>
+
+          {/* Workbook-port team rates — only render when we have classified
+              rally data for at least one match in this tournament. */}
+          {onCourt.team.rallies > 0 ? (
+            <View style={{ flexDirection: 'row', marginTop: spacing.md }}>
+              <TournamentMetric
+                label="Rally Win %"
+                pct={onCourt.team.rallyWinPct}
+                counts={`${onCourt.team.ralliesWon} / ${onCourt.team.rallies}`}
+                colors={colors}
+              />
+              <View style={{ width: spacing.sm }} />
+              <TournamentMetric
+                label="Set Win %"
+                pct={onCourt.team.setWinPct}
+                counts={`${onCourt.team.setsWon} / ${onCourt.team.setsPlayed}`}
+                colors={colors}
+              />
+            </View>
+          ) : null}
+          {serveStats.team.recvRallies + serveStats.team.serveRallies > 0 ? (
+            <View style={{ flexDirection: 'row', marginTop: spacing.sm }}>
+              <TournamentMetric
+                label="Side-Out %"
+                pct={serveStats.team.recvPct}
+                counts={`${serveStats.team.recvWon} / ${serveStats.team.recvRallies}`}
+                colors={colors}
+              />
+              <View style={{ width: spacing.sm }} />
+              <TournamentMetric
+                label="Serve Pt %"
+                pct={serveStats.team.servePct}
+                counts={`${serveStats.team.serveWon} / ${serveStats.team.serveRallies}`}
+                colors={colors}
+              />
+            </View>
+          ) : null}
         </View>
+
+        {/* Per-athlete set win % — workbook tab #2 */}
+        {setWinByAthlete.length > 0 ? (
+          <View style={styles.card}>
+            <Text style={styles.kicker}>SET WIN % BY ATHLETE</Text>
+            <Text style={styles.cardSubtitle}>% of sets won when on the floor for any rally</Text>
+            <View style={styles.tableHeader}>
+              <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
+              <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
+              <Text style={styles.headerCell}>Sets</Text>
+              <Text style={styles.headerCell}>W</Text>
+              <Text style={styles.headerCell}>Set%</Text>
+              <Text style={styles.headerCell}>On%</Text>
+            </View>
+            {setWinByAthlete
+              .filter((p) => p.setsAppeared > 0)
+              .sort((a, b) => b.setsWon - a.setsWon || a.shirt - b.shirt)
+              .map((p) => (
+                <View key={p.shirt} style={styles.tableRow}>
+                  <Text style={[styles.cell, { flex: 2, fontWeight: '800' }]}>{p.shirt}</Text>
+                  <Text style={[styles.cell, { flex: 4, textAlign: 'left', paddingLeft: spacing.xs }]} numberOfLines={1}>
+                    {p.name}
+                  </Text>
+                  <Text style={styles.cell}>{p.setsAppeared}</Text>
+                  <Text style={styles.cell}>{p.setsWon}</Text>
+                  <Text style={[styles.cell, { color: colors.primary, fontWeight: '700' }]}>
+                    {Number.isFinite(p.setWinPct) ? `${(p.setWinPct * 100).toFixed(0)}` : '—'}
+                  </Text>
+                  <Text style={styles.cell}>
+                    {Number.isFinite(p.shareOfRallies) ? `${(p.shareOfRallies * 100).toFixed(0)}` : '—'}
+                  </Text>
+                </View>
+              ))}
+          </View>
+        ) : null}
 
         {/* Per-player table */}
         {summary.players.length > 0 ? (
@@ -204,6 +293,39 @@ function sumSetsWon(summary: { matches: { setsWon: number }[] }): number {
 }
 function sumSetsLost(summary: { matches: { setsLost: number }[] }): number {
   return summary.matches.reduce((acc, m) => acc + m.setsLost, 0);
+}
+
+function TournamentMetric({
+  label,
+  pct,
+  counts,
+  colors,
+}: {
+  label: string;
+  pct: number;
+  counts: string;
+  colors: ThemeColors;
+}) {
+  return (
+    <View
+      style={{
+        flex: 1,
+        backgroundColor: colors.background,
+        borderRadius: borderRadius.md,
+        padding: spacing.sm,
+        borderWidth: 1,
+        borderColor: colors.border,
+      }}
+    >
+      <Text style={{ fontSize: 9, fontWeight: '800', color: colors.textLight, letterSpacing: 1 }}>
+        {label.toUpperCase()}
+      </Text>
+      <Text style={{ fontSize: fontSize.xl, fontWeight: '900', color: colors.primary, marginTop: 2 }}>
+        {Number.isFinite(pct) ? `${(pct * 100).toFixed(0)}%` : '—'}
+      </Text>
+      <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary }}>{counts}</Text>
+    </View>
+  );
 }
 
 function Header({

@@ -32,8 +32,9 @@ import {
 } from 'react-native';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
-import type { Match, MatchKind } from '../types/match';
+import type { Match, MatchCategory, MatchKind, MatchSource } from '../types/match';
 import { loadMatches } from '../utils/scoredMatchStore';
+import { matchCategoryLabel } from '../utils/matchMetaPure';
 import {
   aggregateSeasonStats,
   type PlayerStatLine,
@@ -44,6 +45,8 @@ import {
   buildSeasonGlance,
   presentSplitKeys,
   getMatchPhase,
+  splitKeyLabel,
+  filterPlayersByPosition,
   type SeasonGlance,
   type TournamentRollup,
   type Phase,
@@ -64,10 +67,30 @@ import {
   topCombosBySetDomination,
   type LineupComboLine,
 } from '../utils/lineupCombos';
+import {
+  DEFAULT_ANALYTICS_VIEW_PREFERENCE,
+  loadAnalyticsViewPreference,
+  saveAnalyticsViewPreference,
+  type AnalyticsSplitsAxis,
+  type AnalyticsMetricSet,
+} from '../utils/analyticsViewPreference';
 
 type KindFilter = 'all' | MatchKind;
 type PhaseFilter = 'all' | Phase;
+type CategoryFilter = 'all' | MatchCategory | 'unknown';
+type SourceFilter = 'all' | MatchSource;
 type SortKey = 'kills' | 'blocks' | 'aces' | 'assists' | 'digs' | 'passAvg' | 'errors' | 'totalPoints';
+
+// Workbook category iteration order — matches the workbook tab order
+// the user is used to: champs → tournament → non-OVA → scrimmage →
+// sunday league.
+const CATEGORY_ORDER: MatchCategory[] = [
+  'ova-champs',
+  'ova-tournament',
+  'non-ova-tournament',
+  'scrimmage',
+  'womens-sunday-league',
+];
 
 interface Props {
   teamProfileId: string;
@@ -98,13 +121,27 @@ export function StatsScreen({
   const [allMatches, setAllMatches] = useState<Match[]>([]);
   const [kindFilter, setKindFilter] = useState<KindFilter>('all');
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [splitsAxis, setSplitsAxis] = useState<AnalyticsSplitsAxis>(
+    DEFAULT_ANALYTICS_VIEW_PREFERENCE.splitsAxis
+  );
+  const [metricSet, setMetricSet] = useState<AnalyticsMetricSet>(
+    DEFAULT_ANALYTICS_VIEW_PREFERENCE.metricSet
+  );
   const [sortKey, setSortKey] = useState<SortKey>('totalPoints');
+  // positionFilter is plumbed through but the UI control ships disabled —
+  // future iteration enables the dropdown without code rewiring.
+  const [positionFilter] = useState<'S' | 'OH' | 'MB' | 'OPP' | 'L' | 'DS' | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const matches = await loadMatches();
+        const [matches, pref] = await Promise.all([
+          loadMatches(),
+          loadAnalyticsViewPreference(),
+        ]);
         if (cancelled) return;
         const teamMatches = matches.filter(
           (m) =>
@@ -112,6 +149,8 @@ export function StatsScreen({
             m.meta.away.teamProfileId === teamProfileId
         );
         setAllMatches(teamMatches);
+        setSplitsAxis(pref.splitsAxis);
+        setMetricSet(pref.metricSet);
       } catch (err) {
         if (!cancelled) console.warn('[StatsScreen] load failed', err);
       } finally {
@@ -123,7 +162,23 @@ export function StatsScreen({
     };
   }, [teamProfileId]);
 
-  // Apply includeInStats + matchKind filter once. Everything below
+  // Persist the view preference whenever it changes.
+  useEffect(() => {
+    if (loading) return; // skip the initial render before load completes
+    void saveAnalyticsViewPreference({ splitsAxis, metricSet });
+  }, [splitsAxis, metricSet, loading]);
+
+  // When the splits axis changes, reset the active chip so we don't
+  // carry e.g. a stale "AES" filter into a matchCategory axis where
+  // the chip doesn't exist.
+  useEffect(() => {
+    setKindFilter('all');
+    setPhaseFilter('all');
+    setCategoryFilter('all');
+    setSourceFilter('all');
+  }, [splitsAxis]);
+
+  // Apply includeInStats + the active axis filter. Everything below
   // (glance, season totals, tournament rollup) is built from this
   // pre-filtered list.
   const filteredMatches = useMemo(() => {
@@ -135,12 +190,31 @@ export function StatsScreen({
       if (phaseFilter !== 'all' && getMatchPhase(m) !== phaseFilter) {
         return false;
       }
+      if (categoryFilter !== 'all') {
+        const cat = m.meta.matchCategory;
+        if (categoryFilter === 'unknown') {
+          if (cat) return false;
+        } else if (cat !== categoryFilter) {
+          return false;
+        }
+      }
+      if (sourceFilter !== 'all' && (m.meta.source ?? 'tier2-live') !== sourceFilter) {
+        return false;
+      }
       return true;
     });
-  }, [allMatches, kindFilter, phaseFilter]);
+  }, [allMatches, kindFilter, phaseFilter, categoryFilter, sourceFilter]);
 
   const presentKinds = useMemo(
     () => presentSplitKeys(allMatches, teamProfileId, 'matchKind', { respectIncludeInStats: true }),
+    [allMatches, teamProfileId]
+  );
+  const presentCategories = useMemo(
+    () => presentSplitKeys(allMatches, teamProfileId, 'matchCategory', { respectIncludeInStats: true }),
+    [allMatches, teamProfileId]
+  );
+  const presentSources = useMemo(
+    () => presentSplitKeys(allMatches, teamProfileId, 'source', { respectIncludeInStats: true }),
     [allMatches, teamProfileId]
   );
 
@@ -202,7 +276,7 @@ export function StatsScreen({
   );
 
   const sortedPlayers = useMemo(() => {
-    const sorted = seasonSummary.players.slice();
+    const sorted = filterPlayersByPosition(seasonSummary.players, positionFilter).slice();
     sorted.sort((a, b) => {
       const aVal = a[sortKey];
       const bVal = b[sortKey];
@@ -215,7 +289,7 @@ export function StatsScreen({
       return 0;
     });
     return sorted;
-  }, [seasonSummary, sortKey]);
+  }, [seasonSummary, sortKey, positionFilter]);
 
   if (loading) {
     return (
@@ -257,71 +331,120 @@ export function StatsScreen({
         stickyHeaderIndices={[0]}
         showsVerticalScrollIndicator={true}
       >
-        {/* Sticky splits stripe */}
+        {/* Sticky picker + splits stripe */}
         <View style={styles.stripeWrap}>
+          {/* "Pick view" chips — axis + metric set */}
+          <ViewPicker
+            splitsAxis={splitsAxis}
+            metricSet={metricSet}
+            onPickAxis={setSplitsAxis}
+            onPickMetricSet={setMetricSet}
+            colors={colors}
+            styles={styles}
+          />
+
+          {/* Active-axis chip stripe */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.stripeRow}
           >
-            <Chip label="All" active={kindFilter === 'all'} onPress={() => setKindFilter('all')} colors={colors} />
-            {presentKinds.has('aes') ? (
-              <Chip label="AES" active={kindFilter === 'aes'} onPress={() => setKindFilter('aes')} colors={colors} />
-            ) : null}
-            {presentKinds.has('timu') ? (
-              <Chip label="Timu" active={kindFilter === 'timu'} onPress={() => setKindFilter('timu')} colors={colors} />
-            ) : null}
-            {presentKinds.has('standalone') ? (
-              <Chip
-                label="Standalone"
-                active={kindFilter === 'standalone'}
-                onPress={() => setKindFilter('standalone')}
-                colors={colors}
-              />
-            ) : null}
-            {presentKinds.has('imported') ? (
-              <Chip
-                label="Imported"
-                active={kindFilter === 'imported'}
-                onPress={() => setKindFilter('imported')}
-                colors={colors}
-              />
-            ) : null}
+            {splitsAxis === 'matchCategory' ? (
+              <>
+                <Chip
+                  label="All categories"
+                  active={categoryFilter === 'all'}
+                  onPress={() => setCategoryFilter('all')}
+                  colors={colors}
+                />
+                {CATEGORY_ORDER.filter((c) => presentCategories.has(c)).map((c) => (
+                  <Chip
+                    key={c}
+                    label={matchCategoryLabel(c)}
+                    active={categoryFilter === c}
+                    onPress={() => setCategoryFilter(c)}
+                    colors={colors}
+                  />
+                ))}
+                {presentCategories.has('unknown') ? (
+                  <Chip
+                    label="Untagged"
+                    active={categoryFilter === 'unknown'}
+                    onPress={() => setCategoryFilter('unknown')}
+                    colors={colors}
+                  />
+                ) : null}
+              </>
+            ) : splitsAxis === 'matchKind' ? (
+              <>
+                <Chip label="All" active={kindFilter === 'all'} onPress={() => setKindFilter('all')} colors={colors} />
+                {presentKinds.has('aes') ? (
+                  <Chip label="AES" active={kindFilter === 'aes'} onPress={() => setKindFilter('aes')} colors={colors} />
+                ) : null}
+                {presentKinds.has('timu') ? (
+                  <Chip label="Timu" active={kindFilter === 'timu'} onPress={() => setKindFilter('timu')} colors={colors} />
+                ) : null}
+                {presentKinds.has('standalone') ? (
+                  <Chip label="Standalone" active={kindFilter === 'standalone'} onPress={() => setKindFilter('standalone')} colors={colors} />
+                ) : null}
+                {presentKinds.has('imported') ? (
+                  <Chip label="Imported" active={kindFilter === 'imported'} onPress={() => setKindFilter('imported')} colors={colors} />
+                ) : null}
+              </>
+            ) : splitsAxis === 'phase' ? (
+              <>
+                <Chip label="All phases" active={phaseFilter === 'all'} onPress={() => setPhaseFilter('all')} colors={colors} />
+                {presentPhases.has('pool') ? (
+                  <Chip label="Pool" active={phaseFilter === 'pool'} onPress={() => setPhaseFilter('pool')} colors={colors} />
+                ) : null}
+                {presentPhases.has('playoff') ? (
+                  <Chip label="Playoff" active={phaseFilter === 'playoff'} onPress={() => setPhaseFilter('playoff')} colors={colors} />
+                ) : null}
+              </>
+            ) : (
+              // source axis
+              <>
+                <Chip label="All sources" active={sourceFilter === 'all'} onPress={() => setSourceFilter('all')} colors={colors} />
+                {presentSources.has('tier2-live') ? (
+                  <Chip label="Live" active={sourceFilter === 'tier2-live'} onPress={() => setSourceFilter('tier2-live')} colors={colors} />
+                ) : null}
+                {presentSources.has('sideline-hd-import') ? (
+                  <Chip label="Imported" active={sourceFilter === 'sideline-hd-import'} onPress={() => setSourceFilter('sideline-hd-import')} colors={colors} />
+                ) : null}
+                {presentSources.has('manual-entry') ? (
+                  <Chip label="Manual" active={sourceFilter === 'manual-entry'} onPress={() => setSourceFilter('manual-entry')} colors={colors} />
+                ) : null}
+              </>
+            )}
           </ScrollView>
 
-          {/* Sub-stripe: Pool / Playoff. Only shown when the current
-              kind slice actually has identifiable phase data — otherwise
-              it'd be a confusing dead chip row. */}
-          {(presentPhases.has('pool') || presentPhases.has('playoff')) && (
+          {/* Phase sub-stripe still useful as a cross-cut when the primary
+              axis isn't already phase — visible only when phase data is
+              actually present in the current slice. */}
+          {splitsAxis !== 'phase' && (presentPhases.has('pool') || presentPhases.has('playoff')) && (
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={[styles.stripeRow, { paddingTop: 0 }]}
             >
-              <Chip
-                label="All phases"
-                active={phaseFilter === 'all'}
-                onPress={() => setPhaseFilter('all')}
-                colors={colors}
-              />
+              <Chip label="All phases" active={phaseFilter === 'all'} onPress={() => setPhaseFilter('all')} colors={colors} />
               {presentPhases.has('pool') ? (
-                <Chip
-                  label="Pool"
-                  active={phaseFilter === 'pool'}
-                  onPress={() => setPhaseFilter('pool')}
-                  colors={colors}
-                />
+                <Chip label="Pool" active={phaseFilter === 'pool'} onPress={() => setPhaseFilter('pool')} colors={colors} />
               ) : null}
               {presentPhases.has('playoff') ? (
-                <Chip
-                  label="Playoff"
-                  active={phaseFilter === 'playoff'}
-                  onPress={() => setPhaseFilter('playoff')}
-                  colors={colors}
-                />
+                <Chip label="Playoff" active={phaseFilter === 'playoff'} onPress={() => setPhaseFilter('playoff')} colors={colors} />
               ) : null}
             </ScrollView>
           )}
+
+          {/* Disabled "Filter by position" — wired but inert this iteration */}
+          <View style={styles.positionFilterRow}>
+            <Text style={styles.positionFilterLabel}>Filter by position</Text>
+            <View style={styles.positionFilterPicker}>
+              <Text style={styles.positionFilterPickerText}>All positions</Text>
+              <Text style={styles.positionFilterPickerChevron}>▾</Text>
+            </View>
+          </View>
         </View>
 
         {noMatchesInSlice ? (
@@ -403,26 +526,33 @@ export function StatsScreen({
               )}
             </View>
 
-            {/* On-court & set wins */}
-            <OnCourtStatsCard
-              summary={onCourtSummary}
-              colors={colors}
-              styles={styles}
-            />
+            {/* Workbook-port cards — gated by metric set */}
+            {(metricSet === 'advanced' || metricSet === 'lineups') ? (
+              <OnCourtStatsCard
+                summary={onCourtSummary}
+                colors={colors}
+                styles={styles}
+              />
+            ) : null}
 
-            {/* Side-out & serving conversion */}
-            <ServerSplitsCard
-              splits={serverSplits}
-              colors={colors}
-              styles={styles}
-            />
+            {(metricSet === 'advanced' || metricSet === 'lineups') ? (
+              <ServerSplitsCard
+                splits={serverSplits}
+                colors={colors}
+                styles={styles}
+              />
+            ) : null}
 
-            {/* Lineup combinations */}
-            <LineupCombosCard
-              summary={lineupCombos}
-              colors={colors}
-              styles={styles}
-            />
+            {/* Lineup combinations — always shown when metricSet=lineups,
+                also surfaced under 'advanced' so the workbook port
+                renders end-to-end by default. */}
+            {(metricSet === 'lineups' || metricSet === 'advanced') ? (
+              <LineupCombosCard
+                summary={lineupCombos}
+                colors={colors}
+                styles={styles}
+              />
+            ) : null}
 
             {/* Per-tournament rollup */}
             {tournamentRollups.length > 0 ? (
@@ -460,14 +590,16 @@ export function StatsScreen({
                   .map((m) => {
                     const match = filteredMatches.find((x) => x.id === m.matchId);
                     const kind = match?.meta.matchKind ?? 'standalone';
+                    const category = match?.meta.matchCategory;
                     return (
                       <View key={m.matchId} style={styles.matchListRow}>
                         <View style={{ flex: 1 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' }}>
                             <Text style={[styles.matchOpponent, { color: colors.text }]} numberOfLines={1}>
                               vs {m.opponent}
                             </Text>
                             <KindBadge kind={kind} colors={colors} />
+                            {category ? <CategoryBadge category={category} colors={colors} /> : null}
                           </View>
                           <Text style={{ fontSize: fontSize.xs, color: colors.textSecondary, marginTop: 2 }} numberOfLines={1}>
                             {m.matchLabel} · {new Date(m.dateMs).toLocaleDateString()}
@@ -526,6 +658,46 @@ function Header({
   );
 }
 
+// ── ViewPicker — "Pick view" axis + metric set chips ─────────────────────
+
+function ViewPicker({
+  splitsAxis,
+  metricSet,
+  onPickAxis,
+  onPickMetricSet,
+  colors,
+  styles,
+}: {
+  splitsAxis: AnalyticsSplitsAxis;
+  metricSet: AnalyticsMetricSet;
+  onPickAxis: (axis: AnalyticsSplitsAxis) => void;
+  onPickMetricSet: (set: AnalyticsMetricSet) => void;
+  colors: ThemeColors;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <View style={styles.viewPickerWrap}>
+      <View style={styles.viewPickerRow}>
+        <Text style={styles.viewPickerLabel}>SPLIT</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <Chip label="Category" active={splitsAxis === 'matchCategory'} onPress={() => onPickAxis('matchCategory')} colors={colors} small />
+          <Chip label="Match kind" active={splitsAxis === 'matchKind'} onPress={() => onPickAxis('matchKind')} colors={colors} small />
+          <Chip label="Phase" active={splitsAxis === 'phase'} onPress={() => onPickAxis('phase')} colors={colors} small />
+          <Chip label="Source" active={splitsAxis === 'source'} onPress={() => onPickAxis('source')} colors={colors} small />
+        </ScrollView>
+      </View>
+      <View style={styles.viewPickerRow}>
+        <Text style={styles.viewPickerLabel}>METRICS</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <Chip label="Basic" active={metricSet === 'basic'} onPress={() => onPickMetricSet('basic')} colors={colors} small />
+          <Chip label="Advanced" active={metricSet === 'advanced'} onPress={() => onPickMetricSet('advanced')} colors={colors} small />
+          <Chip label="Lineups" active={metricSet === 'lineups'} onPress={() => onPickMetricSet('lineups')} colors={colors} small />
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
 // ── Chip ─────────────────────────────────────────────────────────────────
 
 function Chip({
@@ -533,11 +705,13 @@ function Chip({
   active,
   onPress,
   colors,
+  small,
 }: {
   label: string;
   active: boolean;
   onPress: () => void;
   colors: ThemeColors;
+  small?: boolean;
 }) {
   return (
     <TouchableOpacity
@@ -545,8 +719,8 @@ function Chip({
       activeOpacity={0.7}
       style={[
         {
-          paddingHorizontal: spacing.md,
-          paddingVertical: 6,
+          paddingHorizontal: small ? spacing.sm : spacing.md,
+          paddingVertical: small ? 4 : 6,
           borderRadius: borderRadius.full,
           marginRight: 6,
           borderWidth: 1,
@@ -558,7 +732,7 @@ function Chip({
     >
       <Text
         style={{
-          fontSize: fontSize.xs,
+          fontSize: small ? 11 : fontSize.xs,
           fontWeight: '700',
           color: active ? colors.textOnPrimary : colors.textSecondary,
         }}
@@ -853,18 +1027,23 @@ function LineupCombosCard({
   const [view, setView] = useState<'rally' | 'dominant'>('rally');
   if (summary.totalRallies === 0) return null;
 
+  // Workbook-port thresholds: ≥50 rallies together, top 15 combos. Set
+  // domination threshold stays at the workbook default (3).
+  const MIN_RALLIES = 50;
+  const TOP_N = 15;
   const rows =
     view === 'rally'
-      ? topCombosByRallyWinPct(summary, 30, 10)
-      : topCombosBySetDomination(summary, 3, 10);
+      ? topCombosByRallyWinPct(summary, MIN_RALLIES, TOP_N)
+      : topCombosBySetDomination(summary, 3, TOP_N);
+  const qualifyingCount = summary.combos.filter((c) => c.rallies >= MIN_RALLIES).length;
 
   return (
     <View style={styles.card}>
       <Text style={styles.kicker}>LINEUP COMBINATIONS</Text>
       <Text style={styles.cardSubtitle}>
         {view === 'rally'
-          ? 'Top 6-player combos by rally win % (min 30 rallies together)'
-          : 'Top 6-player combos by set win % when they dominated the set (min 3 dominated sets)'}
+          ? `Top ${TOP_N} 6-player combos by rally win % (min ${MIN_RALLIES} rallies together)`
+          : `Top ${TOP_N} 6-player combos by set win % when dominant (min 3 dominated sets)`}
       </Text>
 
       {/* View toggle */}
@@ -896,8 +1075,10 @@ function LineupCombosCard({
       {rows.length === 0 ? (
         <Text style={styles.empty}>
           Not enough data — need 6 distinct players playing
-          {view === 'rally' ? ' ≥30 rallies' : ' as the primary 6 for ≥3 sets'}{' '}
-          together.
+          {view === 'rally' ? ` ≥${MIN_RALLIES} rallies` : ' as the primary 6 for ≥3 sets'}{' '}
+          together. {view === 'rally' && qualifyingCount === 0 && summary.combos.length > 0
+            ? `(${summary.combos.length} combo${summary.combos.length === 1 ? '' : 's'} seen, none cleared the threshold)`
+            : ''}
         </Text>
       ) : (
         rows.map((c) => (
@@ -1391,6 +1572,26 @@ function KindBadge({ kind, colors }: { kind: MatchKind; colors: ThemeColors }) {
   );
 }
 
+function CategoryBadge({ category, colors }: { category: MatchCategory; colors: ThemeColors }) {
+  return (
+    <View
+      style={{
+        backgroundColor: colors.background,
+        paddingHorizontal: 5,
+        paddingVertical: 1,
+        borderRadius: borderRadius.sm,
+        marginLeft: 4,
+        borderWidth: 1,
+        borderColor: colors.border,
+      }}
+    >
+      <Text style={{ fontSize: 9, fontWeight: '700', color: colors.textSecondary }}>
+        {matchCategoryLabel(category).toUpperCase()}
+      </Text>
+    </View>
+  );
+}
+
 // ── Empty state ─────────────────────────────────────────────────────────
 
 function EmptyState({
@@ -1443,6 +1644,56 @@ function makeStyles(colors: ThemeColors) {
     stripeRow: {
       paddingHorizontal: spacing.md,
       flexDirection: 'row',
+    },
+    viewPickerWrap: {
+      paddingHorizontal: spacing.md,
+      paddingBottom: spacing.xs,
+    },
+    viewPickerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 2,
+    },
+    viewPickerLabel: {
+      width: 64,
+      fontSize: 10,
+      fontWeight: '800',
+      color: colors.textLight,
+      letterSpacing: 1,
+    },
+    positionFilterRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: spacing.md,
+      paddingTop: spacing.xs,
+      paddingBottom: 2,
+      opacity: 0.5,
+    },
+    positionFilterLabel: {
+      fontSize: 11,
+      fontWeight: '700',
+      color: colors.textLight,
+      letterSpacing: 0.5,
+    },
+    positionFilterPicker: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: borderRadius.sm,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+    },
+    positionFilterPickerText: {
+      fontSize: 11,
+      color: colors.textSecondary,
+      fontWeight: '600',
+    },
+    positionFilterPickerChevron: {
+      fontSize: 10,
+      color: colors.textLight,
+      marginLeft: 6,
     },
 
     card: {
