@@ -77,12 +77,27 @@ export async function removeMyTeamAlias(name: string): Promise<string[]> {
  * Normalize a team name for comparison: lowercase, trim, collapse
  * whitespace, strip common age-group markers ("18U", "U18", "18 Under")
  * so "Defensa U18 Rob" and "Defensa Rob" land on the same key.
+ *
+ * Also strips trailing ranking-style parenthetical suffixes like
+ * "(ON53)", "(ON-53)", "[ON53]", "(Ontario 53)", or just "(53)" — used
+ * by tournament listings (OVA, Canadian nationals) to tag teams with a
+ * province/state code and rank. The same team in AES/Timu usually
+ * appears without that suffix, so leaving it in breaks cross-source
+ * alias matching. Non-ranking parentheticals (e.g. "(Brampton)",
+ * "(Coach Smith)") are preserved — the heuristic requires a digit.
  */
 export function normalizeName(name: string): string {
   if (!name) return '';
   return name
-    .toLowerCase()
     .trim()
+    // Strip a trailing ranking-style parenthetical:
+    //   "(ON53)", "(ON-53)", "[ON53]", "(Ontario 53)", "(53)", "(USA1)"
+    // Only matches when the bracketed content is letters+digits or just
+    // digits, so plain-text parentheticals like "(Brampton)" or
+    // "(Coach Smith)" stay untouched. Applied BEFORE lowercase/age strip
+    // so the rest of the pipeline sees the clean name.
+    .replace(/\s*[([]\s*(?:[A-Z]{2}-?|\w+\s+)?\d{1,4}\s*[)\]]\s*$/i, '')
+    .toLowerCase()
     // Strip age-group prefixes/suffixes anywhere in the name.
     .replace(/\b(\d{1,2}u|u\d{1,2}|\d{1,2}\s*under)\b/gi, ' ')
     // Girls/boys markers sometimes cluttered into the team text.
