@@ -288,6 +288,12 @@ const SEARCH_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'MatchScoring',
   'Scoreboard',
   'GlobalSearch',
+  // Connection screens have their own slim hero with back / title /
+  // status; the search overlay would visually collide with the back
+  // button there. The hamburger overlay still appears on the right —
+  // we right-pad the connection hero to clear it.
+  'MrsConnection',
+  'CacConnection',
 ]);
 
 // ── Pre-migration snapshot guard ──────────────────────────────────────────
