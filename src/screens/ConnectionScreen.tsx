@@ -21,7 +21,7 @@
 // disconnect or the service expires their session.
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useRef, useState, useMemo, useEffect } from 'react';
+import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -29,6 +29,7 @@ import {
   StyleSheet,
   Alert,
   ActivityIndicator,
+  BackHandler,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { WebViewNavigation } from 'react-native-webview';
@@ -134,6 +135,18 @@ export function ConnectionScreen({
   const [capturedUrl, setCapturedUrl] = useState<string | null>(null);
   const autoRedirectedRef = useRef(false);
 
+  // ── In-WebView navigation state ────────────────────────────────────
+  // We mirror the WebView's own can-go-back / can-go-forward / current
+  // URL so the in-app toolbar (and the smart hero Back) can drive the
+  // session like a tiny embedded browser. Without this, every chip 404
+  // is a dead end — there's no way to recover except disconnecting.
+  const [canGoBack, setCanGoBack] = useState(false);
+  const [canGoForward, setCanGoForward] = useState(false);
+  const [currentUrl, setCurrentUrl] = useState<string>(config.loginUrl);
+  // Last load error — surfaces as a dismissible banner. Cleared on the
+  // next successful navigation.
+  const [lastError, setLastError] = useState<string | null>(null);
+
   // Load any persisted captured URL on mount so the very next login
   // can redirect there immediately.
   useEffect(() => {
@@ -147,6 +160,13 @@ export function ConnectionScreen({
 
   const handleNavigationStateChange = (event: WebViewNavigation) => {
     const url = event.url || '';
+    // Mirror nav state into React so the toolbar buttons reflect what's
+    // actually reachable from this point in the WebView's history.
+    setCanGoBack(!!event.canGoBack);
+    setCanGoForward(!!event.canGoForward);
+    setCurrentUrl(url);
+    // Any successful navigation supersedes the last error banner.
+    if (lastError) setLastError(null);
     const onLoginPage = config.loginUrlPattern.test(url);
     if (!onLoginPage && !firedConnectRef.current) {
       firedConnectRef.current = true;
@@ -197,6 +217,56 @@ export function ConnectionScreen({
     );
   };
 
+  // ── In-WebView nav: back / forward / reload / home ────────────────
+  // `home` lands the user on the most useful URL we know about:
+  //   - capturedUrl (e.g. CAC Locker's /account/detail/{id}) when we've
+  //     seen the user navigate to it
+  //   - the loginUrl otherwise (which, post-login, redirects to whatever
+  //     the service's default dashboard is)
+  const goWebViewBack = useCallback(() => {
+    webViewRef.current?.goBack();
+  }, []);
+  const goWebViewForward = useCallback(() => {
+    webViewRef.current?.goForward();
+  }, []);
+  const reloadWebView = useCallback(() => {
+    setLastError(null);
+    webViewRef.current?.reload();
+  }, []);
+  const goHome = useCallback(() => {
+    setLastError(null);
+    navigateTo(capturedUrl || config.loginUrl);
+  }, [capturedUrl, config.loginUrl]);
+
+  // Smart hero-back + hardware-back: if there's somewhere to go in the
+  // WebView, go there first; only exit the screen when we're at the
+  // root of the WebView's history. Matches what users expect from a
+  // browser-like surface.
+  const handleSmartBack = useCallback(() => {
+    if (canGoBack) {
+      goWebViewBack();
+      return true;
+    }
+    onBack();
+    return true;
+  }, [canGoBack, goWebViewBack, onBack]);
+
+  // Android hardware back. Registers after the global App.tsx handler
+  // so RN's reverse-order dispatch lets us intercept first. We return
+  // true when we handle it (back-inside-WebView), false to let the
+  // global handler exit the screen.
+  useEffect(() => {
+    const onHardware = () => {
+      if (canGoBack) {
+        goWebViewBack();
+        return true;
+      }
+      return false;
+    };
+    const sub = BackHandler.addEventListener('hardwareBackPress', onHardware);
+    return () => sub.remove();
+  }, [canGoBack, goWebViewBack]);
+
   const handleDisconnect = () => {
     Alert.alert(
       `Disconnect ${config.serviceName}?`,
@@ -221,10 +291,12 @@ export function ConnectionScreen({
     <View style={styles.container}>
       <View style={styles.hero}>
         <TouchableOpacity
-          onPress={onBack}
+          onPress={handleSmartBack}
           hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
         >
-          <Text style={styles.heroBack}>{'< Back'}</Text>
+          <Text style={styles.heroBack}>
+            {canGoBack ? '< Back' : '< Exit'}
+          </Text>
         </TouchableOpacity>
         <View style={styles.heroRow}>
           <Text style={styles.heroTitle} numberOfLines={1}>
@@ -250,6 +322,43 @@ export function ConnectionScreen({
           {connected
             ? 'Browse your account inside Setpoint.'
             : `Sign in with your ${config.serviceName} credentials below.`}
+        </Text>
+      </View>
+
+      {/* In-WebView nav toolbar. Always shown so users can recover from
+          any state — including 404s on chip URLs that haven't been
+          verified against the live site. Disabled buttons grey out
+          when they aren't applicable (e.g. forward when at history
+          head). */}
+      <View style={styles.toolbar}>
+        <ToolbarBtn
+          label="‹"
+          accessibilityLabel="Back"
+          disabled={!canGoBack}
+          onPress={goWebViewBack}
+          styles={styles}
+        />
+        <ToolbarBtn
+          label="›"
+          accessibilityLabel="Forward"
+          disabled={!canGoForward}
+          onPress={goWebViewForward}
+          styles={styles}
+        />
+        <ToolbarBtn
+          label="↻"
+          accessibilityLabel="Reload"
+          onPress={reloadWebView}
+          styles={styles}
+        />
+        <ToolbarBtn
+          label="🏠"
+          accessibilityLabel="Home"
+          onPress={goHome}
+          styles={styles}
+        />
+        <Text style={styles.toolbarUrl} numberOfLines={1}>
+          {prettifyUrl(currentUrl)}
         </Text>
       </View>
 
@@ -280,6 +389,25 @@ export function ConnectionScreen({
           </View>
         </View>
       )}
+
+      {/* Last-load error banner — dismissible, non-blocking. Shows up
+          when a chip URL 404s or a network call fails. The toolbar
+          back/home buttons handle the recovery itself; this just tells
+          the user something went wrong so they aren't staring at a
+          blank or unfamiliar page wondering whether the tap worked. */}
+      {lastError ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText} numberOfLines={2}>
+            {lastError}
+          </Text>
+          <TouchableOpacity
+            onPress={() => setLastError(null)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.errorBannerDismiss}>{'✕'}</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       <View style={styles.webContainer}>
         <WebView
@@ -314,6 +442,8 @@ export function ConnectionScreen({
           // without the user having to flag each one. Best-effort logs;
           // shipped builds stay quiet.
           onError={(e: WebViewErrorEvent) => {
+            const desc = e.nativeEvent.description || 'Network error';
+            setLastError(`Couldn't load this page (${desc}). Tap ↻ to retry or 🏠 to go home.`);
             if (__DEV__) {
               // eslint-disable-next-line no-console
               console.warn(
@@ -327,6 +457,17 @@ export function ConnectionScreen({
             }
           }}
           onHttpError={(e: WebViewHttpErrorEvent) => {
+            const status = e.nativeEvent.statusCode;
+            // Most chip-URL 404s land here. The site's own 404 page still
+            // renders, but we surface a banner so the user knows the link
+            // is broken and can recover via the toolbar.
+            if (status >= 400) {
+              setLastError(
+                status === 404
+                  ? `That link isn't valid for ${config.serviceName} (404). Try ← back or 🏠 home.`
+                  : `Server returned ${status}. Try ↻ reload or 🏠 home.`
+              );
+            }
             if (__DEV__) {
               // eslint-disable-next-line no-console
               console.warn(
@@ -574,6 +715,54 @@ function buildInjectedScript(extraCss?: string): string {
 
 // ── URL helpers ───────────────────────────────────────────────────────────
 
+// Compress a URL into something readable in the slim toolbar. We drop
+// the protocol, surface just the host + path tail, and cap the total
+// length so it never wraps onto a second line.
+function prettifyUrl(url: string): string {
+  if (!url) return '';
+  let s = url.replace(/^https?:\/\//i, '');
+  s = s.replace(/#.*$/, '').replace(/\?.*$/, '');
+  if (s.length > 38) s = s.slice(0, 18) + '…' + s.slice(-18);
+  return s;
+}
+
+// Small toolbar button — matches the surrounding chrome and dims when
+// the action isn't currently available (e.g. forward when there's
+// nothing forward to go to).
+function ToolbarBtn({
+  label,
+  accessibilityLabel,
+  disabled,
+  onPress,
+  styles,
+}: {
+  label: string;
+  accessibilityLabel: string;
+  disabled?: boolean;
+  onPress: () => void;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.7}
+      accessibilityLabel={accessibilityLabel}
+      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+      style={[styles.toolbarBtn, disabled && styles.toolbarBtnDisabled]}
+    >
+      <Text
+        style={[
+          styles.toolbarBtnText,
+          disabled && styles.toolbarBtnTextDisabled,
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 // Loose URL comparator — strips the trailing slash and any anchor so
 // `https://x/y` and `https://x/y/#tab=foo` are treated as the same page.
 function sameUrl(a: string, b: string): boolean {
@@ -776,6 +965,74 @@ function makeStyles(colors: ThemeColors) {
   },
   statusChipTextOn: { color: colors.primary },
   statusChipTextOff: { color: '#ffffff' },
+
+  // ── WebView nav toolbar ─────────────────────────────────────────────
+  // Slim browser-style row: back / forward / reload / home + a
+  // truncated URL display. Renders always so users can recover from
+  // any state including chip-URL 404s.
+  toolbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+    gap: 2,
+  },
+  toolbarBtn: {
+    minWidth: 36,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: borderRadius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolbarBtnDisabled: {
+    opacity: 0.3,
+  },
+  toolbarBtnText: {
+    color: colors.primary,
+    fontSize: 22,
+    lineHeight: 24,
+    fontWeight: '700',
+  },
+  toolbarBtnTextDisabled: {
+    color: colors.textLight,
+  },
+  toolbarUrl: {
+    flex: 1,
+    marginLeft: spacing.sm,
+    color: colors.textSecondary,
+    fontSize: fontSize.xs,
+  },
+
+  // ── Inline error banner ─────────────────────────────────────────────
+  // Sits below the chips and above the WebView. Dismissible and
+  // non-blocking so the user can still interact with the page below
+  // (which on a 404 will be the site's own error page).
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.warning ? `${colors.warning}22` : '#fff3ee',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.warning ?? '#f5a623',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    gap: spacing.sm,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: colors.text,
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+  },
+  errorBannerDismiss: {
+    color: colors.textSecondary,
+    fontSize: fontSize.md,
+    fontWeight: '700',
+  },
 
   // Shortcut chip strip shown above the WebView once the user is
   // logged in. Horizontally wraps so chips reflow on narrow screens.
