@@ -32,7 +32,10 @@
       "package": "com.aesscoretracker.app",
       "permissions": [
         "INTERNET"
-      ]
+      ],
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -42,6 +45,9 @@
         "projectId": "f809fef2-3bf0-4186-8619-96afe8d581b8"
       }
     },
-    "owner": "joncollis"
+    "owner": "joncollis",
+    "updates": {
+      "url": "https://u.expo.dev/f809fef2-3bf0-4186-8619-96afe8d581b8"
+    }
   }
 }
