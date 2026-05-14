@@ -296,16 +296,19 @@ export function ConnectionScreen({
 
   return (
     <View style={styles.container}>
+      {/* Slim hero at top: single row of back / title / status / disconnect.
+          Subtitle only shows pre-connect; once logged in the bar is one
+          line so the WebView gets the rest of the screen. */}
       <View style={styles.hero}>
-        <TouchableOpacity
-          onPress={handleSmartBack}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-        >
-          <Text style={styles.heroBack}>
-            {canGoBack ? '< Back' : '< Exit'}
-          </Text>
-        </TouchableOpacity>
         <View style={styles.heroRow}>
+          <TouchableOpacity
+            onPress={handleSmartBack}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
+            <Text style={styles.heroBack}>
+              {canGoBack ? '< Back' : '< Exit'}
+            </Text>
+          </TouchableOpacity>
           <Text style={styles.heroTitle} numberOfLines={1}>
             {config.serviceName}
           </Text>
@@ -324,107 +327,22 @@ export function ConnectionScreen({
               {connected ? 'Connected' : 'Not connected'}
             </Text>
           </View>
+          {connected ? (
+            <TouchableOpacity
+              onPress={handleDisconnect}
+              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.heroDisconnect}>Disconnect</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
-        <Text style={styles.heroSubtitle}>
-          {connected
-            ? 'Browse your account inside Setpoint.'
-            : `Sign in with your ${config.serviceName} credentials below.`}
-        </Text>
-      </View>
-
-      {/* In-WebView nav toolbar. Always shown so users can recover from
-          any state — including 404s on chip URLs that haven't been
-          verified against the live site. Disabled buttons grey out
-          when they aren't applicable (e.g. forward when at history
-          head). */}
-      <View style={styles.toolbar}>
-        <ToolbarBtn
-          label="‹"
-          accessibilityLabel="Back"
-          disabled={!canGoBack}
-          onPress={goWebViewBack}
-          styles={styles}
-        />
-        <ToolbarBtn
-          label="›"
-          accessibilityLabel="Forward"
-          disabled={!canGoForward}
-          onPress={goWebViewForward}
-          styles={styles}
-        />
-        <ToolbarBtn
-          label="↻"
-          accessibilityLabel="Reload"
-          onPress={reloadWebView}
-          styles={styles}
-        />
-        <ToolbarBtn
-          label="🏠"
-          accessibilityLabel="Home"
-          onPress={goHome}
-          styles={styles}
-        />
-        <Text style={styles.toolbarUrl} numberOfLines={1}>
-          {prettifyUrl(currentUrl)}
-        </Text>
-      </View>
-
-      {connected && (() => {
-        // Prefer chips discovered from the site's own nav. Fall back
-        // to the speculative config-side chips only when discovery
-        // hasn't returned anything yet (or in case the site has no
-        // findable nav). Capture-URL chip stays visible either way.
-        const chipsToRender = discoveredChips.length > 0
-          ? discoveredChips
-          : (config.chips ?? []);
-        if (chipsToRender.length === 0 && !capturedUrl) return null;
-        return (
-          <View style={styles.chipsBar}>
-            <View style={styles.chipsBarInner}>
-              {capturedUrl ? (
-                <TouchableOpacity
-                  style={[styles.chip, styles.chipPrimary]}
-                  onPress={() => navigateTo(capturedUrl)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.chipText, styles.chipTextPrimary]}>
-                    ↺ My Profile
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {chipsToRender.map((c) => (
-                <TouchableOpacity
-                  key={c.url}
-                  style={styles.chip}
-                  onPress={() => navigateTo(c.url)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.chipText}>{c.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-        );
-      })()}
-
-      {/* Last-load error banner — dismissible, non-blocking. Shows up
-          when a chip URL 404s or a network call fails. The toolbar
-          back/home buttons handle the recovery itself; this just tells
-          the user something went wrong so they aren't staring at a
-          blank or unfamiliar page wondering whether the tap worked. */}
-      {lastError ? (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorBannerText} numberOfLines={2}>
-            {lastError}
+        {!connected ? (
+          <Text style={styles.heroSubtitle}>
+            {`Sign in with your ${config.serviceName} credentials below.`}
           </Text>
-          <TouchableOpacity
-            onPress={() => setLastError(null)}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          >
-            <Text style={styles.errorBannerDismiss}>{'✕'}</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+        ) : null}
+      </View>
 
       <View style={styles.webContainer}>
         <WebView
@@ -528,26 +446,95 @@ export function ConnectionScreen({
         ) : null}
       </View>
 
-      {connected ? (
-        <View
-          style={[
-            styles.footer,
-            // Bottom safe-area inset clears the Android gesture-nav
-            // indicators so the destructive button stays tappable.
-            { paddingBottom: spacing.md + Math.max(insets.bottom, 0) },
-          ]}
-        >
+      {/* ── Bottom chrome (stack from top to bottom of group) ─────
+          chips strip → error banner → in-WebView nav toolbar. All
+          fixed-height; the WebView above absorbs the rest of the
+          screen. The toolbar pads its bottom by `insets.bottom` so
+          the buttons clear Android's gesture-nav indicator. */}
+      {connected && (() => {
+        const chipsToRender = discoveredChips.length > 0
+          ? discoveredChips
+          : (config.chips ?? []);
+        if (chipsToRender.length === 0 && !capturedUrl) return null;
+        return (
+          <View style={styles.chipsBar}>
+            <View style={styles.chipsBarInner}>
+              {capturedUrl ? (
+                <TouchableOpacity
+                  style={[styles.chip, styles.chipPrimary]}
+                  onPress={() => navigateTo(capturedUrl)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.chipText, styles.chipTextPrimary]}>
+                    ↺ My Profile
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {chipsToRender.map((c) => (
+                <TouchableOpacity
+                  key={c.url}
+                  style={styles.chip}
+                  onPress={() => navigateTo(c.url)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.chipText}>{c.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        );
+      })()}
+
+      {lastError ? (
+        <View style={styles.errorBanner}>
+          <Text style={styles.errorBannerText} numberOfLines={2}>
+            {lastError}
+          </Text>
           <TouchableOpacity
-            onPress={handleDisconnect}
-            style={styles.disconnectBtn}
-            activeOpacity={0.7}
+            onPress={() => setLastError(null)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
-            <Text style={styles.disconnectBtnText}>
-              Disconnect {config.serviceName}
-            </Text>
+            <Text style={styles.errorBannerDismiss}>{'✕'}</Text>
           </TouchableOpacity>
         </View>
       ) : null}
+
+      <View
+        style={[
+          styles.toolbar,
+          { paddingBottom: 4 + Math.max(insets.bottom, 0) },
+        ]}
+      >
+        <ToolbarBtn
+          label="‹"
+          accessibilityLabel="Back"
+          disabled={!canGoBack}
+          onPress={goWebViewBack}
+          styles={styles}
+        />
+        <ToolbarBtn
+          label="›"
+          accessibilityLabel="Forward"
+          disabled={!canGoForward}
+          onPress={goWebViewForward}
+          styles={styles}
+        />
+        <ToolbarBtn
+          label="↻"
+          accessibilityLabel="Reload"
+          onPress={reloadWebView}
+          styles={styles}
+        />
+        <ToolbarBtn
+          label="🏠"
+          accessibilityLabel="Home"
+          onPress={goHome}
+          styles={styles}
+        />
+        <Text style={styles.toolbarUrl} numberOfLines={1}>
+          {prettifyUrl(currentUrl)}
+        </Text>
+      </View>
     </View>
   );
 }
@@ -1172,16 +1159,20 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
 function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
+  // ── Slim hero ─────────────────────────────────────────────────────
+  // Top safe-area inset is consumed by the top padding so the back
+  // button clears the status bar; horizontal padding stays generous
+  // enough for thumb hit-targets without wasting vertical space.
   hero: {
     backgroundColor: colors.primary,
-    padding: spacing.xxl,
-    paddingBottom: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.sm,
   },
   heroBack: {
     color: 'rgba(255,255,255,0.9)',
-    fontSize: fontSize.md,
+    fontSize: fontSize.sm,
     fontWeight: '600',
-    marginBottom: spacing.sm,
   },
   heroRow: {
     flexDirection: 'row',
@@ -1190,18 +1181,24 @@ function makeStyles(colors: ThemeColors) {
   },
   heroTitle: {
     color: colors.textOnPrimary,
-    fontSize: fontSize.xxl,
+    fontSize: fontSize.lg,
     fontWeight: '800',
     flex: 1,
   },
+  heroDisconnect: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+  },
   heroSubtitle: {
     color: 'rgba(255,255,255,0.8)',
-    fontSize: fontSize.md,
+    fontSize: fontSize.sm,
     marginTop: 4,
   },
   statusChip: {
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingVertical: 2,
     borderRadius: borderRadius.sm,
   },
   statusChipOn: { backgroundColor: 'rgba(255,255,255,0.85)' },
@@ -1215,17 +1212,19 @@ function makeStyles(colors: ThemeColors) {
   statusChipTextOff: { color: '#ffffff' },
 
   // ── WebView nav toolbar ─────────────────────────────────────────────
-  // Slim browser-style row: back / forward / reload / home + a
-  // truncated URL display. Renders always so users can recover from
-  // any state including chip-URL 404s.
+  // Slim browser-style row anchored at the bottom of the screen:
+  // back / forward / reload / home + a truncated URL display. Border
+  // on TOP so it visually separates from the WebView above; bottom
+  // padding is patched at render time to clear safe-area / gesture-
+  // nav insets.
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
+    paddingTop: 4,
     backgroundColor: colors.surface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
     gap: 2,
   },
   toolbarBtn: {
@@ -1289,9 +1288,13 @@ function makeStyles(colors: ThemeColors) {
   // dark grey in dark) so the chips visibly pop out from the strip in
   // both palettes.
   chipsBar: {
+    // Sits between the WebView (above) and the toolbar (below) at
+    // the bottom of the screen. Border-top marks the WebView edge;
+    // no border-bottom since the toolbar's own border-top handles
+    // that boundary.
     backgroundColor: colors.background,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.divider,
+    borderTopWidth: 1,
+    borderTopColor: colors.divider,
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
   },
@@ -1330,27 +1333,5 @@ function makeStyles(colors: ThemeColors) {
     borderRadius: borderRadius.sm,
   },
 
-  footer: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
-    backgroundColor: colors.surface,
-    borderTopWidth: 1,
-    borderTopColor: colors.divider,
-    alignItems: 'flex-end',
-  },
-  disconnectBtn: {
-    paddingVertical: 4,
-    paddingHorizontal: spacing.sm,
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: colors.error,
-    alignItems: 'center',
-    alignSelf: 'flex-end',
-  },
-  disconnectBtnText: {
-    color: colors.error,
-    fontWeight: '700',
-    fontSize: fontSize.xs,
-  },
 });
 }
