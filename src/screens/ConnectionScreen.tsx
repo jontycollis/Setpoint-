@@ -1293,16 +1293,16 @@ function makeStyles(colors: ThemeColors) {
     borderBottomWidth: 1,
     borderBottomColor: colors.divider,
     paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.sm,
+    paddingVertical: 4,
   },
   chipsBarInner: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: 4,
   },
   chip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
     borderRadius: borderRadius.full,
     borderWidth: 1,
     borderColor: colors.border,
@@ -1331,23 +1331,26 @@ function makeStyles(colors: ThemeColors) {
   },
 
   footer: {
-    padding: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.divider,
+    alignItems: 'flex-end',
   },
   disconnectBtn: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.md,
+    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    borderRadius: borderRadius.sm,
     borderWidth: 1,
     borderColor: colors.error,
     alignItems: 'center',
+    alignSelf: 'flex-end',
   },
   disconnectBtnText: {
     color: colors.error,
     fontWeight: '700',
-    fontSize: fontSize.sm,
+    fontSize: fontSize.xs,
   },
 });
 }
