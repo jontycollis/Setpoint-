@@ -132,6 +132,7 @@ import type {
   TournamentYear,
 } from './src/config/tournaments';
 import type { SavedTimuTournament, TimuTournamentInfo } from './src/types/timu';
+import type { UnifiedTournamentEntry } from './src/utils/unifiedSeasonHistory';
 
 type Screen =
   | 'MyHome'
@@ -1479,6 +1480,69 @@ export default function App() {
     [currentEvent, currentTeam, screen]
   );
 
+  // ── Open an upcoming-tournament card from a TeamDashboard ─────────────
+  // The `UpcomingTournamentsSection` (rendered on AES + Timu team
+  // dashboards) calls this when a card is tapped. We re-use the same
+  // routing as favorites for AES so the user lands on TeamDashboard with
+  // event + division + their own team selected, and the same direct
+  // state push for Timu so they land on TimuTeamDashboard.
+  const handleOpenUnifiedEntry = useCallback(
+    (entry: UnifiedTournamentEntry) => {
+      if (entry.source === 'aes') {
+        if (!entry.eventKey || !entry.divisionId || !entry.myTeamId) {
+          Alert.alert(
+            "Can't open this tournament yet",
+            'This event is in our index but the team-id link is missing. Re-open it from the tournament list once to refresh the link.'
+          );
+          return;
+        }
+        const teamName = entry.myTeamAsSeen || '';
+        handleNavigateToFavorite({
+          source: 'aes',
+          eventKey: entry.eventKey,
+          eventName: entry.tournamentName,
+          teamId: entry.myTeamId,
+          teamName,
+          teamText: teamName,
+          teamCode: '',
+          clubName: '',
+          divisionId: entry.divisionId,
+          divisionName: entry.subtitle || '',
+          divisionColorHex: entry.divisionColorHex || '',
+        });
+        return;
+      }
+      if (entry.source === 'timu') {
+        if (!entry.tid || !entry.myTeamAsSeen) {
+          Alert.alert(
+            "Can't open this tournament yet",
+            "We don't have the Timu tournament id for this entry. Re-open the team from the Timu tournament once to refresh the link."
+          );
+          return;
+        }
+        setCurrentTimuTid(entry.tid);
+        setCurrentTimuTeamName(entry.myTeamAsSeen);
+        setAesScope(null);
+        setScreenHistory((prev) => [...prev, screen]);
+        setScreen('TimuTeamDashboard');
+        pushRecentlyViewedAndNotify({
+          kind: 'team-timu',
+          tid: entry.tid,
+          teamName: entry.myTeamAsSeen,
+          label: entry.myTeamAsSeen,
+          subtitle: entry.tournamentName,
+          touchedAt: Date.now(),
+        });
+        return;
+      }
+      Alert.alert(
+        "Can't open this tournament",
+        "This entry came from a locally-scored match and doesn't link back to a tournament dashboard."
+      );
+    },
+    [handleNavigateToFavorite, screen]
+  );
+
   const handleMenuNavigate = useCallback(
     (dest: MenuDestination) => {
       switch (dest) {
@@ -2119,6 +2183,7 @@ export default function App() {
               if (!profileMatch || profileMatch.kind !== 'me') return undefined;
               return () => handleOpenRosterEditor(profileMatch);
             })()}
+            onOpenUpcomingTournament={handleOpenUnifiedEntry}
           />
         );
       case 'MyTeams':
@@ -2473,6 +2538,7 @@ export default function App() {
               if (!profileMatch || profileMatch.kind !== 'me') return undefined;
               return () => handleOpenRosterEditor(profileMatch);
             })()}
+            onOpenUpcomingTournament={handleOpenUnifiedEntry}
           />
         );
       case 'TimuOpponentScout':
