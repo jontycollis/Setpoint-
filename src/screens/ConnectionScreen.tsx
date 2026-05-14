@@ -296,9 +296,12 @@ export function ConnectionScreen({
 
   return (
     <View style={styles.container}>
-      {/* Slim hero at top: single row of back / title / status / disconnect.
-          Subtitle only shows pre-connect; once logged in the bar is one
-          line so the WebView gets the rest of the screen. */}
+      {/* Slim hero at top: back / title / status. Disconnect lives in
+          the bottom toolbar instead — keeping it out of the hero
+          avoids a visual collision with the SetPoint hamburger
+          overlay that floats over the top-right of every screen.
+          The hero's right-padding leaves a clear gutter for that
+          overlay so the status chip doesn't sit underneath it. */}
       <View style={styles.hero}>
         <View style={styles.heroRow}>
           <TouchableOpacity
@@ -327,15 +330,6 @@ export function ConnectionScreen({
               {connected ? 'Connected' : 'Not connected'}
             </Text>
           </View>
-          {connected ? (
-            <TouchableOpacity
-              onPress={handleDisconnect}
-              hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-              activeOpacity={0.7}
-            >
-              <Text style={styles.heroDisconnect}>Disconnect</Text>
-            </TouchableOpacity>
-          ) : null}
         </View>
         {!connected ? (
           <Text style={styles.heroSubtitle}>
@@ -534,6 +528,17 @@ export function ConnectionScreen({
         <Text style={styles.toolbarUrl} numberOfLines={1}>
           {prettifyUrl(currentUrl)}
         </Text>
+        {connected ? (
+          <TouchableOpacity
+            onPress={handleDisconnect}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            style={styles.toolbarDisconnect}
+            accessibilityLabel={`Disconnect ${config.serviceName}`}
+          >
+            <Text style={styles.toolbarDisconnectText}>Disconnect</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
   );
@@ -614,6 +619,19 @@ const POSTLOGIN_CSS = `
   body {
     background: #f5f5f5 !important;
     color: #1a1a1a !important;
+  }
+
+  /* Hide the host site's bulky footer on every post-login page.
+     Site footers tend to be copyright + utility links that aren't
+     useful inside an embedded WebView and just steal vertical
+     real estate. Header and nav stay visible so users can still
+     navigate via the site's own UI. */
+  footer, .footer, #footer,
+  .site-footer, .siteFooter,
+  .page-footer, .pageFooter,
+  .bottomFooter, .bottom-footer,
+  .sf-footer, .sfFooter {
+    display: none !important;
   }
 
   /* Content cards — soften the host's stock card chrome to the
@@ -1004,20 +1022,22 @@ export const MRS_CONFIG: ConnectionConfig = {
   serviceName: 'OVA MRS',
   loginUrl: 'https://mrs.ontariovolleyball.org/Account/Login',
   loginUrlPattern: /\/Account\/Login/i,
-  // Hide MRS's post-login "Welcome, <name>" greeting strip. The strip
-  // restates info already visible in the SetPoint chrome and just
-  // pushes the actual dashboard content below the fold on a phone.
-  // Several class/id patterns are listed because MRS's markup hasn't
-  // been pinned down — if the banner survives this set, swap in the
-  // exact selector from a DOM inspection.
+  // Hide MRS's post-login "Welcome, <name>" greeting strip. The
+  // SetPoint chrome already conveys connection state; the inline
+  // greeting just pushes real content below the fold.
+  //
+  // Only specific class/id patterns — earlier broader selectors
+  // (.welcome, .greeting, .dashboard-header) had a high false-
+  // positive rate and were hiding legitimate content (My Certs etc).
   injectedCss: `
     .welcome-banner, .welcomeBanner, #welcome-banner, #welcomeBanner,
-    .welcome, .welcomeMessage, .welcome-message, .welcome-msg,
+    .welcomeMessage, .welcome-message, .welcome-msg,
     .welcome-alert, .alert-welcome,
+    .welcome-section, .welcome-container, .welcomeBox,
     .member-welcome, .memberWelcome, .member-banner, .memberBanner,
     .user-welcome, .userWelcome, .user-greeting, .userGreeting,
     .dashboard-banner, .dashboardBanner,
-    .greeting, .greeting-bar, .greetingBar,
+    .greeting-bar, .greetingBar,
     .hero-welcome, .welcome-hero {
       display: none !important;
     }
@@ -1039,23 +1059,23 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
   // overlay heading fix, and tab tap-target sizing.
   injectedCss: `
     /* Hide CAC's post-login welcome / dashboard greeting strip.
-       Equivalent of the MRS welcome-banner hide — same intent: the
-       SetPoint chrome already conveys "you're connected to CAC", so
-       restating it as a banner just wastes vertical space. Several
-       common Sitefinity / .NET / generic patterns are covered. If a
-       specific banner survives this set, swap in its exact selector. */
+       Same intent as MRS — the SetPoint chrome already conveys
+       "you're connected", so restating it as a banner wastes space.
+       Only specific class/id patterns — earlier broader selectors
+       (.welcome, .greeting, .dashboard-header) hid My Certifications
+       and similar legitimate content. */
     .welcome-banner, .welcomeBanner, #welcome-banner, #welcomeBanner,
-    .welcome, .welcomeMessage, .welcome-message, .welcome-msg,
+    .welcomeMessage, .welcome-message, .welcome-msg,
+    .welcome-alert, .alert-welcome,
     .welcome-section, .welcome-container, .welcomeBox,
-    .coach-welcome, .coachWelcome, .coach-greeting, .coachGreeting,
+    .coach-welcome, .coachWelcome,
     .user-welcome, .userWelcome, .user-greeting, .userGreeting,
     .member-welcome, .memberWelcome,
     .dashboard-greeting, .dashboardGreeting,
-    .dashboard-header, .dashboardHeader,
     .dashboard-banner, .dashboardBanner,
-    .sfWelcome, .sfGreeting, .sfBanner, .sfNewsBanner, .sfAnnouncement,
+    .sfWelcome, .sfNewsBanner, .sfAnnouncement,
     .news-banner, .newsBanner, .announcement-banner, .announcementBanner,
-    .greeting, .greeting-bar, .greetingBar,
+    .greeting-bar, .greetingBar,
     .hero-welcome, .welcome-hero {
       display: none !important;
     }
@@ -1133,9 +1153,11 @@ function makeStyles(colors: ThemeColors) {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   // ── Slim hero ─────────────────────────────────────────────────────
-  // Top safe-area inset is consumed by the top padding so the back
-  // button clears the status bar; horizontal padding stays generous
-  // enough for thumb hit-targets without wasting vertical space.
+  // Top padding clears the status bar; horizontal padding stays
+  // generous enough for thumb hit-targets without wasting vertical
+  // space. The heroRow itself adds extra right-padding so the title
+  // and status chip don't sit underneath the global SetPoint
+  // hamburger overlay that floats over the top-right.
   hero: {
     backgroundColor: colors.primary,
     paddingHorizontal: spacing.md,
@@ -1151,18 +1173,15 @@ function makeStyles(colors: ThemeColors) {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
+    // Clear gutter on the right for the global hamburger overlay
+    // (rendered at right: 8 in App.tsx with a ~36px hit target).
+    paddingRight: 48,
   },
   heroTitle: {
     color: colors.textOnPrimary,
     fontSize: fontSize.lg,
     fontWeight: '800',
     flex: 1,
-  },
-  heroDisconnect: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: fontSize.xs,
-    fontWeight: '700',
-    textDecorationLine: 'underline',
   },
   heroSubtitle: {
     color: 'rgba(255,255,255,0.8)',
@@ -1225,6 +1244,19 @@ function makeStyles(colors: ThemeColors) {
     marginLeft: spacing.sm,
     color: colors.textSecondary,
     fontSize: fontSize.xs,
+  },
+  toolbarDisconnect: {
+    marginLeft: spacing.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  toolbarDisconnectText: {
+    color: colors.error,
+    fontSize: fontSize.xs,
+    fontWeight: '700',
   },
 
   // ── Inline error banner ─────────────────────────────────────────────
