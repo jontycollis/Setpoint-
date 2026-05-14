@@ -147,6 +147,13 @@ export function ConnectionScreen({
   // next successful navigation.
   const [lastError, setLastError] = useState<string | null>(null);
 
+  // Chips scraped from the host site's own navigation (postMessage'd
+  // by the injected script on each non-login page load). When this is
+  // non-empty we render it INSTEAD of `config.chips` so the buttons
+  // always point at URLs the site actually serves — no more 404
+  // chip-tap roulette. Capture URL still appears as "↺ My Profile".
+  const [discoveredChips, setDiscoveredChips] = useState<ConnectionChip[]>([]);
+
   // Load any persisted captured URL on mount so the very next login
   // can redirect there immediately.
   useEffect(() => {
@@ -362,33 +369,43 @@ export function ConnectionScreen({
         </Text>
       </View>
 
-      {connected && config.chips && config.chips.length > 0 && (
-        <View style={styles.chipsBar}>
-          <View style={styles.chipsBarInner}>
-            {capturedUrl ? (
-              <TouchableOpacity
-                style={[styles.chip, styles.chipPrimary]}
-                onPress={() => navigateTo(capturedUrl)}
-                activeOpacity={0.7}
-              >
-                <Text style={[styles.chipText, styles.chipTextPrimary]}>
-                  ↺ My Profile
-                </Text>
-              </TouchableOpacity>
-            ) : null}
-            {config.chips.map((c) => (
-              <TouchableOpacity
-                key={c.url}
-                style={styles.chip}
-                onPress={() => navigateTo(c.url)}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.chipText}>{c.label}</Text>
-              </TouchableOpacity>
-            ))}
+      {connected && (() => {
+        // Prefer chips discovered from the site's own nav. Fall back
+        // to the speculative config-side chips only when discovery
+        // hasn't returned anything yet (or in case the site has no
+        // findable nav). Capture-URL chip stays visible either way.
+        const chipsToRender = discoveredChips.length > 0
+          ? discoveredChips
+          : (config.chips ?? []);
+        if (chipsToRender.length === 0 && !capturedUrl) return null;
+        return (
+          <View style={styles.chipsBar}>
+            <View style={styles.chipsBarInner}>
+              {capturedUrl ? (
+                <TouchableOpacity
+                  style={[styles.chip, styles.chipPrimary]}
+                  onPress={() => navigateTo(capturedUrl)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.chipText, styles.chipTextPrimary]}>
+                    ↺ My Profile
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+              {chipsToRender.map((c) => (
+                <TouchableOpacity
+                  key={c.url}
+                  style={styles.chip}
+                  onPress={() => navigateTo(c.url)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.chipText}>{c.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
           </View>
-        </View>
-      )}
+        );
+      })()}
 
       {/* Last-load error banner — dismissible, non-blocking. Shows up
           when a chip URL 404s or a network call fails. The toolbar
@@ -417,6 +434,27 @@ export function ConnectionScreen({
           onNavigationStateChange={handleNavigationStateChange}
           onLoadStart={() => setLoading(true)}
           onLoadEnd={() => setLoading(false)}
+          // Receive nav-link payloads from the injected scraper. The
+          // host site's real nav links replace the speculative chips
+          // configured in MRS_CONFIG / CAC_LOCKER_CONFIG.
+          onMessage={(e) => {
+            try {
+              const msg = JSON.parse(e.nativeEvent.data);
+              if (msg && msg.type === 'navLinks' && Array.isArray(msg.links)) {
+                const cleaned: ConnectionChip[] = msg.links
+                  .filter(
+                    (l: unknown): l is { label: string; url: string } =>
+                      !!l &&
+                      typeof (l as { label?: unknown }).label === 'string' &&
+                      typeof (l as { url?: unknown }).url === 'string'
+                  )
+                  .slice(0, 8);
+                if (cleaned.length > 0) setDiscoveredChips(cleaned);
+              }
+            } catch {
+              // Ignore malformed payloads.
+            }
+          }}
           // Persist cookies so a logged-in session survives between launches.
           sharedCookiesEnabled
           thirdPartyCookiesEnabled
@@ -571,6 +609,98 @@ const MINIMAL_CSS = `
     padding: 12px !important;
     border-radius: 8px !important;
     margin: 12px 0 !important;
+  }
+`;
+
+// ── Post-login visual polish ──────────────────────────────────────────────
+// Applied on every non-login page. Styles content-bearing elements
+// (cards, tables, headings) to feel like a SetPoint screen — rounded
+// white cards on a light-grey body, accent-blue links, clean tables —
+// WITHOUT touching layout-defining selectors. Specifically:
+//   - no `form` selector (that turned every inline form into a card)
+//   - no `.container` / `.row` / `.col` resets (breaks Bootstrap)
+//   - no width/margin overrides on .panel/.card (breaks side-by-side
+//     layouts and grid placement)
+// Net effect: the host site's grid still does its job, but the cards
+// and tables that LIVE inside it look like SetPoint cards and tables.
+const POSTLOGIN_CSS = `
+  body {
+    background: #f5f5f5 !important;
+    color: #1a1a1a !important;
+  }
+
+  /* Content cards — soften the host's stock card chrome to the
+     rounded white look SetPoint uses elsewhere. Padding/margin stay
+     conservative so we don't disrupt nested layouts. */
+  .panel, .panel-default, .panel-body,
+  .card, .card-body, .well, .tile, .dashboard-tile,
+  .sfDataItem, .alert, .cert-card, .renewal-card {
+    background: #ffffff !important;
+    border: 1px solid #e0e0e0 !important;
+    border-radius: 12px !important;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04) !important;
+  }
+  .panel-heading, .card-header {
+    background: #ffffff !important;
+    border-bottom: 1px solid #eeeeee !important;
+    font-weight: 700 !important;
+    color: #1a1a1a !important;
+  }
+
+  /* Tables — match SetPoint's data-table styling: header row tinted
+     with the primary blue at low alpha, alt rows banded, padding
+     generous enough for thumb-tap. */
+  table, .sfTable, .data-table, .grid-table, table.table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    background: #ffffff !important;
+    border-radius: 8px !important;
+    overflow: hidden !important;
+    font-size: 14px !important;
+  }
+  th, td, .sfTable th, .sfTable td {
+    padding: 10px 8px !important;
+    text-align: left !important;
+    vertical-align: top !important;
+    border-bottom: 1px solid #eeeeee !important;
+  }
+  th, .sfTable th, table.table th {
+    background: #f0f4ff !important;
+    color: #1a1a1a !important;
+    font-weight: 700 !important;
+    font-size: 13px !important;
+  }
+  tr:nth-child(even) td {
+    background: #fafafa !important;
+  }
+
+  /* Headings — bigger / cleaner so the page hierarchy reads on a
+     phone. No padding/position resets — those broke the bg-icon
+     trick CAC uses on some pages and we no longer need that
+     workaround now that the site nav is visible. */
+  h1, h2, h3, .pageTitle, .pageHeading, .sectionHeader {
+    color: #1a1a1a !important;
+    font-weight: 700 !important;
+  }
+  h1, .pageTitle { font-size: 22px !important; line-height: 1.3 !important; }
+  h2, .pageHeading { font-size: 19px !important; line-height: 1.3 !important; }
+  h3, .sectionHeader { font-size: 17px !important; line-height: 1.3 !important; }
+
+  /* Links — SetPoint blue. Exclude anything styled as a button so
+     CTA buttons keep their pill chrome. */
+  a:not(.btn):not(.button):not([role="button"]) {
+    color: #1a73e8 !important;
+  }
+
+  /* Submit-style CTA buttons get our primary blue treatment. Other
+     buttons (filters, dropdowns) keep their host styling so they
+     still feel at home in the site's own toolbars. */
+  button[type="submit"], input[type="submit"], .btn-primary {
+    background: #1a73e8 !important;
+    color: #ffffff !important;
+    border: 0 !important;
+    border-radius: 8px !important;
+    font-weight: 700 !important;
   }
 `;
 
@@ -732,21 +862,87 @@ function buildInjectedScript(
           document.head.appendChild(s2);
         }
 
-        // LOGIN_ONLY_CSS: gate by URL. Add when on login, remove when
-        // we've navigated away (so post-login dashboards aren't
-        // wrecked by the form-card and container-reset rules).
+        // LOGIN_ONLY_CSS vs POSTLOGIN_CSS: swap based on URL. Login
+        // gets the heavy form-card + chrome-hiding treatment; every
+        // other page gets the lighter SetPoint-flavoured polish.
         var isLoginPage = new RegExp(
           ${JSON.stringify(loginUrlPatternSrc)},
           ${JSON.stringify(loginUrlPatternFlags)}
         ).test(location.href);
         var loginStyle = document.getElementById('__vbplus_login_css__');
-        if (isLoginPage && !loginStyle) {
-          var s3 = document.createElement('style');
-          s3.id = '__vbplus_login_css__';
-          s3.textContent = ${JSON.stringify(LOGIN_ONLY_CSS)};
-          document.head.appendChild(s3);
-        } else if (!isLoginPage && loginStyle) {
-          loginStyle.parentNode && loginStyle.parentNode.removeChild(loginStyle);
+        var postStyle = document.getElementById('__vbplus_postlogin_css__');
+        if (isLoginPage) {
+          if (!loginStyle) {
+            var s3 = document.createElement('style');
+            s3.id = '__vbplus_login_css__';
+            s3.textContent = ${JSON.stringify(LOGIN_ONLY_CSS)};
+            document.head.appendChild(s3);
+          }
+          if (postStyle) postStyle.parentNode && postStyle.parentNode.removeChild(postStyle);
+        } else {
+          if (loginStyle) loginStyle.parentNode && loginStyle.parentNode.removeChild(loginStyle);
+          if (!postStyle) {
+            var s4 = document.createElement('style');
+            s4.id = '__vbplus_postlogin_css__';
+            s4.textContent = ${JSON.stringify(POSTLOGIN_CSS)};
+            document.head.appendChild(s4);
+          }
+        }
+
+        // ── Dynamic chip discovery ────────────────────────────────
+        // On every non-login page, scrape the real navigation links
+        // from the site and post them back to the host. The host
+        // replaces its (speculative, sometimes 404-ing) chip strip
+        // with these guaranteed-working URLs.
+        function vbpScrapeNav() {
+          try {
+            var containers = document.querySelectorAll(
+              'nav, header nav, header, [role="navigation"], ' +
+              '.navbar, .navbar-nav, .nav, .main-nav, .mainNav, ' +
+              '.site-nav, .siteNav, .topnav, .top-nav, .primary-nav, ' +
+              '.menu, .main-menu, .siteMenu, .accountNav, .userNav'
+            );
+            var seen = {};
+            var out = [];
+            for (var i = 0; i < containers.length && out.length < 8; i++) {
+              var anchors = containers[i].querySelectorAll('a[href]');
+              for (var j = 0; j < anchors.length && out.length < 8; j++) {
+                var a = anchors[j];
+                var label = (a.textContent || '').replace(/\\s+/g, ' ').trim();
+                var href = a.href || '';
+                if (!label || !href) continue;
+                if (label.length > 32 || label.length < 2) continue;
+                if (href.indexOf('javascript:') === 0) continue;
+                if (/^https?:/i.test(href) === false) continue;
+                // Stay on the same host so we don't link out to
+                // external resources (help docs, social media).
+                try {
+                  var u = new URL(href);
+                  if (u.host !== location.host) continue;
+                } catch (e) {}
+                // Skip auth-related links — sign-out belongs to the
+                // app's Disconnect button, not a chip.
+                if (/log\\s*out|sign\\s*out|logout|signout/i.test(label)) continue;
+                if (/log\\s*in|sign\\s*in/i.test(label)) continue;
+                // De-dupe by URL (without hash/query).
+                var key = href.replace(/[#?].*$/, '');
+                if (seen[key]) continue;
+                seen[key] = true;
+                out.push({ label: label, url: href });
+              }
+            }
+            if (out.length > 0 && window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(
+                JSON.stringify({ type: 'navLinks', links: out })
+              );
+            }
+          } catch (err) {}
+        }
+        if (!isLoginPage) {
+          // Run immediately; also retry once after 500ms in case the
+          // site renders its nav asynchronously (some SPAs do).
+          vbpScrapeNav();
+          setTimeout(vbpScrapeNav, 500);
         }
       } catch (e) {}
       true;
@@ -821,18 +1017,10 @@ export const MRS_CONFIG: ConnectionConfig = {
   serviceName: 'OVA MRS',
   loginUrl: 'https://mrs.ontariovolleyball.org/Account/Login',
   loginUrlPattern: /\/Account\/Login/i,
-  // The generic READABILITY_CSS already turns ASP.NET MVC markup into a
-  // clean card. This slot is reserved for MRS-specific tweaks we
-  // discover after testing on the actual page.
-  // Best-effort shortcut chips. URLs are guesses based on common
-  // ASP.NET MVC routing conventions — tell us which ones 404 and we'll
-  // swap in the real routes.
-  chips: [
-    { label: 'My Profile', url: 'https://mrs.ontariovolleyball.org/Member/Profile' },
-    { label: 'Affiliations', url: 'https://mrs.ontariovolleyball.org/Member/Affiliations' },
-    { label: 'Memberships', url: 'https://mrs.ontariovolleyball.org/Member/Memberships' },
-    { label: 'Events', url: 'https://mrs.ontariovolleyball.org/Member/Events' },
-  ],
+  // No speculative chips — they 404'd consistently. The injected
+  // scraper picks up the real nav links from the post-login page and
+  // posts them back via `onMessage`, so the chip strip is always
+  // populated with URLs the site actually serves.
 };
 
 export const CAC_LOCKER_CONFIG: ConnectionConfig = {
@@ -954,14 +1142,11 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
   // profile instead of the announcements dashboard.
   captureUrlPattern: /thelocker\.coach\.ca\/account\/detail\/\d+/i,
   captureStorageKey: 'connection.cac.coachDetailUrl',
-  // Best-effort shortcut chips. URLs are guesses; correct any that 404.
-  chips: [
-    { label: 'My Certifications', url: 'https://thelocker.coach.ca/account/myCertifications' },
-    { label: 'Transcript', url: 'https://thelocker.coach.ca/account/transcripts/personal/Index' },
-    { label: 'Coach Info', url: 'https://thelocker.coach.ca/account/coachInfoSheet' },
-    { label: 'Events', url: 'https://thelocker.coach.ca/account/myEvents' },
-    { label: 'Renewals', url: 'https://thelocker.coach.ca/account/myRenewals' },
-  ],
+  // No speculative chips — the user reported the previous static
+  // list (My Certifications, Transcript, etc.) gave "page not
+  // available" on tap. The injected scraper reads the real nav
+  // links from each post-login page and posts them back via
+  // `onMessage`, replacing this list with URLs the site serves.
 };
 
 // ── Styles ────────────────────────────────────────────────────────────────
