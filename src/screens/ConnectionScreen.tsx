@@ -436,7 +436,11 @@ export function ConnectionScreen({
           // every page load. We do this rather than wrapping the page
           // because both services render the form via server templates
           // we can't easily restyle from the host side.
-          injectedJavaScript={buildInjectedScript(config.injectedCss)}
+          injectedJavaScript={buildInjectedScript(
+            config.loginUrlPattern.source,
+            config.loginUrlPattern.flags,
+            config.injectedCss
+          )}
           // Surface load failures (404s on chip URLs, network errors,
           // certificate failures) in dev so we can fix bad chip routes
           // without the user having to flag each one. Best-effort logs;
@@ -522,9 +526,61 @@ export function ConnectionScreen({
 // successful (without that, RN warns).
 // ────────────────────────────────────────────────────────────────────────────
 
-const READABILITY_CSS = `
-  /* ─── Reset and fundamentals ──────────────────────────────────── */
+// ── Minimal CSS (every page) ──────────────────────────────────────────────
+// Conservative styling that won't break the service's own layout. We do
+// just enough to make tap targets phone-friendly and to silence the
+// most universally-annoying noise (cookie banners, ad slots). No
+// container resets, no body padding overrides, no `form` selector —
+// those broke post-login dashboards (MRS uses Bootstrap, so `.row`,
+// `.col`, `.panel.panel-default` are load-bearing on its dashboards).
+const MINIMAL_CSS = `
   html { -webkit-text-size-adjust: 100% !important; }
+
+  /* Silence universally-annoying noise. Site-specific chrome (header,
+     nav, footer) is NOT hidden here — that breaks the post-login
+     dashboards. Login pages get those hidden via LOGIN_ONLY_CSS. */
+  .cookie-notice, #cookieNotice, .cookie-banner,
+  .ad, .ads, .advertisement,
+  iframe[src*="googletag"], iframe[src*="doubleclick"] {
+    display: none !important;
+  }
+
+  /* Touch-friendly inputs/buttons without forcing width or layout. */
+  input[type="text"], input[type="email"], input[type="password"],
+  input[type="tel"], input[type="number"], input[type="search"],
+  select, textarea {
+    min-height: 44px !important;
+    font-size: 16px !important;
+    box-sizing: border-box !important;
+  }
+  input[type="submit"], button, .btn {
+    min-height: 44px !important;
+    font-size: 16px !important;
+    cursor: pointer !important;
+  }
+  input:focus, select:focus, textarea:focus {
+    outline: 2px solid #1a73e8 !important;
+    outline-offset: 1px !important;
+  }
+
+  /* Validation summary stays readable on a phone screen. */
+  .validation-summary-errors, .alert-danger, .text-danger {
+    background: #fff3ee !important;
+    border-left: 4px solid #ff6b35 !important;
+    color: #1a1a1a !important;
+    padding: 12px !important;
+    border-radius: 8px !important;
+    margin: 12px 0 !important;
+  }
+`;
+
+// ── Login-only CSS ────────────────────────────────────────────────────────
+// Applied only when the URL matches the service's login pattern. Heavy-
+// handed because the login pages are simple forms we can confidently
+// restyle — no risk of nuking a dashboard's layout. Selectors include
+// the form-card treatment, wrapper reset, and chrome hiding that used
+// to live in the universal CSS.
+const LOGIN_ONLY_CSS = `
   html, body {
     margin: 0 !important;
     padding: 0 !important;
@@ -533,37 +589,29 @@ const READABILITY_CSS = `
   body {
     font-size: 17px !important;
     line-height: 1.5 !important;
-    /* Top padding so content doesn't slip under the SetPoint hamburger
-       overlay; right padding for the same reason on the top-right. */
-    padding-top: 64px !important;
-    padding-right: 60px !important;
-    padding-left: 16px !important;
-    padding-bottom: 16px !important;
+    padding: 24px 16px !important;
     box-sizing: border-box !important;
     min-height: 100vh !important;
   }
 
-  /* ─── Hide layout chrome that wastes vertical space and clutters
-         the login form. These selectors are no-ops on pages that
-         don't use them — safe to fire universally. ─────────────── */
+  /* Hide layout chrome on the login page itself — it's just noise
+     when the goal is "sign in and move on". These selectors stay
+     scoped to login pages only. */
   header, footer, nav, aside,
   .navbar, .navbar-default, .navbar-fixed-top, .navbar-header,
   .site-header, .site-footer, .header, .footer,
   .top-bar, .topbar, .top-banner, .promo, .promo-banner,
   .breadcrumb, .breadcrumbs,
   .sidebar, .left-sidebar, .right-sidebar,
-  .skip-link, .skiplinks,
-  .cookie-notice, #cookieNotice, .cookie-banner,
-  .ad, .ads, .advertisement,
-  iframe[src*="googletag"], iframe[src*="doubleclick"] {
+  .skip-link, .skiplinks {
     display: none !important;
   }
 
-  /* ─── Form card ───────────────────────────────────────────────── */
-  form,
+  /* Centered form card. Narrowly targeted — the bare 'form' selector
+     caught too much; here we require a login-shaped class/id. */
   .login-form, .login-panel, .login-container,
-  .panel.panel-default, .panel-body,
-  #loginForm, .auth-form, .signin-form {
+  #loginForm, .auth-form, .signin-form,
+  form[action*="Login" i], form[action*="signin" i], form[action*="account" i] {
     background: #ffffff !important;
     border: 1px solid #e0e0e0 !important;
     border-radius: 14px !important;
@@ -574,8 +622,9 @@ const READABILITY_CSS = `
     box-sizing: border-box !important;
     box-shadow: 0 2px 12px rgba(0,0,0,0.06) !important;
   }
-  /* When the form lives inside a wrapper, reset wrapper margins so
-     the card we built above is the only visible chrome. */
+
+  /* On login pages only, reset wrapping containers so our card sits
+     in clean whitespace instead of nested grey panels. */
   main, .main, .container, .container-fluid, .content, #content,
   .row, .col, [class^="col-"], .wrap, .wrapper {
     background: transparent !important;
@@ -586,7 +635,6 @@ const READABILITY_CSS = `
     max-width: 100% !important;
   }
 
-  /* ─── Form titles ─────────────────────────────────────────────── */
   h1, h2, h3, .panel-title, .login-title, .auth-title {
     font-size: 22px !important;
     line-height: 1.3 !important;
@@ -595,55 +643,30 @@ const READABILITY_CSS = `
     font-weight: 700 !important;
   }
 
-  /* ─── Inputs ──────────────────────────────────────────────────── */
+  /* Inputs get the full-width card treatment on the login page. */
   input[type="text"], input[type="email"], input[type="password"],
-  input[type="tel"], input[type="number"], input[type="search"],
-  select, textarea, .form-control {
-    font-size: 17px !important;
-    min-height: 48px !important;
-    padding: 12px 14px !important;
+  input[type="tel"], select, textarea, .form-control {
     width: 100% !important;
     max-width: 100% !important;
-    box-sizing: border-box !important;
+    padding: 12px 14px !important;
     border-radius: 10px !important;
     border: 1px solid #c0c0c0 !important;
     background: #ffffff !important;
     color: #1a1a1a !important;
   }
-  input:focus, select:focus, textarea:focus {
-    outline: 2px solid #1a73e8 !important;
-    outline-offset: 1px !important;
-    border-color: #1a73e8 !important;
-  }
 
-  /* ─── Buttons ─────────────────────────────────────────────────── */
-  input[type="submit"], input[type="button"], button, .btn,
-  .btn-primary, .btn-default {
-    font-size: 17px !important;
-    min-height: 48px !important;
-    padding: 12px 16px !important;
-    width: 100% !important;
-    max-width: 100% !important;
-    box-sizing: border-box !important;
-    border-radius: 10px !important;
-    font-weight: 700 !important;
-    margin-top: 8px !important;
-    cursor: pointer !important;
-  }
-  /* Primary submit-style button — use the SetPoint blue. */
+  /* Login-page buttons go full-width too. */
   input[type="submit"], button[type="submit"], .btn-primary {
+    width: 100% !important;
     background: #1a73e8 !important;
     color: #ffffff !important;
     border: 0 !important;
-  }
-  /* Secondary / non-submit buttons — outlined. */
-  button:not([type="submit"]), .btn-default {
-    background: #ffffff !important;
-    color: #1a73e8 !important;
-    border: 1px solid #1a73e8 !important;
+    border-radius: 10px !important;
+    padding: 12px 16px !important;
+    margin-top: 8px !important;
+    font-weight: 700 !important;
   }
 
-  /* ─── Labels and form groups ──────────────────────────────────── */
   label, .control-label, .form-label {
     font-size: 14px !important;
     font-weight: 600 !important;
@@ -653,26 +676,8 @@ const READABILITY_CSS = `
   }
   .form-group, .field, .form-field { margin-bottom: 14px !important; }
 
-  /* ─── Links + helper text ─────────────────────────────────────── */
-  a {
-    font-size: 15px !important;
-    color: #1a73e8 !important;
-    text-decoration: none !important;
-  }
-  .help-block, .form-text, small { font-size: 13px !important; color: #666 !important; }
+  a { color: #1a73e8 !important; }
 
-  /* ─── Validation summary / error messaging ────────────────────── */
-  .validation-summary-errors, .alert-danger, .text-danger {
-    background: #fff3ee !important;
-    border-left: 4px solid #ff6b35 !important;
-    color: #1a1a1a !important;
-    padding: 12px !important;
-    border-radius: 8px !important;
-    margin: 12px 0 !important;
-    font-size: 14px !important;
-  }
-
-  /* ─── Checkbox row ("Remember me") ───────────────────────────── */
   input[type="checkbox"], input[type="radio"] {
     width: auto !important;
     min-height: 0 !important;
@@ -686,8 +691,16 @@ const READABILITY_CSS = `
   }
 `;
 
-function buildInjectedScript(extraCss?: string): string {
-  const css = READABILITY_CSS + (extraCss ? '\n' + extraCss : '');
+// Build the injected JS. `loginUrlPatternSrc` lets us apply LOGIN_ONLY_CSS
+// only when the current page is the login page; on every other URL the
+// site gets to render natively (plus MINIMAL_CSS + any service-specific
+// extras). The script re-evaluates on each navigation since RN re-runs
+// `injectedJavaScript` after every page load.
+function buildInjectedScript(
+  loginUrlPatternSrc: string,
+  loginUrlPatternFlags: string,
+  extraCss?: string
+): string {
   return `
     (function() {
       try {
@@ -700,11 +713,40 @@ function buildInjectedScript(extraCss?: string): string {
         } else {
           existing.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=5');
         }
-        if (!document.getElementById('__vbplus_readability_css__')) {
-          var s = document.createElement('style');
-          s.id = '__vbplus_readability_css__';
-          s.textContent = ${JSON.stringify(css)};
-          document.head.appendChild(s);
+
+        // Inject MINIMAL_CSS once (idempotent).
+        if (!document.getElementById('__vbplus_minimal_css__')) {
+          var s1 = document.createElement('style');
+          s1.id = '__vbplus_minimal_css__';
+          s1.textContent = ${JSON.stringify(MINIMAL_CSS)};
+          document.head.appendChild(s1);
+        }
+
+        // Service-specific extras (always on). These have already been
+        // tuned per-service to avoid the dashboard-breaking selectors.
+        var extraCss = ${JSON.stringify(extraCss || '')};
+        if (extraCss && !document.getElementById('__vbplus_extra_css__')) {
+          var s2 = document.createElement('style');
+          s2.id = '__vbplus_extra_css__';
+          s2.textContent = extraCss;
+          document.head.appendChild(s2);
+        }
+
+        // LOGIN_ONLY_CSS: gate by URL. Add when on login, remove when
+        // we've navigated away (so post-login dashboards aren't
+        // wrecked by the form-card and container-reset rules).
+        var isLoginPage = new RegExp(
+          ${JSON.stringify(loginUrlPatternSrc)},
+          ${JSON.stringify(loginUrlPatternFlags)}
+        ).test(location.href);
+        var loginStyle = document.getElementById('__vbplus_login_css__');
+        if (isLoginPage && !loginStyle) {
+          var s3 = document.createElement('style');
+          s3.id = '__vbplus_login_css__';
+          s3.textContent = ${JSON.stringify(LOGIN_ONLY_CSS)};
+          document.head.appendChild(s3);
+        } else if (!isLoginPage && loginStyle) {
+          loginStyle.parentNode && loginStyle.parentNode.removeChild(loginStyle);
         }
       } catch (e) {}
       true;
@@ -808,11 +850,14 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
   // small, content-bearing components — actual cards, alerts, tiles,
   // tables, and headings. Let the page's own layout handle the rest.
   injectedCss: `
-    /* Strip Locker chrome that wastes vertical space */
-    header, footer, nav,
-    .header, .footer, .siteHeader, .siteFooter, .site-header, .site-footer,
-    .navbar, .breadcrumb, .breadcrumbs, .sidebar,
-    #header, #footer, #nav, #navigation,
+    /* NOTE: we used to hide header/footer/nav universally here, but
+       that left users stranded on Locker dashboards (their only
+       navigation IS the site nav). The login page hides chrome via
+       LOGIN_ONLY_CSS instead — post-login the site's own header/
+       footer/nav render naturally. */
+
+    /* Strip purely cosmetic noise (skip-nav links, promo banners) that
+       have no navigation value. */
     .skip-nav, .skipNav, .accessibility-link, .alphabet-soup,
     .login-bar, .topBanner, .promoBanner {
       display: none !important;
