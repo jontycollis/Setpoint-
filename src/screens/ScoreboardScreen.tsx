@@ -1451,9 +1451,14 @@ function makeStyles(colors: ThemeColors) {
     letterSpacing: 1,
   },
   landscapeFloatingActions: {
+    // Anchored bottom-left so they're reachable in landscape without
+    // covering the score numbers. `bottom: 50` clears the slim landscape
+    // bottomBar (~22px) plus the compact WinProbabilityBar (~20px) that
+    // sits just above it — at `bottom: 30` the buttons sat on top of
+    // the win-probability indicator.
     position: 'absolute',
     left: 8,
-    bottom: 30,
+    bottom: 50,
     flexDirection: 'row',
     gap: 6,
     zIndex: 50,
