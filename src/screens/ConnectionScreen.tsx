@@ -532,11 +532,11 @@ export function ConnectionScreen({
           <TouchableOpacity
             onPress={handleDisconnect}
             activeOpacity={0.7}
-            hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.toolbarDisconnect}
             accessibilityLabel={`Disconnect ${config.serviceName}`}
           >
-            <Text style={styles.toolbarDisconnectText}>Disconnect</Text>
+            <Text style={styles.toolbarDisconnectText}>⏻</Text>
           </TouchableOpacity>
         ) : null}
       </View>
@@ -909,21 +909,45 @@ function buildInjectedScript(
             );
             var seen = {};
             var out = [];
+            var currentPath = location.pathname.replace(/\\/$/, '');
             for (var i = 0; i < containers.length && out.length < 8; i++) {
               var anchors = containers[i].querySelectorAll('a[href]');
               for (var j = 0; j < anchors.length && out.length < 8; j++) {
                 var a = anchors[j];
                 var label = (a.textContent || '').replace(/\\s+/g, ' ').trim();
+                // Use the raw href attribute, not the resolved a.href,
+                // for the dud-check — anchor-only and JS-only links
+                // resolve to absolute URLs that LOOK valid but don't
+                // actually navigate anywhere.
+                var rawHref = a.getAttribute('href') || '';
                 var href = a.href || '';
                 if (!label || !href) continue;
                 if (label.length > 32 || label.length < 2) continue;
-                if (href.indexOf('javascript:') === 0) continue;
+                // Skip dud / pseudo URLs that produce "Web page not
+                // available" when set on window.location.href:
+                //   "javascript:..." — host JS runs, no real URL
+                //   "mailto:" / "tel:" — open mail/phone client, not
+                //     a web page
+                //   "#" / "#anchor" — same-page anchor, not navigation
+                //   "" — empty href; some templates use these for
+                //     JS-handled buttons disguised as links
+                if (
+                  href.indexOf('javascript:') === 0 ||
+                  href.indexOf('mailto:') === 0 ||
+                  href.indexOf('tel:') === 0
+                ) continue;
+                if (rawHref === '' || rawHref === '#' ||
+                    rawHref.indexOf('#') === 0) continue;
                 if (/^https?:/i.test(href) === false) continue;
                 // Stay on the same host so we don't link out to
                 // external resources (help docs, social media).
                 try {
                   var u = new URL(href);
                   if (u.host !== location.host) continue;
+                  // Skip links to the page we're already on — they
+                  // navigate nowhere meaningful.
+                  var hrefPath = u.pathname.replace(/\\/$/, '');
+                  if (hrefPath === currentPath) continue;
                 } catch (e) {}
                 // Skip auth-related links — sign-out belongs to the
                 // app's Disconnect button, not a chip.
@@ -1081,9 +1105,27 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
     }
 
     /* Strip purely cosmetic noise (skip-nav links, promo banners) that
-       have no navigation value. Site nav itself stays visible. */
+       have no navigation value. */
     .skip-nav, .skipNav, .accessibility-link, .alphabet-soup,
     .login-bar, .topBanner, .promoBanner {
+      display: none !important;
+    }
+
+    /* Hide CAC's in-page horizontal nav button row at the top of every
+       post-login page. The scraper still picks up these links from the
+       DOM (display:none doesn't remove from DOM) and surfaces them as
+       chips in the bottom toolbar — so navigation still works, it just
+       lives at the bottom now. Matches the MRS layout feel.
+       Header (with the CAC logo) stays visible so the user can still
+       see which service they're on inside the WebView. */
+    nav, .navbar, .nav-bar,
+    .main-nav, .mainNav, .main-navigation, .mainNavigation,
+    .top-nav, .topnav, .topNav,
+    .primary-nav, .primaryNav,
+    .site-nav, .siteNav,
+    .account-nav, .accountNav, .user-nav, .userNav,
+    .global-nav, .globalNav,
+    [role="navigation"]:not(header [role="navigation"]) {
       display: none !important;
     }
 
@@ -1103,28 +1145,51 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
        icon rendering on top of the C" came from a background-image +
        padding-left trick. Disabling it lets the heading text read
        cleanly; inline icons (img/svg/i/.icon) inside the heading get
-       proper spacing instead of overlapping. */
-    h1, h2, h3, .pageTitle, .pageHeading, .sectionHeader {
+       proper spacing instead of overlapping.
+       Selector list also covers the cert / renewal / dashboard tile
+       header variants where the icon-overlay trick reappears
+       (e.g. "Certifications requiring renewal" card header). */
+    h1, h2, h3, h4,
+    .pageTitle, .pageHeading, .sectionHeader,
+    .cert-header, .certHeader, .cert-title, .certTitle,
+    .renewal-header, .renewalHeader, .renewal-title, .renewalTitle,
+    .tile-header, .tileHeader, .card-header, .cardHeader,
+    .panel-heading, .panelHeading,
+    .dashboard-tile-title, .dashboardTileTitle,
+    .widget-title, .widgetTitle,
+    .sfTitle, .sfHeading {
       background: none !important;
       background-image: none !important;
       padding-left: 0 !important;
       position: static !important;
     }
-    h1::before, h2::before, h3::before,
-    .pageTitle::before, .pageHeading::before, .sectionHeader::before {
+    h1::before, h2::before, h3::before, h4::before,
+    .pageTitle::before, .pageHeading::before, .sectionHeader::before,
+    .cert-header::before, .cert-title::before,
+    .renewal-header::before, .renewal-title::before,
+    .tile-header::before, .card-header::before,
+    .panel-heading::before, .widget-title::before {
       display: none !important;
       content: none !important;
     }
-    h1 img, h2 img, h3 img,
-    h1 svg, h2 svg, h3 svg,
-    h1 i, h2 i, h3 i,
-    h1 span.icon, h2 span.icon, h3 span.icon {
+    /* Any image or icon inside a heading-like element — pin it inline
+       instead of letting position:absolute drop it on top of the text. */
+    h1 img, h2 img, h3 img, h4 img,
+    h1 svg, h2 svg, h3 svg, h4 svg,
+    h1 i, h2 i, h3 i, h4 i,
+    h1 span.icon, h2 span.icon, h3 span.icon,
+    .cert-header img, .cert-title img,
+    .renewal-header img, .renewal-title img,
+    .tile-header img, .card-header img, .panel-heading img,
+    .widget-title img, .widget-title svg,
+    .pageTitle img, .pageHeading img, .sectionHeader img {
       width: auto !important;
       max-height: 1em !important;
       vertical-align: middle !important;
       display: inline-block !important;
       position: static !important;
       margin: 0 8px 0 0 !important;
+      float: none !important;
     }
 
     /* Tabs inside Locker pages — bigger tap targets. */
@@ -1220,9 +1285,9 @@ function makeStyles(colors: ThemeColors) {
     gap: 2,
   },
   toolbarBtn: {
-    minWidth: 36,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    minWidth: 32,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
     borderRadius: borderRadius.sm,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1232,8 +1297,8 @@ function makeStyles(colors: ThemeColors) {
   },
   toolbarBtnText: {
     color: colors.primary,
-    fontSize: 22,
-    lineHeight: 24,
+    fontSize: 18,
+    lineHeight: 20,
     fontWeight: '700',
   },
   toolbarBtnTextDisabled: {
@@ -1245,17 +1310,22 @@ function makeStyles(colors: ThemeColors) {
     color: colors.textSecondary,
     fontSize: fontSize.xs,
   },
+  // Disconnect lives at the far right of the toolbar. Iconic and
+  // subtle — destructive enough to be recognized (the ⏻ power glyph +
+  // error color), small enough that it doesn't compete with the URL
+  // display or the nav buttons.
   toolbarDisconnect: {
-    marginLeft: spacing.sm,
+    marginLeft: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: colors.error,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   toolbarDisconnectText: {
     color: colors.error,
-    fontSize: fontSize.xs,
+    fontSize: 16,
+    lineHeight: 18,
     fontWeight: '700',
   },
 
