@@ -56,6 +56,7 @@ import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 import { ensureAesIndexed, indexAesSnapshot, loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { addMyTeamAlias } from '../utils/seasonTeamIdentity';
 import { UpcomingTournamentsSection } from '../components/UpcomingTournamentsSection';
+import type { UnifiedTournamentEntry } from '../utils/unifiedSeasonHistory';
 
 interface Props {
   event: AESEvent;
@@ -82,6 +83,10 @@ interface Props {
    *  Surfaced in the Following action sheet only when this team is the
    *  user's primary me-team. Optional — when omitted, the row hides. */
   onManageRoster?: () => void;
+  /** Tap on an "Upcoming Tournaments" card → caller routes to that
+   *  tournament's TeamDashboard (AES or Timu, depending on the entry's
+   *  source). When omitted the cards stay non-interactive. */
+  onOpenUpcomingTournament?: (entry: UnifiedTournamentEntry) => void;
 }
 
 export function TeamDashboardScreen({
@@ -101,6 +106,7 @@ export function TeamDashboardScreen({
   onViewSeasonHistory,
   meTeamCount = 0,
   onManageRoster,
+  onOpenUpcomingTournament,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -738,6 +744,7 @@ export function TeamDashboardScreen({
       <UpcomingTournamentsSection
         aliases={[current.TeamName, current.TeamText].filter(Boolean) as string[]}
         debugLabel={`AES TeamDashboard "${current.TeamName}"`}
+        onOpenEntry={onOpenUpcomingTournament}
       />
 
 

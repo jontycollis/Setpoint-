@@ -84,7 +84,8 @@ export function UpcomingTournamentsSection({
           <TouchableOpacity
             key={entry.sourceKey}
             style={styles.card}
-            activeOpacity={0.7}
+            activeOpacity={onOpenEntry ? 0.7 : 1}
+            disabled={!onOpenEntry}
             onPress={() => onOpenEntry?.(entry)}
           >
             <View style={[styles.sourceBadge, entry.source === 'timu' ? styles.sourceBadgeTimu : styles.sourceBadgeAes]}>
@@ -104,6 +105,11 @@ export function UpcomingTournamentsSection({
                 {entry.venueName ? ` · ${entry.venueName}` : ''}
               </Text>
             </View>
+            {onOpenEntry ? (
+              <Text style={styles.chevron} accessible={false}>
+                {'›'}
+              </Text>
+            ) : null}
           </TouchableOpacity>
         ))
       )}
@@ -162,5 +168,11 @@ function makeStyles(colors: ThemeColors) {
     cardTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
     cardSubtitle: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
     cardMeta: { fontSize: fontSize.xs, color: colors.textLight, marginTop: 2 },
+    chevron: {
+      fontSize: 24,
+      color: colors.textLight,
+      marginLeft: spacing.xs,
+      lineHeight: 24,
+    },
   });
 }

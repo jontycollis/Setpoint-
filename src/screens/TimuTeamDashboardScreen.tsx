@@ -29,6 +29,7 @@ import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { Card } from '../components/Card';
 import { UpcomingTournamentsSection } from '../components/UpcomingTournamentsSection';
+import type { UnifiedTournamentEntry } from '../utils/unifiedSeasonHistory';
 import {
   VenueInfoCard,
   ContactButtonsRow,
@@ -85,6 +86,10 @@ interface Props {
    *  Surfaced in the Following action sheet only when this team is the
    *  user's primary me-team. */
   onManageRoster?: () => void;
+  /** Tap on an "Upcoming Tournaments" card → caller routes to that
+   *  tournament's TeamDashboard (AES or Timu, depending on the entry's
+   *  source). When omitted the cards stay non-interactive. */
+  onOpenUpcomingTournament?: (entry: UnifiedTournamentEntry) => void;
 
   onInfoLoaded?: (info: TimuTournamentInfo) => void;
 }
@@ -107,6 +112,7 @@ export function TimuTeamDashboardScreen({
   onClearMyTeam,
   meTeamCount = 0,
   onManageRoster,
+  onOpenUpcomingTournament,
   onInfoLoaded,
 }: Props) {
   const { colors } = useTheme();
@@ -370,6 +376,7 @@ export function TimuTeamDashboardScreen({
         <UpcomingTournamentsSection
           aliases={matchAliases.length > 0 ? matchAliases : [teamName]}
           debugLabel={`Timu TeamDashboard "${teamName}"`}
+          onOpenEntry={onOpenUpcomingTournament}
         />
 
         {/* Next match — only shown if the tournament hasn't completed. */}

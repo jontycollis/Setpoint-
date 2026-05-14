@@ -42,6 +42,13 @@ export interface UnifiedTournamentEntry {
   // AES-specific
   eventKey?: string;
   divisionId?: number;
+  /** Numeric AES team id for the user's team in this snapshot. Required
+   *  to route into TeamDashboard via `handleNavigateToFavorite` — without
+   *  it the upcoming-tournament tap can't resolve to a specific row. */
+  myTeamId?: number;
+  /** Division accent color from the AES snapshot — used to seed the
+   *  recently-viewed row when we navigate from an upcoming card. */
+  divisionColorHex?: string;
   // Timu-specific
   tid?: number;
   // Scored-specific
@@ -295,6 +302,8 @@ function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEnt
     sourceKey: `aes:${snap.eventKey}:${snap.divisionId}`,
     eventKey: snap.eventKey,
     divisionId: snap.divisionId,
+    myTeamId: snap.myTeamId,
+    divisionColorHex: snap.divisionColorHex,
     tournamentName: snap.eventName,
     subtitle: snap.divisionName,
     dateText: snap.dateText,
