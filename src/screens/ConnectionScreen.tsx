@@ -1017,6 +1017,24 @@ export const MRS_CONFIG: ConnectionConfig = {
   serviceName: 'OVA MRS',
   loginUrl: 'https://mrs.ontariovolleyball.org/Account/Login',
   loginUrlPattern: /\/Account\/Login/i,
+  // Hide MRS's post-login "Welcome, <name>" greeting strip. The strip
+  // restates info already visible in the SetPoint chrome and just
+  // pushes the actual dashboard content below the fold on a phone.
+  // Several class/id patterns are listed because MRS's markup hasn't
+  // been pinned down — if the banner survives this set, swap in the
+  // exact selector from a DOM inspection.
+  injectedCss: `
+    .welcome-banner, .welcomeBanner, #welcome-banner, #welcomeBanner,
+    .welcome, .welcomeMessage, .welcome-message, .welcome-msg,
+    .welcome-alert, .alert-welcome,
+    .member-welcome, .memberWelcome, .member-banner, .memberBanner,
+    .user-welcome, .userWelcome, .user-greeting, .userGreeting,
+    .dashboard-banner, .dashboardBanner,
+    .greeting, .greeting-bar, .greetingBar,
+    .hero-welcome, .welcome-hero {
+      display: none !important;
+    }
+  `,
   // No speculative chips — they 404'd consistently. The injected
   // scraper picks up the real nav links from the post-login page and
   // posts them back via `onMessage`, so the chip strip is always
