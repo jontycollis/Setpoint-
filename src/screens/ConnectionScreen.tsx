@@ -1032,35 +1032,45 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
   serviceName: 'CAC Locker',
   loginUrl: 'https://thelocker.coach.ca/account/login',
   loginUrlPattern: /\/account\/login/i,
-  // CAC Locker-specific polish on top of READABILITY_CSS. The site uses
-  // a custom .NET stack, not Bootstrap, so we add selectors that match
-  // its actual class names. Defensive — selectors that don't exist
-  // no-op silently.
-  //
-  // Strategy: don't force-card every wrapping container (that's what
-  // produced the "empty white block" the user reported — empty
-  // sub-containers were rendered as full-size cards). Style only the
-  // small, content-bearing components — actual cards, alerts, tiles,
-  // tables, and headings. Let the page's own layout handle the rest.
+  // CAC Locker-specific polish on top of MINIMAL_CSS + POSTLOGIN_CSS.
+  // POSTLOGIN_CSS handles the generic card / table / heading / link
+  // styling for both services. This block only adds Locker-specific
+  // tweaks — banner hiding, empty-container collapsing, the icon-
+  // overlay heading fix, and tab tap-target sizing.
   injectedCss: `
-    /* NOTE: we used to hide header/footer/nav universally here, but
-       that left users stranded on Locker dashboards (their only
-       navigation IS the site nav). The login page hides chrome via
-       LOGIN_ONLY_CSS instead — post-login the site's own header/
-       footer/nav render naturally. */
+    /* Hide CAC's post-login welcome / dashboard greeting strip.
+       Equivalent of the MRS welcome-banner hide — same intent: the
+       SetPoint chrome already conveys "you're connected to CAC", so
+       restating it as a banner just wastes vertical space. Several
+       common Sitefinity / .NET / generic patterns are covered. If a
+       specific banner survives this set, swap in its exact selector. */
+    .welcome-banner, .welcomeBanner, #welcome-banner, #welcomeBanner,
+    .welcome, .welcomeMessage, .welcome-message, .welcome-msg,
+    .welcome-section, .welcome-container, .welcomeBox,
+    .coach-welcome, .coachWelcome, .coach-greeting, .coachGreeting,
+    .user-welcome, .userWelcome, .user-greeting, .userGreeting,
+    .member-welcome, .memberWelcome,
+    .dashboard-greeting, .dashboardGreeting,
+    .dashboard-header, .dashboardHeader,
+    .dashboard-banner, .dashboardBanner,
+    .sfWelcome, .sfGreeting, .sfBanner, .sfNewsBanner, .sfAnnouncement,
+    .news-banner, .newsBanner, .announcement-banner, .announcementBanner,
+    .greeting, .greeting-bar, .greetingBar,
+    .hero-welcome, .welcome-hero {
+      display: none !important;
+    }
 
     /* Strip purely cosmetic noise (skip-nav links, promo banners) that
-       have no navigation value. */
+       have no navigation value. Site nav itself stays visible. */
     .skip-nav, .skipNav, .accessibility-link, .alphabet-soup,
     .login-bar, .topBanner, .promoBanner {
       display: none !important;
     }
 
     /* Collapse empty containers so we don't get tall blank cards
-       below "no certifications" / "no announcements" sections. Note
-       :empty doesn't match whitespace, so this only catches truly
-       empty children — a pure-whitespace empty parent will still
-       render visibly. */
+       below "no certifications" / "no announcements" sections.
+       Note :empty doesn't match whitespace, so this catches only
+       truly-empty children. */
     .sfDataItem:empty,
     .card:empty, .panel:empty, .tile:empty,
     .dashboard-tile:empty, .cert-card:empty, .renewal-card:empty,
@@ -1068,18 +1078,13 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
       display: none !important;
     }
 
-    /* Headings — reset any background-image / absolute-positioned icon
-       that CAC overlays on the heading text. The "small certificate
-       icon rendering on top of the C" issue comes from a CSS rule
-       that uses background-image + padding-left as an icon-on-text
-       trick. We disable it here so the text stays readable, then any
-       inline icon (img/svg/i/span) inside the heading gets proper
-       horizontal spacing instead of overlapping. */
+    /* CAC headings — reset the background-image / absolute-positioned
+       icon some templates overlay on heading text. The "small cert
+       icon rendering on top of the C" came from a background-image +
+       padding-left trick. Disabling it lets the heading text read
+       cleanly; inline icons (img/svg/i/.icon) inside the heading get
+       proper spacing instead of overlapping. */
     h1, h2, h3, .pageTitle, .pageHeading, .sectionHeader {
-      font-size: 22px !important;
-      line-height: 1.3 !important;
-      margin: 8px 0 16px 0 !important;
-      color: #1a1a1a !important;
       background: none !important;
       background-image: none !important;
       padding-left: 0 !important;
@@ -1102,39 +1107,7 @@ export const CAC_LOCKER_CONFIG: ConnectionConfig = {
       margin: 0 8px 0 0 !important;
     }
 
-    /* Tables (cert lists, transcripts, history) */
-    table, .sfTable, .data-table, .grid-table {
-      width: 100% !important;
-      border-collapse: collapse !important;
-      font-size: 14px !important;
-    }
-    table th, table td, .sfTable th, .sfTable td {
-      padding: 10px 8px !important;
-      text-align: left !important;
-      vertical-align: top !important;
-    }
-    table th, .sfTable th {
-      background: #f0f4ff !important;
-      color: #1a1a1a !important;
-      font-weight: 700 !important;
-      font-size: 13px !important;
-    }
-    table tr:nth-child(even) td {
-      background: #fafafa !important;
-    }
-
-    /* Cert / dashboard tile cards (Sitefinity uses .sfDataItem; .NET MVC
-       sites tend to use .card / .panel / .tile) */
-    .sfDataItem, .card, .panel, .tile, .dashboard-tile,
-    .cert-card, .renewal-card, .alert, .notification {
-      background: #ffffff !important;
-      border: 1px solid #e0e0e0 !important;
-      border-radius: 12px !important;
-      padding: 12px !important;
-      margin-bottom: 10px !important;
-    }
-
-    /* Nav tabs sometimes used inside Locker pages — make them tap-able */
+    /* Tabs inside Locker pages — bigger tap targets. */
     .tab, .tabs a, .nav-tabs a, .pageTabs a, .accountTabs a {
       padding: 12px 14px !important;
       font-size: 15px !important;
