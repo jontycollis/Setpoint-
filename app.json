@@ -28,7 +28,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a73e8"
       },
-      "versionCode": 12,
+      "versionCode": 13,
       "package": "com.aesscoretracker.app",
       "permissions": [
         "INTERNET"
