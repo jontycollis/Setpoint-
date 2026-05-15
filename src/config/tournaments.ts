@@ -12,6 +12,22 @@ export interface TournamentEvent {
   infoPageUrl?: string;
 }
 
+/** Standalone venue map not tied to a specific AES event. Useful when:
+ *   - Maps are published before AES has indexed the corresponding
+ *     events (e.g. 2026 Nationals Calgary — maps live, AES keys TBD)
+ *   - A venue hosts multiple sub-tournaments under one umbrella so
+ *     one AES event would need to point at multiple maps */
+export interface ExtraVenueMap {
+  /** Display label on the card (e.g. "Calgary — Tournament 1"). */
+  label: string;
+  /** Optional secondary line (city, dates, age groups). */
+  subtitle?: string;
+  /** Remote http(s) URL (PDF or image) or `bundled:<asset-key>`. */
+  mapUrl: string;
+  /** Optional related info page (volleyball.ca city page, etc.). */
+  infoPageUrl?: string;
+}
+
 export interface TournamentYear {
   year: number;
   events: TournamentEvent[];
@@ -19,6 +35,9 @@ export interface TournamentYear {
   venueMapUrl?: string;
   /** URL to the competition info page — applies to all events in this year */
   infoPageUrl?: string;
+  /** Standalone maps surfaced alongside (but separate from) the AES
+   *  events list. Tap → opens VenueMapScreen with the given URL. */
+  extraVenueMaps?: ExtraVenueMap[];
 }
 
 export interface Tournament {
@@ -117,6 +136,29 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 venueMapUrl: 'bundled:nationals-2026-venue-map',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/mississauga-2026',
+              },
+            ],
+            // Standalone Calgary venue maps. The AES events for these
+            // sub-tournaments aren't indexed yet, but the maps are
+            // published and useful to users planning travel. Surfaced
+            // as standalone cards below the events list — same
+            // pinch-to-zoom flow, no AES key dependency.
+            extraVenueMaps: [
+              {
+                label: 'Calgary — Tournament 1',
+                subtitle: 'May 2026 · BMO Centre / Stampede Park',
+                mapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament1.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+              },
+              {
+                label: 'Calgary — Tournaments 2–4',
+                subtitle: 'May 2026 · BMO Centre / Stampede Park',
+                mapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
               },
             ],
           },

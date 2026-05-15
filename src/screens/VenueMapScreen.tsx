@@ -68,6 +68,14 @@ interface Props {
   };
 }
 
+// Detect PDF URLs so we route them through Google Docs Viewer instead
+// of a bare <img> tag. The Android system WebView won't render PDFs
+// inline (it'd download them); Google Docs Viewer normalizes the
+// behavior across iOS and Android and preserves pinch-to-zoom.
+function isPdfUrl(url: string): boolean {
+  return /\.pdf(\?|#|$)/i.test(url);
+}
+
 function buildMapHtml(url: string, highlightCourt?: string) {
   const courtBanner = highlightCourt
     ? `
@@ -110,6 +118,22 @@ function buildMapHtml(url: string, highlightCourt?: string) {
     `
     : '';
 
+  // PDF branch — embed via Google Docs Viewer. The iframe takes 100%
+  // of the WebView, the viewer itself provides pinch-zoom + pan
+  // controls. Image branch keeps the existing <img> path so PNG
+  // provincials maps continue to render the same as before.
+  const content = isPdfUrl(url)
+    ? `<iframe
+         src="https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true"
+         style="width: 100%; height: 100%; border: 0;"
+         frameborder="0"
+       ></iframe>`
+    : `<img src="${url}" alt="Venue Map" />`;
+
+  // PDF iframes need the html/body to fill the viewport; the <img>
+  // path centers in a flex parent (legacy behavior).
+  const layoutMode = isPdfUrl(url) ? 'pdf' : 'image';
+
   return `
 <!DOCTYPE html>
 <html>
@@ -121,11 +145,15 @@ function buildMapHtml(url: string, highlightCourt?: string) {
       width: 100%;
       height: 100%;
       background: #f5f5f5;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: auto;
-      -webkit-overflow-scrolling: touch;
+      ${layoutMode === 'image' ? `
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: auto;
+        -webkit-overflow-scrolling: touch;
+      ` : `
+        overflow: hidden;
+      `}
     }
     img {
       max-width: 100%;
@@ -136,7 +164,7 @@ function buildMapHtml(url: string, highlightCourt?: string) {
 </head>
 <body>
   ${courtBanner}
-  <img src="${url}" alt="Venue Map" />
+  ${content}
 </body>
 </html>
 `;
