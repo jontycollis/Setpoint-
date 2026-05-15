@@ -184,6 +184,29 @@ export function EventEntryScreen({
               </View>
             );
           })}
+
+          {/* Standalone venue maps. Used when maps are published before
+              AES has indexed the events (e.g. 2026 Nationals Calgary),
+              or when a city hosts multiple sub-tournaments under one
+              umbrella event. Tap → same VenueMapScreen with pinch-zoom
+              as the per-event maps above. */}
+          {tournamentYear.extraVenueMaps?.map((m) => (
+            <TouchableOpacity
+              key={m.mapUrl}
+              style={styles.extraMapCard}
+              onPress={() => onViewVenueMap(m.mapUrl, m.infoPageUrl)}
+              activeOpacity={0.7}
+            >
+              <Text style={styles.extraMapIcon}>{'\u{1F5FA}'}</Text>
+              <View style={styles.extraMapLeft}>
+                <Text style={styles.extraMapLabel}>{m.label}</Text>
+                {m.subtitle ? (
+                  <Text style={styles.extraMapSubtitle}>{m.subtitle}</Text>
+                ) : null}
+              </View>
+              <Text style={styles.extraMapArrow}>{'>'}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         {/* Divider */}
@@ -374,6 +397,45 @@ function makeStyles(colors: ThemeColors) {
     paddingHorizontal: spacing.lg,
     marginBottom: spacing.sm,
     marginTop: -spacing.xs,
+  },
+  // ── Standalone venue-map cards ──────────────────────────────────
+  // Rendered below the AES events list when the year has
+  // `extraVenueMaps`. Visually styled like an event card but with a
+  // map glyph instead of dates so users read it as "open a map", not
+  // "load a team list".
+  extraMapCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 3,
+    elevation: 1,
+  },
+  extraMapIcon: {
+    fontSize: 22,
+    marginRight: spacing.md,
+  },
+  extraMapLeft: { flex: 1 },
+  extraMapLabel: {
+    fontSize: fontSize.lg,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 2,
+  },
+  extraMapSubtitle: {
+    fontSize: fontSize.sm,
+    color: colors.textSecondary,
+  },
+  extraMapArrow: {
+    fontSize: 20,
+    color: colors.textLight,
   },
   venueMapIconSmall: {
     fontSize: 14,
