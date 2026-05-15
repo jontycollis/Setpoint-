@@ -104,6 +104,8 @@ export function EventEntryScreen({
           style={styles.backRow}
           onPress={onBack}
           activeOpacity={0.6}
+          accessibilityRole="button"
+          accessibilityLabel="Back to tournaments"
         >
           <Text style={styles.backArrow}>{'‹'}</Text>
           <Text style={styles.backLabel}>Tournaments</Text>
@@ -156,6 +158,9 @@ export function EventEntryScreen({
                   onPress={() => loadEventByKey(ev.key)}
                   disabled={!!loadingEvent}
                   activeOpacity={0.7}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open ${ev.label}, ${ev.subtitle}${ev.venue ? `, ${ev.venue}` : ''}, ${ev.dates}`}
+                  accessibilityState={{ disabled: !!loadingEvent, busy: isLoading }}
                 >
                   <View style={styles.eventCardLeft}>
                     <Text style={styles.eventLabel}>{ev.label}</Text>
@@ -176,6 +181,8 @@ export function EventEntryScreen({
                     style={styles.venueMapButtonInline}
                     onPress={() => onViewVenueMap(eventVenueMap, eventInfoPage)}
                     activeOpacity={0.7}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View venue map for ${ev.label}`}
                   >
                     <Text style={styles.venueMapIconSmall}>{'\u{1F5FA}'}</Text>
                     <Text style={styles.venueMapTextSmall}>Venue Map</Text>
@@ -196,6 +203,8 @@ export function EventEntryScreen({
               style={styles.extraMapCard}
               onPress={() => onViewVenueMap(m.mapUrl, m.infoPageUrl)}
               activeOpacity={0.7}
+              accessibilityRole="button"
+              accessibilityLabel={`View venue map: ${m.label}${m.subtitle ? `, ${m.subtitle}` : ''}`}
             >
               <Text style={styles.extraMapIcon}>{'\u{1F5FA}'}</Text>
               <View style={styles.extraMapLeft}>
