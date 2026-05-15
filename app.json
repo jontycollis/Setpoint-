@@ -7,6 +7,9 @@
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "scheme": "aesscoretracker",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "splash": {
       "image": "./assets/splash.png",
       "resizeMode": "contain",
@@ -60,10 +63,7 @@
       "package": "com.aesscoretracker.app",
       "permissions": [
         "INTERNET"
-      ],
-      "runtimeVersion": {
-        "policy": "appVersion"
-      }
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -89,3 +89,5 @@
     ]
   }
 }
+</content>
+</invoke>
