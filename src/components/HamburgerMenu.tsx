@@ -40,7 +40,8 @@ export type MenuDestination =
   | 'MatchList'
   | 'TeamAnalytics'
   | 'StorageSnapshot'
-  | 'HistoricalImport';
+  | 'HistoricalImport'
+  | 'About';
 
 /**
  * The hamburger renders different items depending on whether the user is
@@ -661,6 +662,14 @@ export function HamburgerMenu({
                   available={true}
                   isCurrent={isCurrentScreen('StorageSnapshot')}
                   onPress={() => handleSelect('StorageSnapshot')}
+                />
+                <MenuRow
+                  icon={'\u{2139}️'}
+                  label="About & privacy"
+                  subtitle="Disclaimer · data policy · version"
+                  available={true}
+                  isCurrent={isCurrentScreen('About')}
+                  onPress={() => handleSelect('About')}
                 />
               </View>
 

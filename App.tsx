@@ -57,6 +57,7 @@ import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
+import { AboutScreen } from './src/screens/AboutScreen';
 import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
 import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
@@ -171,7 +172,8 @@ type Screen =
   | 'TournamentDetail'
   | 'GlobalSearch'
   | 'StorageSnapshot'
-  | 'HistoricalImport';
+  | 'HistoricalImport'
+  | 'About';
 
 // AES navigation scope: an event can stand alone (DivisionSelect view), an
 // event+division is the standard tournament context, and event+division+team
@@ -240,6 +242,7 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'Stats',
   'PlayerDetail',
   'TournamentDetail',
+  'About',
 ]);
 
 // Screens where the bottom tab bar is hidden (focused full-screen flows).
@@ -269,6 +272,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'GlobalSearch':
     case 'StorageSnapshot':
     case 'HistoricalImport':
+    case 'About':
       return 'home';
     default:
       return 'team';
@@ -294,6 +298,8 @@ const SEARCH_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   // we right-pad the connection hero to clear it.
   'MrsConnection',
   'CacConnection',
+  // About — slim disclaimer screen; search has no purpose here.
+  'About',
 ]);
 
 // ── Pre-migration snapshot guard ──────────────────────────────────────────
@@ -1728,6 +1734,10 @@ export default function App() {
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('HistoricalImport');
           break;
+        case 'About':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('About');
+          break;
       }
     },
     [screen, currentEvent, currentDivision, currentTeam, currentTimuTid, currentTimuTeamName, myTeam, userProfile]
@@ -2607,6 +2617,8 @@ export default function App() {
             onBack={goBack}
           />
         );
+      case 'About':
+        return <AboutScreen onBack={goBack} />;
       case 'SeasonHistory':
         if (!currentHistoryTeamName) return null;
         return (
