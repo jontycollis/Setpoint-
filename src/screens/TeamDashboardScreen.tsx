@@ -12,6 +12,7 @@ import {
   Share,
   Alert,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { BracketPredictions } from '../components/BracketPredictions';
@@ -109,6 +110,7 @@ export function TeamDashboardScreen({
   onOpenUpcomingTournament,
 }: Props) {
   const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   // Each pool the team belongs to (Day 1 pools, Day 2 power pools, etc.)
   interface PoolEntry {
@@ -639,9 +641,21 @@ export function TeamDashboardScreen({
 
   return (
     <View style={{ flex: 1 }}>
-      {/* Update banner — floats above the scroll content */}
+      {/* Update banner — transient toast that floats above the scroll
+          content. `top` is patched at render so the banner clears the
+          status bar (insets.top) AND the global TopBar / Hamburger
+          overlay (which lives at insets.top + 8, ~36px tall). Sliding
+          it below those means the toast doesn't cover the team-pill or
+          the hamburger button while it's animating in. The 56px offset
+          works in both portrait and landscape — banner shifts with the
+          inset, not with the orientation. */}
       {updateBanner && (
-        <Animated.View style={[styles.updateBanner, { opacity: bannerOpacity }]}>
+        <Animated.View
+          style={[
+            styles.updateBanner,
+            { top: insets.top + 56, opacity: bannerOpacity },
+          ]}
+        >
           <Text style={styles.updateBannerText}>{updateBanner}</Text>
         </Animated.View>
       )}
@@ -1929,8 +1943,11 @@ function makeStyles(colors: ThemeColors) {
     marginBottom: spacing.xs,
   },
   updateBanner: {
+    // `top` is patched at render time from insets.top + 56 so the
+    // toast clears both the status bar AND the global TopBar /
+    // Hamburger overlay zone. Keeping it out of this style block
+    // forces the call site to supply it consciously.
     position: 'absolute',
-    top: 8,
     left: 20,
     right: 20,
     zIndex: 20,

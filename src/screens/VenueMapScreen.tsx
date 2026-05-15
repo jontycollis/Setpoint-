@@ -13,6 +13,7 @@ import { WebView } from 'react-native-webview';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { getBestVenueMapUrl } from '../api/venueMapDiscovery';
+import { isPdfUrl } from '../utils/webViewUrls';
 
 /**
  * Bundled venue map assets — keyed by the identifier after "bundled:" prefix.
@@ -66,14 +67,6 @@ interface Props {
     opponentName: string;
     time: string;
   };
-}
-
-// Detect PDF URLs so we route them through Google Docs Viewer instead
-// of a bare <img> tag. The Android system WebView won't render PDFs
-// inline (it'd download them); Google Docs Viewer normalizes the
-// behavior across iOS and Android and preserves pinch-to-zoom.
-function isPdfUrl(url: string): boolean {
-  return /\.pdf(\?|#|$)/i.test(url);
 }
 
 function buildMapHtml(url: string, highlightCourt?: string) {
