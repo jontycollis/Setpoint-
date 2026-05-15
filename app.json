@@ -78,7 +78,14 @@
       "url": "https://u.expo.dev/f809fef2-3bf0-4186-8619-96afe8d581b8"
     },
     "plugins": [
-      "@sentry/react-native"
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "setpoint",
+          "organization": "none-6v6"
+        }
+      ]
     ]
   }
 }

@@ -14,11 +14,15 @@
 import * as Sentry from '@sentry/react-native';
 import Constants from 'expo-constants';
 
-/** TODO: replace with the real DSN once a Sentry project is created.
- *  Find at: Sentry → Project Settings → Client Keys (DSN).
- *  Empty string → Sentry init is skipped; the app runs as if Sentry
- *  wasn't installed. */
-const SENTRY_DSN = '';
+/** Sentry project DSN. Public; safe to commit (write-only ingest key,
+ *  not a secret). The Sentry auth token, which IS a secret, lives in
+ *  `.env.local` (gitignored) for local development and as an EAS Build
+ *  secret named SENTRY_AUTH_TOKEN for cloud builds — only used at
+ *  build time for source-maps upload, never at runtime.
+ *
+ *  Sentry project: none-6v6/setpoint (US ingest). */
+const SENTRY_DSN =
+  'https://98a5036dacdf5bd0bffa09f9873d4e50@o4511395214393344.ingest.us.sentry.io/4511395230253056';
 
 let _initialized = false;
 
@@ -42,6 +46,11 @@ export function initSentry(): void {
 
   Sentry.init({
     dsn: SENTRY_DSN,
+    // Explicit override of the (already-default) PII handling. PRIVACY.md
+    // promises we don't collect IP / user data; the wizard's default
+    // template tried to flip this to `true`, so we pin it false here to
+    // make the privacy contract visible alongside the rest of the config.
+    sendDefaultPii: false,
     // Wire dev / preview / production from the EAS channel so the
     // Sentry dashboard can separate noise from real users.
     environment: __DEV__ ? 'development' : 'production',

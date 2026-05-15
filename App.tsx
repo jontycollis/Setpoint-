@@ -148,6 +148,14 @@ import type {
 } from './src/config/tournaments';
 import type { SavedTimuTournament, TimuTournamentInfo } from './src/types/timu';
 import type { UnifiedTournamentEntry } from './src/utils/unifiedSeasonHistory';
+// Sentry's `wrap()` helper is imported from the package directly; the
+// actual `Sentry.init({...})` call lives in `src/utils/sentryInit.ts`
+// so all the privacy-conscious config (sendDefaultPii: false, IP-strip
+// in beforeSend, release tagging) stays in one place. The wizard's
+// default `sendDefaultPii: true` would have violated the privacy
+// policy's "we drop IPs" promise, so we intentionally route through
+// our wrapper instead of letting the wizard wire init in here.
+import * as Sentry from '@sentry/react-native';
 
 type Screen =
   | 'MyHome'
@@ -2850,7 +2858,7 @@ function AppInner() {
 // any uncaught render error surfaces a recovery screen instead of
 // white-screening JS. When Sentry lands in Phase 4 the `onError`
 // callback below will hand the error through to Sentry.captureException.
-export default function App() {
+export default Sentry.wrap(function App() {
   return (
     <ErrorBoundary
       onError={(err, componentStack) => {
@@ -2864,7 +2872,7 @@ export default function App() {
       <AppInner />
     </ErrorBoundary>
   );
-}
+});
 
 // ── Discovery confirmation modal ──────────────────────────────────────────
 //
