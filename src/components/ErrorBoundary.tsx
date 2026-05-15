@@ -136,7 +136,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
           <TouchableOpacity
             onPress={() =>
               Linking.openURL(
-                `mailto:TBD@example.com?subject=SetPoint%20error&body=${encodeURIComponent(
+                `mailto:jontycollis@gmail.com?subject=SetPoint%20error&body=${encodeURIComponent(
                   errorMessage
                 )}`
               )

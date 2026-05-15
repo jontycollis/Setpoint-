@@ -36,10 +36,10 @@ interface Props {
 // behavior (when this is left empty) shows the same wording inline.
 const PRIVACY_POLICY_URL = '';
 
-// Replace with a real contact channel before submitting to either
-// store — the store review process rejects "TBD@example.com" style
-// placeholders.
-const SUPPORT_EMAIL = 'TBD@example.com';
+// Primary contact for SetPoint support / feedback / privacy
+// questions. Surfaced in the About screen "Contact" section, in the
+// ErrorBoundary "Report this error" mailto link, and in PRIVACY.md.
+const SUPPORT_EMAIL = 'jontycollis@gmail.com';
 
 export function AboutScreen({ onBack }: Props) {
   const { colors } = useTheme();
