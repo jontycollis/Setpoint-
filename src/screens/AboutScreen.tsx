@@ -32,9 +32,12 @@ interface Props {
   onBack: () => void;
 }
 
-// Replace this with the hosted policy URL once published. The fallback
-// behavior (when this is left empty) shows the same wording inline.
-const PRIVACY_POLICY_URL = '';
+// Hosted privacy policy. Source markdown lives in PRIVACY.md and is
+// rendered as a static page via GitHub Pages from the setpoint-legal
+// public repo. The store-listing privacy-policy fields (Play Console
+// and App Store Connect) both point at this same URL.
+const PRIVACY_POLICY_URL =
+  'https://jontycollis.github.io/setpoint-legal/privacy.html';
 
 // Primary contact for SetPoint support / feedback / privacy
 // questions. Surfaced in the About screen "Contact" section, in the
