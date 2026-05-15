@@ -141,6 +141,19 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/mississauga-2026',
               },
+              {
+                // AES key decodes to `2026_Volleyball_Canada_14U_Nationals_Edmonton`
+                // — same per-city 14U pattern as the 2025 Winnipeg /
+                // Fredericton / Ottawa events below.
+                key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV8xNFVfTmF0aW9uYWxzX0VkbW9udG9u0',
+                label: 'Edmonton — 14U',
+                subtitle: '14U Nationals',
+                dates: 'May 2026',
+                venueMapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Edmonton-V3.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+              },
             ],
             // Standalone venue maps for cities whose AES events haven't
             // been indexed yet. Surfaced as cards below the events
@@ -162,14 +175,6 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 subtitle: 'May 2026 · BMO Centre / Stampede Park',
                 mapUrl:
                   'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
-                infoPageUrl:
-                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
-              },
-              {
-                label: 'Edmonton',
-                subtitle: 'May 2026',
-                mapUrl:
-                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Edmonton-V3.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals',
               },
