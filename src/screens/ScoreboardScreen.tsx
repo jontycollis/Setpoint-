@@ -367,10 +367,12 @@ export function ScoreboardScreen({ onBack }: Props) {
         <TouchableOpacity
           onPress={onBack}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
         >
           <Text style={styles.backBtn}>{'< Back'}</Text>
         </TouchableOpacity>
-        {!isLandscape && <Text style={styles.title}>SCOREBOARD</Text>}
+        {!isLandscape && <Text style={styles.title} accessibilityRole="header">SCOREBOARD</Text>}
         {/* Reset has moved into Settings to avoid both colliding with the
             global hamburger overlay AND being a one-tap destructive
             action. The gear is the entry point now; settings modal
@@ -378,6 +380,8 @@ export function ScoreboardScreen({ onBack }: Props) {
         <TouchableOpacity
           onPress={() => setSettingsOpen(true)}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
+          accessibilityLabel="Scoreboard settings"
         >
           <Text style={styles.gearBtn}>⚙</Text>
         </TouchableOpacity>
@@ -751,6 +755,9 @@ function TeamPanel({
         onPress={onTap}
         disabled={disabled}
         activeOpacity={disabled ? 1 : 0.85}
+        accessibilityRole="button"
+        accessibilityLabel={`${name}: ${points} points, ${setsWon} sets. Tap to add a point.`}
+        accessibilityHint="Double tap to add a point for this team"
       >
         {/* Top strip: name + colour swatch + sets-won chip */}
         <View style={styles.landscapeTopStrip}>
@@ -758,11 +765,15 @@ function TeamPanel({
             onPress={onPickColor}
             style={[styles.colorSwatchLg, { backgroundColor: color }]}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Change ${name} colour`}
           />
           <TouchableOpacity
             onPress={onEditName}
             style={styles.landscapeNamePressable}
             hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit team name (currently ${name})`}
           >
             <Text
               style={styles.landscapeTeamName}
@@ -834,12 +845,17 @@ function TeamPanel({
       onPress={onTap}
       disabled={disabled}
       activeOpacity={disabled ? 1 : 0.85}
+      accessibilityRole="button"
+      accessibilityLabel={`${name}: ${points} points, ${setsWon} sets. Tap to add a point.`}
+      accessibilityHint="Double tap to add a point for this team"
     >
       <View style={styles.panelHeaderRow}>
         <TouchableOpacity
           onPress={onPickColor}
           style={[styles.colorSwatchLg, { backgroundColor: color }]}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Change ${name} colour`}
         >
           <Text style={styles.colorSwatchHint}>tap</Text>
         </TouchableOpacity>
@@ -847,6 +863,8 @@ function TeamPanel({
           onPress={onEditName}
           style={styles.namePressable}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit team name (currently ${name})`}
         >
           <Text style={styles.teamName} numberOfLines={2}>
             {name}
@@ -860,6 +878,9 @@ function TeamPanel({
         onPress={onToggleServer}
         style={[styles.serverPill, isServing && { backgroundColor: color }]}
         hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        accessibilityRole="button"
+        accessibilityLabel={isServing ? `${name} is serving` : `Set ${name} as the serving team`}
+        accessibilityState={{ selected: isServing }}
       >
         <Text
           style={[
@@ -891,6 +912,8 @@ function TeamPanel({
         style={styles.timeoutBtn}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel={`Call timeout for ${name} (${timeouts} so far)`}
       >
         <Text style={styles.timeoutBtnText}>⏱ Timeout · {timeouts}</Text>
       </TouchableOpacity>

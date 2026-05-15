@@ -176,6 +176,8 @@ export function HamburgerMenu({
         style={styles.hamburgerButton}
         onPress={() => setVisible(true)}
         hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        accessibilityRole="button"
+        accessibilityLabel="Open navigation menu"
       >
         <View style={styles.hamburgerLines}>
           <View

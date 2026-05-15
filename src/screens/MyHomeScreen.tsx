@@ -535,6 +535,8 @@ function RightNowCard({
             style={styles.leadCtaSecondary}
             onPress={secondary.onPress}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={secondary.label}
           >
             <Text style={styles.leadCtaSecondaryText}>{secondary.label}</Text>
           </TouchableOpacity>
@@ -546,6 +548,8 @@ function RightNowCard({
             style={[styles.leadCtaPrimary, { backgroundColor: '#fff' }]}
             onPress={primary.onPress}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel={primary.label}
           >
             <Text style={[styles.leadCtaPrimaryText, { color: colors.primary }]}>
               {primary.label}
@@ -788,6 +792,8 @@ function RecentChip({
           borderColor: colors.divider,
         },
       ]}
+      accessibilityRole="button"
+      accessibilityLabel={`${badgeLabel} ${isTournament ? 'tournament' : 'team'}: ${item.label}${item.subtitle ? `, ${item.subtitle}` : ''}`}
     >
       <View style={[styles.recentBadge, { backgroundColor: badgeColor }]}>
         <Text style={styles.recentBadgeText}>{badgeLabel}</Text>
@@ -852,6 +858,8 @@ function MyTeamsSection({
         style={[styles.addTeamLink]}
         onPress={onAddTeam}
         activeOpacity={0.6}
+        accessibilityRole="button"
+        accessibilityLabel="Add a team"
       >
         <Text style={[styles.addTeamLinkText, { color: colors.primary }]}>
           + Add team
@@ -873,6 +881,8 @@ function AddTeamRow({ onAddTeam }: { onAddTeam: () => void }) {
         style={[styles.addTeamLink]}
         onPress={onAddTeam}
         activeOpacity={0.6}
+        accessibilityRole="button"
+        accessibilityLabel="Add a team"
       >
         <Text style={[styles.addTeamLinkText, { color: colors.primary }]}>
           + Add team
@@ -975,6 +985,9 @@ function TeamCard({
           borderColor: colors.divider,
         },
       ]}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${team.label} (${sourceLabel})${meta ? `, ${meta}` : ''}`}
+      accessibilityHint={onLongPress ? 'Long press for team options' : undefined}
     >
       <View style={[styles.sourceBadge, { backgroundColor: sourceColor }]}>
         <Text style={styles.sourceBadgeText}>{sourceLabel}</Text>
