@@ -3,7 +3,7 @@
 _Effective date: TBD (fill in when published)._
 _Last reviewed: TBD._
 
-This document describes how the **SetPoint** mobile app ("SetPoint", "the app", "we", "us") handles your data. SetPoint is built and operated by Jon Collis ("the developer"). Contact: **TBD@example.com** (replace before publishing).
+This document describes how the **SetPoint** mobile app ("SetPoint", "the app", "we", "us") handles your data. SetPoint is built and operated by Jon Collis ("the developer"). Contact: **jontycollis@gmail.com** (replace before publishing).
 
 > **SetPoint is not affiliated with, endorsed by, or sponsored by** Volleyball Canada, the Ontario Volleyball Association (OVA), the Coaching Association of Canada (CAC), Advanced Event Systems (AES), or Timu Sports. The app is a third-party companion tool that surfaces public data and embeds those services' own member portals as web views.
 
@@ -93,7 +93,7 @@ Because everything is local to your device:
 
 Because we hold no personal data on any server, the standard "delete my data" request resolves to "uninstall the app".
 
-For data SetPoint receives via Sentry (anonymized crash traces), you may contact us to request deletion: **TBD@example.com**.
+For data SetPoint receives via Sentry (anonymized crash traces), you may contact us to request deletion: **jontycollis@gmail.com**.
 
 ## Changes to this policy
 
@@ -101,4 +101,4 @@ We may update this policy from time to time. The "Effective date" and "Last revi
 
 ## Contact
 
-Questions about this policy: **TBD@example.com**.
+Questions about this policy: **jontycollis@gmail.com**.
