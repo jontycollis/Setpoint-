@@ -122,29 +122,27 @@ export const TOURNAMENT_REGISTRY: Country[] = [
             venue: 'Multiple Cities',
             infoPageUrl:
               'https://volleyball.ca/en/competitions/2026-youth-nationals',
+            // All six 2026 Nationals AES events wired up. Calgary hosts
+            // the BMO Centre flagship across 4 staged waves (the age
+            // assignment per wave is published on the volleyball.ca
+            // Calgary page); Mississauga, Edmonton, Moncton, and Ottawa
+            // each host a single event. Maps live remote on
+            // volleyball.ca so revisions land without an APK push.
             events: [
-              // Only include events with confirmed AES keys.
-              // Other city events (Calgary, Edmonton, Moncton, Ottawa) will
-              // be populated automatically by the dynamic discovery system
-              // once they appear on AES.
               {
+                // 2026_Volleyball_Canada_Nationals___14UB___15UB
                 key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV9OYXRpb25hbHNfX18xNFVCX19fMTVVQg2',
                 label: 'Mississauga — 14UB & 15UB',
                 subtitle: '14U Boys, 15U Boys',
                 dates: 'May 2026',
                 venue: 'International Centre, Mississauga',
-                // V3 PDF on volleyball.ca — supersedes the bundled
-                // PNG that shipped earlier. Remote URL means users
-                // always see the latest revision without an APK push.
                 venueMapUrl:
                   'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Mississauga-V3.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/mississauga-2026',
               },
               {
-                // AES key decodes to `2026_Volleyball_Canada_14U_Nationals_Edmonton`
-                // — same per-city 14U pattern as the 2025 Winnipeg /
-                // Fredericton / Ottawa events below.
+                // 2026_Volleyball_Canada_14U_Nationals_Edmonton
                 key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV8xNFVfTmF0aW9uYWxzX0VkbW9udG9u0',
                 label: 'Edmonton — 14U',
                 subtitle: '14U Nationals',
@@ -152,47 +150,85 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 venueMapUrl:
                   'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Edmonton-V3.pdf',
                 infoPageUrl:
-                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
-              },
-            ],
-            // Standalone venue maps for cities whose AES events haven't
-            // been indexed yet. Surfaced as cards below the events
-            // list — same pinch-to-zoom flow, no AES key dependency.
-            // When AES indexes these events, dynamic discovery will
-            // add proper TournamentEvent entries and these standalone
-            // cards can be replaced (or kept as a no-cost fallback).
-            extraVenueMaps: [
-              {
-                label: 'Calgary — Tournament 1',
-                subtitle: 'May 2026 · BMO Centre / Stampede Park',
-                mapUrl:
-                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament1.pdf',
-                infoPageUrl:
-                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals/edmonton-2026',
               },
               {
-                label: 'Calgary — Tournaments 2–4',
-                subtitle: 'May 2026 · BMO Centre / Stampede Park',
-                mapUrl:
-                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
-                infoPageUrl:
-                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
-              },
-              {
-                label: 'Moncton',
-                subtitle: 'May 2026',
-                mapUrl:
+                // 2026_Volleyball_Canada_14U_Nationals_Moncton
+                key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV8xNFVfTmF0aW9uYWxzX01vbmN0b241',
+                label: 'Moncton — 14U',
+                subtitle: '14U Boys, 14U Girls',
+                dates: 'May 2026',
+                venueMapUrl:
                   'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Moncton-V3.pdf',
                 infoPageUrl:
-                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals/moncton-2026',
               },
               {
-                label: 'Ottawa',
-                subtitle: 'May 2026',
-                mapUrl:
+                // 2026_Volleyball_Canada_14U_Nationals_Ottawa
+                key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV8xNFVfTmF0aW9uYWxzX090dGF3YQ2',
+                label: 'Ottawa — 14U',
+                subtitle: '14U Nationals (kickoff)',
+                dates: 'May 2026',
+                venueMapUrl:
                   'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Ottawa-3ftx4ft-REVISED.pdf',
                 infoPageUrl:
-                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals/ottawa-2026',
+              },
+              // ── Calgary — BMO Centre flagship, 4 staged waves ──
+              // Wave-to-age assignment confirmed from
+              // volleyball.ca/.../calgary-2026:
+              //   T1: 17U Girls
+              //   T2: 17U Boys + 18U Girls + 18U Boys
+              //   T3: 14U Boys + 15U Girls
+              //   T4: 16U Boys + 16U Girls
+              // T1 has its own venue map; T2-T4 share one map.
+              {
+                // 2026_Volleyball_Canada_Nationals___17UG
+                key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV9OYXRpb25hbHNfX18xN1VH0',
+                label: 'Calgary — T1 (17UG)',
+                subtitle: '17U Girls',
+                dates: 'May 2026',
+                venue: 'BMO Centre, Calgary',
+                venueMapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament1.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
+              },
+              {
+                // 2026_Volleyball_Canada_Nationals___17UB__18UG___18UB
+                key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV9OYXRpb25hbHNfX18xN1VCX18xOFVHX19fMThVQg2',
+                label: 'Calgary — T2 (17UB & 18U)',
+                subtitle: '17U Boys, 18U Girls, 18U Boys',
+                dates: 'May 2026',
+                venue: 'BMO Centre, Calgary',
+                venueMapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
+              },
+              {
+                // 2026_Volleyball_Canada_Nationals___14UB___15UG
+                key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV9OYXRpb25hbHNfX18xNFVCX19fMTVVRw2',
+                label: 'Calgary — T3 (14UB & 15UG)',
+                subtitle: '14U Boys, 15U Girls',
+                dates: 'May 2026',
+                venue: 'BMO Centre, Calgary',
+                venueMapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
+              },
+              {
+                // 2026_Volleyball_Canada_Nationals___16UB___16UG
+                key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV9OYXRpb25hbHNfX18xNlVCX19fMTZVRw2',
+                label: 'Calgary — T4 (16U)',
+                subtitle: '16U Boys, 16U Girls',
+                dates: 'May 2026',
+                venue: 'BMO Centre, Calgary',
+                venueMapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
               },
             ],
           },
