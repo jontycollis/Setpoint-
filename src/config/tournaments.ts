@@ -133,16 +133,21 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 subtitle: '14U Boys, 15U Boys',
                 dates: 'May 2026',
                 venue: 'International Centre, Mississauga',
-                venueMapUrl: 'bundled:nationals-2026-venue-map',
+                // V3 PDF on volleyball.ca — supersedes the bundled
+                // PNG that shipped earlier. Remote URL means users
+                // always see the latest revision without an APK push.
+                venueMapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Mississauga-V3.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/mississauga-2026',
               },
             ],
-            // Standalone Calgary venue maps. The AES events for these
-            // sub-tournaments aren't indexed yet, but the maps are
-            // published and useful to users planning travel. Surfaced
-            // as standalone cards below the events list — same
-            // pinch-to-zoom flow, no AES key dependency.
+            // Standalone venue maps for cities whose AES events haven't
+            // been indexed yet. Surfaced as cards below the events
+            // list — same pinch-to-zoom flow, no AES key dependency.
+            // When AES indexes these events, dynamic discovery will
+            // add proper TournamentEvent entries and these standalone
+            // cards can be replaced (or kept as a no-cost fallback).
             extraVenueMaps: [
               {
                 label: 'Calgary — Tournament 1',
@@ -157,6 +162,22 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 subtitle: 'May 2026 · BMO Centre / Stampede Park',
                 mapUrl:
                   'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+              },
+              {
+                label: 'Moncton',
+                subtitle: 'May 2026',
+                mapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Moncton-V3.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+              },
+              {
+                label: 'Ottawa',
+                subtitle: 'May 2026',
+                mapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Ottawa-3ftx4ft-REVISED.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals',
               },

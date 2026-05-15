@@ -44,6 +44,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
+import { prettifyUrl, sameUrl } from '../utils/webViewUrls';
 
 export interface ConnectionChip {
   /** Visible label on the chip. */
@@ -72,14 +73,11 @@ export interface ConnectionConfig {
    * just makes them more readable too.
    */
   injectedCss?: string;
-  /**
-   * Shortcut chips shown above the WebView when the user is logged in.
-   * Each tap navigates the embedded site to a specific URL the user is
-   * likely to want, instead of forcing them to find the link inside
-   * the desktop-style nav. URLs are best-effort guesses — adjust per
-   * service after testing.
-   */
-  chips?: ConnectionChip[];
+  // NOTE: the static `chips` array used to live here. Removed — the
+  // injected scraper now reads real nav links from the site's own
+  // markup and posts them back via `onMessage`, replacing all need
+  // for a hardcoded list. ConnectionChip stays exported because the
+  // discovered-chips state is typed against it.
   /**
    * Pattern: when navigation lands on a URL matching this RegExp, we
    * treat that URL as the user's "primary destination" for this service
@@ -148,10 +146,11 @@ export function ConnectionScreen({
   const [lastError, setLastError] = useState<string | null>(null);
 
   // Chips scraped from the host site's own navigation (postMessage'd
-  // by the injected script on each non-login page load). When this is
-  // non-empty we render it INSTEAD of `config.chips` so the buttons
-  // always point at URLs the site actually serves — no more 404
-  // chip-tap roulette. Capture URL still appears as "↺ My Profile".
+  // by the injected script on each non-login page load). The chip
+  // strip renders these directly — there's no static fallback any
+  // more, so a fresh-mount / pre-login screen just shows no chips
+  // until the scraper fires. Capture URL still appears separately
+  // as "↺ My Profile".
   const [discoveredChips, setDiscoveredChips] = useState<ConnectionChip[]>([]);
 
   // Load any persisted captured URL on mount so the very next login
@@ -286,6 +285,14 @@ export function ConnectionScreen({
           onPress: () => {
             firedConnectRef.current = false;
             onDisconnect();
+            // Reset every piece of session-derived state so the next
+            // login (possibly with a different account) starts clean.
+            // Without these resets the previous user's discovered
+            // chips and captured profile URL would linger until the
+            // new session navigated to its first post-login page.
+            setDiscoveredChips([]);
+            setCapturedUrl(null);
+            autoRedirectedRef.current = false;
             // Force the WebView back to the login URL.
             setWebviewKey((k) => k + 1);
           },
@@ -445,39 +452,33 @@ export function ConnectionScreen({
           fixed-height; the WebView above absorbs the rest of the
           screen. The toolbar pads its bottom by `insets.bottom` so
           the buttons clear Android's gesture-nav indicator. */}
-      {connected && (() => {
-        const chipsToRender = discoveredChips.length > 0
-          ? discoveredChips
-          : (config.chips ?? []);
-        if (chipsToRender.length === 0 && !capturedUrl) return null;
-        return (
-          <View style={styles.chipsBar}>
-            <View style={styles.chipsBarInner}>
-              {capturedUrl ? (
-                <TouchableOpacity
-                  style={[styles.chip, styles.chipPrimary]}
-                  onPress={() => navigateTo(capturedUrl)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={[styles.chipText, styles.chipTextPrimary]}>
-                    ↺ My Profile
-                  </Text>
-                </TouchableOpacity>
-              ) : null}
-              {chipsToRender.map((c) => (
-                <TouchableOpacity
-                  key={c.url}
-                  style={styles.chip}
-                  onPress={() => navigateTo(c.url)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.chipText}>{c.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
+      {connected && (discoveredChips.length > 0 || capturedUrl) ? (
+        <View style={styles.chipsBar}>
+          <View style={styles.chipsBarInner}>
+            {capturedUrl ? (
+              <TouchableOpacity
+                style={[styles.chip, styles.chipPrimary]}
+                onPress={() => navigateTo(capturedUrl)}
+                activeOpacity={0.7}
+              >
+                <Text style={[styles.chipText, styles.chipTextPrimary]}>
+                  ↺ My Profile
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+            {discoveredChips.map((c) => (
+              <TouchableOpacity
+                key={c.url}
+                style={styles.chip}
+                onPress={() => navigateTo(c.url)}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.chipText}>{c.label}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
-        );
-      })()}
+        </View>
+      ) : null}
 
       {lastError ? (
         <View style={styles.errorBanner}>
@@ -980,18 +981,12 @@ function buildInjectedScript(
   `;
 }
 
-// ── URL helpers ───────────────────────────────────────────────────────────
-
-// Compress a URL into something readable in the slim toolbar. We drop
-// the protocol, surface just the host + path tail, and cap the total
-// length so it never wraps onto a second line.
-function prettifyUrl(url: string): string {
-  if (!url) return '';
-  let s = url.replace(/^https?:\/\//i, '');
-  s = s.replace(/#.*$/, '').replace(/\?.*$/, '');
-  if (s.length > 38) s = s.slice(0, 18) + '…' + s.slice(-18);
-  return s;
-}
+// ── Local helpers ─────────────────────────────────────────────────────────
+//
+// URL string helpers (prettifyUrl, sameUrl, isPdfUrl) live in
+// ../utils/webViewUrls so Vitest can import them. The ToolbarBtn
+// component below stays here — it depends on RN primitives and would
+// drag native imports into the test bundle.
 
 // Small toolbar button — matches the surrounding chrome and dims when
 // the action isn't currently available (e.g. forward when there's
@@ -1028,14 +1023,6 @@ function ToolbarBtn({
       </Text>
     </TouchableOpacity>
   );
-}
-
-// Loose URL comparator — strips the trailing slash and any anchor so
-// `https://x/y` and `https://x/y/#tab=foo` are treated as the same page.
-function sameUrl(a: string, b: string): boolean {
-  const norm = (s: string) =>
-    (s || '').replace(/[#?].*$/, '').replace(/\/$/, '').toLowerCase();
-  return norm(a) === norm(b);
 }
 
 // ── Static configs ────────────────────────────────────────────────────────
