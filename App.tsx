@@ -58,6 +58,12 @@ import { StatsScreen } from './src/screens/StatsScreen';
 import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
+import {
+  OnboardingScreen,
+  ONBOARDING_STORAGE_KEY,
+} from './src/screens/OnboardingScreen';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
 import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
@@ -331,7 +337,7 @@ async function runPreMigrationSnapshotOnce(): Promise<void> {
   }
 }
 
-export default function App() {
+function AppInner() {
   const [themeMode, setThemeMode] = useState<ThemeMode>('light');
   const themeColors = themeMode === 'dark' ? darkColors : lightColors;
   const themeContextValue = useMemo(() => ({
@@ -390,6 +396,11 @@ export default function App() {
   const [highlightCourt, setHighlightCourt] = useState<string | undefined>(undefined);
   const [courtMatchInfo, setCourtMatchInfo] = useState<{ opponentName: string; time: string } | undefined>(undefined);
   const [hydrated, setHydrated] = useState(false);
+  // Onboarding gate: `null` while we're still reading AsyncStorage,
+  // `true` if the user has already completed the welcome flow, `false`
+  // if it needs to show. Splitting "unknown" from "needs-flow" prevents
+  // a one-frame flash of the welcome screen for returning users.
+  const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
   // Aliases of the team currently displayed by SeasonHistoryScreen. Sourced
   // from the active TeamProfile so the screen filters tournaments to ONLY
   // that team's appearances — fixes the cross-pollution bug where Team A's
@@ -512,6 +523,32 @@ export default function App() {
         setHydrated(true);
       }
     })();
+  }, []);
+
+  // Onboarding gate. Runs once on mount in parallel with the main
+  // hydration effect above. We don't block hydration on this — the
+  // OnboardingScreen is an overlay; once it's dismissed we just flip
+  // the flag and let the already-loaded normal UI render through.
+  useEffect(() => {
+    (async () => {
+      try {
+        const done = await AsyncStorage.getItem(ONBOARDING_STORAGE_KEY);
+        setOnboardingDone(done === '1');
+      } catch {
+        // If AsyncStorage fails, default to "already done" — better
+        // to skip onboarding for returning users than to show it on
+        // every launch because of a transient read error.
+        setOnboardingDone(true);
+      }
+    })();
+  }, []);
+
+  const handleOnboardingComplete = useCallback(() => {
+    setOnboardingDone(true);
+    AsyncStorage.setItem(ONBOARDING_STORAGE_KEY, '1').catch(() => {
+      // Persistence failure is non-fatal — the worst case is the
+      // welcome screen shows again on next launch.
+    });
   }, []);
 
   useEffect(() => {
@@ -2732,6 +2769,13 @@ export default function App() {
   return (
     <ThemeContext.Provider value={themeContextValue}>
     <SafeAreaProvider>
+      {/* First-launch onboarding gate. While we're still reading
+          AsyncStorage (onboardingDone === null), don't render
+          anything — the wait is short and avoids a flash of the
+          welcome screen for returning users. */}
+      {onboardingDone === null ? null : onboardingDone === false ? (
+        <OnboardingScreen onComplete={handleOnboardingComplete} />
+      ) : (
       <AppContent
         renderScreen={renderScreen}
         handleMenuNavigate={handleMenuNavigate}
@@ -2775,9 +2819,30 @@ export default function App() {
         onOpenRosterEditor={handleOpenRosterEditor}
         onTeamMenu={handleLongPressTeam}
       />
+      )}
       <DiscoveryConfirmModal pending={confirmDiscovery} />
     </SafeAreaProvider>
     </ThemeContext.Provider>
+  );
+}
+
+// Top-level export — wraps the actual app shell in an ErrorBoundary so
+// any uncaught render error surfaces a recovery screen instead of
+// white-screening JS. When Sentry lands in Phase 4 the `onError`
+// callback below will hand the error through to Sentry.captureException.
+export default function App() {
+  return (
+    <ErrorBoundary
+      onError={(err, componentStack) => {
+        if (__DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn('[App] caught render error:', err, componentStack);
+        }
+        // TODO(Phase 4): Sentry.captureException(err, { contexts: { react: { componentStack } } });
+      }}
+    >
+      <AppInner />
+    </ErrorBoundary>
   );
 }
 
