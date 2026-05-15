@@ -1,9 +1,9 @@
 # SetPoint — Privacy Policy
 
-_Effective date: TBD (fill in when published)._
-_Last reviewed: TBD._
+_Effective date: 2026-05-15._
+_Last reviewed: 2026-05-15._
 
-This document describes how the **SetPoint** mobile app ("SetPoint", "the app", "we", "us") handles your data. SetPoint is built and operated by Jon Collis ("the developer"). Contact: **jontycollis@gmail.com** (replace before publishing).
+This document describes how the **SetPoint** mobile app ("SetPoint", "the app", "we", "us") handles your data. SetPoint is built and operated by Jon Collis ("the developer"). Contact: **jontycollis@gmail.com**.
 
 > **SetPoint is not affiliated with, endorsed by, or sponsored by** Volleyball Canada, the Ontario Volleyball Association (OVA), the Coaching Association of Canada (CAC), Advanced Event Systems (AES), or Timu Sports. The app is a third-party companion tool that surfaces public data and embeds those services' own member portals as web views.
 
