@@ -166,6 +166,14 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                   'https://volleyball.ca/en/competitions/2026-youth-nationals',
               },
               {
+                label: 'Edmonton',
+                subtitle: 'May 2026',
+                mapUrl:
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Edmonton-V3.pdf',
+                infoPageUrl:
+                  'https://volleyball.ca/en/competitions/2026-youth-nationals',
+              },
+              {
                 label: 'Moncton',
                 subtitle: 'May 2026',
                 mapUrl:
