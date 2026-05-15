@@ -168,9 +168,13 @@ export async function addTournamentHistoryEntry(entry: TournamentHistoryEntry): 
 
 // ─── Theme Mode ──────────────────────────────────────────────────────────────
 
-export async function loadThemeMode(): Promise<'light' | 'dark'> {
-  const mode = await getJson<string>(KEYS.themeMode, 'light');
-  return mode === 'dark' ? 'dark' : 'light';
+/** Loads the user's saved theme preference. Returns `null` if the
+ *  user has never explicitly toggled — callers should treat that as
+ *  "follow the OS color scheme" (via React Native's useColorScheme). */
+export async function loadThemeMode(): Promise<'light' | 'dark' | null> {
+  const mode = await getJson<string | null>(KEYS.themeMode, null);
+  if (mode === 'dark' || mode === 'light') return mode;
+  return null;
 }
 
 export async function saveThemeMode(mode: 'light' | 'dark'): Promise<void> {

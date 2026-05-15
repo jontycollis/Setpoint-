@@ -12,6 +12,7 @@ import {
   Modal,
   TouchableOpacity,
   AppState,
+  useColorScheme,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -64,6 +65,13 @@ import {
 } from './src/screens/OnboardingScreen';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { initSentry, reportError } from './src/utils/sentryInit';
+import { OfflineBanner } from './src/components/OfflineBanner';
+
+// Initialize Sentry as early as possible so anything that throws
+// during the first render reaches the reporter. A no-op until the
+// DSN is filled in (see src/utils/sentryInit.ts).
+initSentry();
 import { PlayerDetailScreen } from './src/screens/PlayerDetailScreen';
 import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
@@ -338,17 +346,22 @@ async function runPreMigrationSnapshotOnce(): Promise<void> {
 }
 
 function AppInner() {
-  const [themeMode, setThemeMode] = useState<ThemeMode>('light');
+  // Theme mode: follows the OS color scheme by default, but the user's
+  // saved preference (if any) wins. The `useColorScheme()` hook re-runs
+  // on OS theme change, so users who haven't picked a preference see
+  // the app re-theme live when they flip iOS / Android into dark mode.
+  const systemScheme = useColorScheme();
+  const [userOverride, setUserOverride] = useState<ThemeMode | null>(null);
+  const themeMode: ThemeMode =
+    userOverride ?? (systemScheme === 'dark' ? 'dark' : 'light');
   const themeColors = themeMode === 'dark' ? darkColors : lightColors;
   const themeContextValue = useMemo(() => ({
     mode: themeMode,
     colors: themeColors,
     toggle: () => {
-      setThemeMode((prev) => {
-        const next = prev === 'light' ? 'dark' : 'light';
-        saveThemeMode(next);
-        return next;
-      });
+      const next: ThemeMode = themeMode === 'light' ? 'dark' : 'light';
+      setUserOverride(next);
+      saveThemeMode(next);
     },
   }), [themeMode, themeColors]);
 
@@ -490,7 +503,10 @@ function AppInner() {
         ]);
         setSavedEvents(events);
         setFavoriteTeams(favs);
-        setThemeMode(savedTheme);
+        // savedTheme is null when the user has never toggled — leave
+        // userOverride null in that case so useColorScheme() drives
+        // the theme from the OS setting.
+        if (savedTheme) setUserOverride(savedTheme);
         setSavedTimuTournaments(timu);
         setUserProfile(profile);
 
@@ -2821,6 +2837,10 @@ function AppInner() {
       />
       )}
       <DiscoveryConfirmModal pending={confirmDiscovery} />
+      {/* Global offline indicator — slim pill anchored to the bottom.
+          Renders null when the device is online so it has zero visual
+          cost most of the time. */}
+      <OfflineBanner />
     </SafeAreaProvider>
     </ThemeContext.Provider>
   );
@@ -2838,7 +2858,7 @@ export default function App() {
           // eslint-disable-next-line no-console
           console.warn('[App] caught render error:', err, componentStack);
         }
-        // TODO(Phase 4): Sentry.captureException(err, { contexts: { react: { componentStack } } });
+        reportError(err, componentStack);
       }}
     >
       <AppInner />
