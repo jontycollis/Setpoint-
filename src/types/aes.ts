@@ -51,9 +51,14 @@ export interface AESTeamAssignment {
   SearchableTeamName: string;
   NextPendingReseed: boolean;
   NextWorkMatchDate: string | null;
-  TeamClub: AESClub;
+  // Both clubs are nullable in the wire data — teams without a club
+  // affiliation (the most common case for invitational rosters) come
+  // back with `TeamClub: null` / `OpponentClub: null`. Type was
+  // originally non-null which crashed `TeamClub.Name` reads at
+  // runtime; every consumer now uses optional-chain access.
+  TeamClub: AESClub | null;
   TeamDivision: AESDivision;
-  OpponentClub: AESClub;
+  OpponentClub: AESClub | null;
   NextMatch: AESMatch | null;
   WorkMatchs: AESMatch[];
 }

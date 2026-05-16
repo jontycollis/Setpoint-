@@ -671,7 +671,11 @@ export function TeamDashboardScreen({
         <View style={styles.teamHeaderTop}>
           <View style={styles.teamHeaderInfo}>
             <Text style={styles.teamName}>{current.TeamName}</Text>
-            <Text style={styles.clubName}>{current.TeamClub.Name}</Text>
+            {/* TeamClub is typed non-null but the AES API returns null
+                for unaffiliated teams — guard before reading .Name. */}
+            {current.TeamClub?.Name ? (
+              <Text style={styles.clubName}>{current.TeamClub.Name}</Text>
+            ) : null}
             <Text style={styles.divisionName}>{division.Name}</Text>
           </View>
           <View style={styles.headerActions}>
@@ -1577,7 +1581,7 @@ export function TeamDashboardScreen({
         return (
           <ShareCard
             teamName={current.TeamName}
-            clubName={current.TeamClub.Name}
+            clubName={current.TeamClub?.Name ?? ''}
             divisionName={division.Name}
             eventName={event.Name}
             opponentName={opponentText || opponentName || 'TBD'}

@@ -49,7 +49,7 @@ export function TeamSelectScreen({
         teams.filter(
           (t) =>
             t.TeamName.toLowerCase().includes(q) ||
-            t.TeamClub.Name.toLowerCase().includes(q)
+            (t.TeamClub?.Name ?? '').toLowerCase().includes(q)
         )
       );
     }
@@ -79,7 +79,9 @@ export function TeamSelectScreen({
       >
         <View style={styles.teamInfo}>
           <Text style={styles.teamName}>{item.TeamText}</Text>
-          <Text style={styles.clubName}>{item.TeamClub.Name}</Text>
+          {item.TeamClub?.Name ? (
+            <Text style={styles.clubName}>{item.TeamClub.Name}</Text>
+          ) : null}
           {item.NextMatch && (
             <Text style={styles.nextMatch}>
               Next: vs {item.OpponentTeamName} - {item.NextMatch.Court.Name}
