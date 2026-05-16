@@ -991,7 +991,7 @@ export function TeamDashboardScreen({
                     {countdownText}
                   </Text>
                   <Text style={styles.countdownCourt}>
-                    {current.NextMatch.Court.Name}
+                    {current.NextMatch.Court?.Name || 'TBD'}
                   </Text>
                 </View>
                 <Text style={styles.nextMatchTime}>
@@ -1041,7 +1041,7 @@ export function TeamDashboardScreen({
                 {isPlayoff && (
                   <Text style={styles.viewBracketHint}>Tap to view bracket</Text>
                 )}
-                <WatchLiveButton videoLink={current.NextMatch.Court.VideoLink || courtStreamMap[current.NextMatch.Court.Name] || ''} />
+                <WatchLiveButton videoLink={current.NextMatch.Court?.VideoLink || courtStreamMap[current.NextMatch.Court?.Name || ''] || ''} />
               </Card>
             </TouchableOpacity>
           </View>

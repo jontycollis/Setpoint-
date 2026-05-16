@@ -37,7 +37,11 @@ export interface AESMatch {
   MatchId: number;
   ScheduledStartDateTime: string;
   ScheduledEndDateTime: string;
-  Court: AESCourt;
+  // Court is nullable on the wire — matches that haven't been assigned a
+  // court (TBD slots, postponed/deferred matches) come back with
+  // `Court: null`. Was originally typed non-null which crashed
+  // `Court.Name` reads at runtime; every consumer now uses `?.`.
+  Court: AESCourt | null;
 }
 
 export interface AESTeamAssignment {
