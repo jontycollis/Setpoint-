@@ -26,6 +26,7 @@ import type {
   TimuPoolTeam,
   TimuTournamentInfo,
 } from '../types/timu';
+import { tzForVenueAddress } from './venueTimeZone';
 
 const STORAGE_KEY = 'timu.seasonIndex.v1';
 
@@ -38,6 +39,13 @@ export interface TimuTournamentSnapshot {
   /** Parsed start date (Unix ms) for sorting. Best-effort — may be undefined. */
   dateMs?: number;
   venueName?: string;
+  /**
+   * IANA time zone for the venue, e.g. `"America/Toronto"`. Best-effort —
+   * resolved by scanning the venue address for Canadian city / US state
+   * codes when indexing. Optional; when absent consumers fall back to
+   * device-local display.
+   */
+  venueTimeZone?: string;
   /** Flattened team roster with pool stats. */
   teams: Array<TimuTeamSnapshot>;
   /** Match results with per-set scores, including playoffs. */
@@ -266,6 +274,14 @@ export async function buildSnapshot(tid: number): Promise<TimuTournamentSnapshot
     }
   }
 
+  // Best-effort venue tz from the address line (Timu exposes free-text
+  // address, no structured state code). Falls back to venueName when
+  // address is empty since Timu sometimes puts the city in the name.
+  const venueTimeZone =
+    (poolsPage.info.venueAddress && tzForVenueAddress(poolsPage.info.venueAddress)) ||
+    (poolsPage.info.venueName && tzForVenueAddress(poolsPage.info.venueName)) ||
+    undefined;
+
   return {
     tid,
     name: poolsPage.info.name || `Tournament ${tid}`,
@@ -273,6 +289,7 @@ export async function buildSnapshot(tid: number): Promise<TimuTournamentSnapshot
     dateText: poolsPage.info.dateText,
     dateMs: parseDateText(poolsPage.info.dateText),
     venueName: poolsPage.info.venueName,
+    venueTimeZone: venueTimeZone ?? undefined,
     teams,
     results,
     finalRankings: rankings.map((r) => ({
@@ -820,6 +837,10 @@ export async function snapshotFromLoaded(
   results: TimuMatchResult[],
   finalRankings: Array<{ rank: number; rankLabel: string; teamName: string }>
 ): Promise<SeasonIndex> {
+  const venueTimeZone =
+    (info.venueAddress && tzForVenueAddress(info.venueAddress)) ||
+    (info.venueName && tzForVenueAddress(info.venueName)) ||
+    undefined;
   const snapshot: TimuTournamentSnapshot = {
     tid: info.tid,
     name: info.name,
@@ -827,6 +848,7 @@ export async function snapshotFromLoaded(
     dateText: info.dateText,
     dateMs: parseDateText(info.dateText),
     venueName: info.venueName,
+    venueTimeZone: venueTimeZone ?? undefined,
     teams,
     results,
     finalRankings,

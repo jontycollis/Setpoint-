@@ -977,9 +977,15 @@ export async function fetchCanadianEvents(
   // Instead, we use a date-based cutoff: include any event whose end date is
   // within the last 30 days or in the future. This captures ongoing + upcoming
   // events without pulling in years of history.
+  //
+  // Anchor the cutoff in device-local calendar time, not UTC: slicing the
+  // ISO string off a `Date` produces a UTC date which rolls back to
+  // "yesterday" for users west of UTC late at night. For a North American
+  // user that translates to filter-by-tomorrow-at-the-event, which can
+  // hide events that just started. `en-CA` locale renders ISO YYYY-MM-DD.
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - 30);
-  const cutoffStr = cutoffDate.toISOString().split('T')[0];
+  const cutoffStr = cutoffDate.toLocaleDateString('en-CA');
   const filter = options.includePast
     ? `(${caNameFilter})`
     : `endDate ge ${cutoffStr} and (${caNameFilter})`;

@@ -6,6 +6,8 @@
  * Gracefully degrades if the module is not installed.
  */
 
+import { formatInVenueTz } from './dates';
+
 let Notifications: any = null;
 try {
   Notifications = require('expo-notifications');
@@ -17,7 +19,17 @@ export interface MatchNotification {
   matchId: number;
   teamText: string;
   opponentText: string;
-  scheduledStart: string; // ISO date string
+  /**
+   * Match start as an epoch millisecond timestamp. The caller is expected
+   * to resolve any tz ambiguity ahead of time (typically via
+   * `parseScheduleTime(scheduledStart, venueTimeZone)`) so this module
+   * never has to second-guess what the upstream wall-clock string meant.
+   */
+  scheduledStartMs: number;
+  /** IANA tz of the venue, used to render the body in venue-local with a
+   *  short tz name suffix ("9:00 AM EDT") rather than the user's device
+   *  zone. Optional — undefined falls back to device-local rendering. */
+  venueTimeZone?: string;
   courtName: string;
   eventName: string;
   divisionName: string;
@@ -81,18 +93,28 @@ export async function scheduleMatchNotification(
 ): Promise<string | null> {
   if (!Notifications) return null;
 
-  const startTime = new Date(match.scheduledStart).getTime();
+  const startTime = match.scheduledStartMs;
+  if (!isFinite(startTime)) return null;
   const notifyTime = startTime - MINUTES_BEFORE * 60 * 1000;
   const now = Date.now();
 
   // Don't schedule if the notification time has already passed
   if (notifyTime <= now) return null;
 
+  // Render the start time in the venue's tz with a short tz suffix so the
+  // body reads "9:00 AM EDT" regardless of where the user opens it from.
+  const startLabel = formatInVenueTz(startTime, match.venueTimeZone, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  });
+
   try {
     const id = await Notifications.scheduleNotificationAsync({
       content: {
         title: `${match.teamText} plays in ${MINUTES_BEFORE} min`,
-        body: `vs ${match.opponentText} on ${match.courtName}\n${match.divisionName}`,
+        body: `vs ${match.opponentText} @ ${startLabel}\n${match.courtName} · ${match.divisionName}`,
         data: {
           matchId: match.matchId,
           type: 'match-reminder',
