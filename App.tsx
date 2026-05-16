@@ -13,6 +13,7 @@ import {
   TouchableOpacity,
   AppState,
   useColorScheme,
+  useWindowDimensions,
 } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -3024,17 +3025,26 @@ function AppContent({
   onOpenGlobalSearch,
 }: any) {
   const insets = useSafeAreaInsets();
+  const { width, height } = useWindowDimensions();
+  const isLandscape = width > height;
   const lightHeader = darkHeaderScreens.includes(screen);
-  const showTabBar = !TAB_BAR_HIDDEN_SCREENS.has(screen);
+  // Hide the tab bar on Scoreboard in landscape — the score panels need
+  // every vertical pixel, and the user pivots the device specifically to
+  // get the bigger numbers. Other screens keep the tab bar regardless.
+  const showTabBar =
+    !TAB_BAR_HIDDEN_SCREENS.has(screen) &&
+    !(screen === 'Scoreboard' && isLandscape);
   const showPill =
     !PILL_SUPPRESSED_SCREENS.has(screen) && !!userProfile?.activeTeamId;
   const showSearch = !SEARCH_SUPPRESSED_SCREENS.has(screen);
   // Reserve space at the bottom for the tab bar so screens don't render
   // under it. Tab bar height is fixed; the safe-area bottom is added inside
-  // the bar component itself.
+  // the bar component itself. When the tab bar is hidden, fall back to
+  // `insets.bottom` directly so the content still clears Android nav
+  // buttons / the iOS home indicator instead of slipping under them.
   const screenPaddingBottom = showTabBar
     ? BOTTOM_TAB_BAR_HEIGHT + insets.bottom
-    : 0;
+    : insets.bottom;
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>

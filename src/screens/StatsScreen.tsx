@@ -21,7 +21,7 @@
 //   • Hamburger Tools → "Team Analytics"
 // ────────────────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -81,7 +81,115 @@ type KindFilter = 'all' | MatchKind;
 type PhaseFilter = 'all' | Phase;
 type CategoryFilter = 'all' | MatchCategory | 'unknown';
 type SourceFilter = 'all' | MatchSource;
-type SortKey = 'kills' | 'blocks' | 'aces' | 'assists' | 'digs' | 'passAvg' | 'errors' | 'totalPoints';
+type SortKey =
+  | 'shirt'
+  | 'name'
+  | 'kills'
+  | 'blocks'
+  | 'aces'
+  | 'assists'
+  | 'digs'
+  | 'passAvg'
+  | 'errors'
+  | 'totalPoints';
+type SortDir = 'asc' | 'desc';
+
+// ── Header-tap sorting ─────────────────────────────────────────────────────
+//
+// Each per-player table maintains its own (key, dir) sort state via this
+// hook. Tap a header to set it as the sort key, default direction
+// 'desc' (high→low); tap the same header again to flip to 'asc'
+// (low→high). Tapping a different header always resets to 'desc'.
+// Numeric columns use natural number compare; the Player column uses
+// localeCompare (asc by default since A→Z is the intuitive read).
+function useTableSort<TKey extends string>(
+  defaultKey: TKey,
+  defaultDir: SortDir = 'desc'
+): {
+  sortKey: TKey;
+  sortDir: SortDir;
+  onHeaderPress: (key: TKey) => void;
+} {
+  const [state, setState] = useState<{ key: TKey; dir: SortDir }>({
+    key: defaultKey,
+    dir: defaultDir,
+  });
+  const onHeaderPress = useCallback((key: TKey) => {
+    setState((prev) =>
+      prev.key === key
+        ? { key, dir: prev.dir === 'desc' ? 'asc' : 'desc' }
+        : { key, dir: 'desc' }
+    );
+  }, []);
+  return { sortKey: state.key, sortDir: state.dir, onHeaderPress };
+}
+
+function compareSortValues(a: unknown, b: unknown, dir: SortDir): number {
+  // NaN / undefined sort to the bottom regardless of direction so the
+  // user always sees populated rows first.
+  const aMissing =
+    a == null || (typeof a === 'number' && Number.isNaN(a));
+  const bMissing =
+    b == null || (typeof b === 'number' && Number.isNaN(b));
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  if (typeof a === 'number' && typeof b === 'number') {
+    return dir === 'desc' ? b - a : a - b;
+  }
+  if (typeof a === 'string' && typeof b === 'string') {
+    return dir === 'desc' ? b.localeCompare(a) : a.localeCompare(b);
+  }
+  return 0;
+}
+
+interface SortableHeaderProps<TKey extends string> {
+  label: string;
+  sortKey: TKey;
+  activeKey: TKey;
+  dir: SortDir;
+  onPress: (key: TKey) => void;
+  flex?: number;
+  align?: 'left' | 'center';
+  styles: ReturnType<typeof makeStyles>;
+  colors: ThemeColors;
+}
+
+function SortableHeader<TKey extends string>({
+  label,
+  sortKey,
+  activeKey,
+  dir,
+  onPress,
+  flex,
+  align = 'center',
+  styles,
+  colors,
+}: SortableHeaderProps<TKey>) {
+  const active = sortKey === activeKey;
+  const arrow = active ? (dir === 'desc' ? ' ▼' : ' ▲') : '';
+  return (
+    <TouchableOpacity
+      onPress={() => onPress(sortKey)}
+      activeOpacity={0.6}
+      hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+      style={{ flex: flex ?? 1 }}
+      accessibilityRole="button"
+      accessibilityLabel={`Sort by ${label} ${active ? (dir === 'desc' ? 'descending' : 'ascending') : ''}`}
+    >
+      <Text
+        style={[
+          styles.headerCell,
+          align === 'left' && { textAlign: 'left', paddingLeft: spacing.xs },
+          active && { color: colors.primary, fontWeight: '800' },
+        ]}
+      >
+        {label}
+        {arrow}
+      </Text>
+    </TouchableOpacity>
+  );
+}
 
 // Workbook category iteration order — matches the workbook tab order
 // the user is used to: champs → tournament → non-OVA → scrimmage →
@@ -142,7 +250,9 @@ export function StatsScreen({
   const [metricSet, setMetricSet] = useState<AnalyticsMetricSet>(
     DEFAULT_ANALYTICS_VIEW_PREFERENCE.metricSet
   );
-  const [sortKey, setSortKey] = useState<SortKey>('totalPoints');
+  const basicSort = useTableSort<SortKey>('totalPoints', 'desc');
+  const sortKey = basicSort.sortKey;
+  const setSortKey = basicSort.onHeaderPress;
   // positionFilter is plumbed through but the UI control ships disabled —
   // future iteration enables the dropdown without code rewiring.
   const [positionFilter] = useState<'S' | 'OH' | 'MB' | 'OPP' | 'L' | 'DS' | null>(null);
@@ -342,19 +452,11 @@ export function StatsScreen({
 
   const sortedPlayers = useMemo(() => {
     const sorted = filterPlayersByPosition(seasonSummary.players, positionFilter).slice();
-    sorted.sort((a, b) => {
-      const aVal = a[sortKey];
-      const bVal = b[sortKey];
-      if (typeof aVal === 'number' && typeof bVal === 'number') {
-        if (isNaN(aVal) && isNaN(bVal)) return 0;
-        if (isNaN(aVal)) return 1;
-        if (isNaN(bVal)) return -1;
-        return bVal - aVal;
-      }
-      return 0;
-    });
+    sorted.sort((a, b) =>
+      compareSortValues(a[sortKey], b[sortKey], basicSort.sortDir)
+    );
     return sorted;
-  }, [seasonSummary, sortKey, positionFilter]);
+  }, [seasonSummary, sortKey, basicSort.sortDir, positionFilter]);
 
   if (loading) {
     return (
@@ -577,14 +679,65 @@ export function StatsScreen({
                 ))}
               </ScrollView>
 
-              {/* Header row */}
+              {/* Header row — tap to sort */}
               <View style={styles.tableHeader}>
-                <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
-                <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
-                <Text style={styles.headerCell}>K</Text>
-                <Text style={styles.headerCell}>B</Text>
-                <Text style={styles.headerCell}>A</Text>
-                <Text style={styles.headerCell}>Pts</Text>
+                <SortableHeader
+                  label="#"
+                  sortKey="shirt"
+                  activeKey={basicSort.sortKey}
+                  dir={basicSort.sortDir}
+                  onPress={basicSort.onHeaderPress}
+                  flex={2}
+                  styles={styles}
+                  colors={colors}
+                />
+                <SortableHeader
+                  label="Player"
+                  sortKey="name"
+                  activeKey={basicSort.sortKey}
+                  dir={basicSort.sortDir}
+                  onPress={basicSort.onHeaderPress}
+                  flex={4}
+                  align="left"
+                  styles={styles}
+                  colors={colors}
+                />
+                <SortableHeader
+                  label="K"
+                  sortKey="kills"
+                  activeKey={basicSort.sortKey}
+                  dir={basicSort.sortDir}
+                  onPress={basicSort.onHeaderPress}
+                  styles={styles}
+                  colors={colors}
+                />
+                <SortableHeader
+                  label="B"
+                  sortKey="blocks"
+                  activeKey={basicSort.sortKey}
+                  dir={basicSort.sortDir}
+                  onPress={basicSort.onHeaderPress}
+                  styles={styles}
+                  colors={colors}
+                />
+                <SortableHeader
+                  label="A"
+                  sortKey="aces"
+                  activeKey={basicSort.sortKey}
+                  dir={basicSort.sortDir}
+                  onPress={basicSort.onHeaderPress}
+                  styles={styles}
+                  colors={colors}
+                />
+                <SortableHeader
+                  label="Pts"
+                  sortKey="totalPoints"
+                  activeKey={basicSort.sortKey}
+                  dir={basicSort.sortDir}
+                  onPress={basicSort.onHeaderPress}
+                  styles={styles}
+                  colors={colors}
+                />
               </View>
 
               {sortedPlayers.length === 0 ? (
@@ -973,6 +1126,14 @@ function TrendChart({
 
 // ── On-court / set wins card ─────────────────────────────────────────────
 
+type OnCourtSortKey =
+  | 'shirt'
+  | 'name'
+  | 'matchesAppeared'
+  | 'setWinPct'
+  | 'rallyWinPct'
+  | 'rallies';
+
 function OnCourtStatsCard({
   summary,
   colors,
@@ -983,8 +1144,19 @@ function OnCourtStatsCard({
   styles: ReturnType<typeof makeStyles>;
 }) {
   const t = summary.team;
+  const sort = useTableSort<OnCourtSortKey>('rallies', 'desc');
+  // Sort the player list whenever the user taps a column header. The
+  // default ('rallies', 'desc') matches the order `aggregateOnCourtStats`
+  // already emits, so the first paint stays identical to the previous
+  // build.
+  const players = useMemo(() => {
+    const filtered = summary.players.filter((p) => p.matchesAppeared > 0);
+    filtered.sort((a, b) =>
+      compareSortValues(a[sort.sortKey], b[sort.sortKey], sort.sortDir)
+    );
+    return filtered;
+  }, [summary.players, sort.sortKey, sort.sortDir]);
   if (t.rallies === 0 && t.setsPlayed === 0) return null;
-  const players = summary.players.filter((p) => p.rallies > 0);
 
   return (
     <View style={styles.card}>
@@ -1020,14 +1192,65 @@ function OnCourtStatsCard({
         />
       </View>
 
-      {/* Header row */}
+      {/* Header row — tap to sort */}
       <View style={styles.tableHeader}>
-        <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
-        <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
-        <Text style={styles.headerCell}>M</Text>
-        <Text style={styles.headerCell}>Set%</Text>
-        <Text style={styles.headerCell}>Rly%</Text>
-        <Text style={styles.headerCell}>On</Text>
+        <SortableHeader
+          label="#"
+          sortKey="shirt"
+          activeKey={sort.sortKey}
+          dir={sort.sortDir}
+          onPress={sort.onHeaderPress}
+          flex={2}
+          styles={styles}
+          colors={colors}
+        />
+        <SortableHeader
+          label="Player"
+          sortKey="name"
+          activeKey={sort.sortKey}
+          dir={sort.sortDir}
+          onPress={sort.onHeaderPress}
+          flex={4}
+          align="left"
+          styles={styles}
+          colors={colors}
+        />
+        <SortableHeader
+          label="M"
+          sortKey="matchesAppeared"
+          activeKey={sort.sortKey}
+          dir={sort.sortDir}
+          onPress={sort.onHeaderPress}
+          styles={styles}
+          colors={colors}
+        />
+        <SortableHeader
+          label="Set%"
+          sortKey="setWinPct"
+          activeKey={sort.sortKey}
+          dir={sort.sortDir}
+          onPress={sort.onHeaderPress}
+          styles={styles}
+          colors={colors}
+        />
+        <SortableHeader
+          label="Rly%"
+          sortKey="rallyWinPct"
+          activeKey={sort.sortKey}
+          dir={sort.sortDir}
+          onPress={sort.onHeaderPress}
+          styles={styles}
+          colors={colors}
+        />
+        <SortableHeader
+          label="On"
+          sortKey="rallies"
+          activeKey={sort.sortKey}
+          dir={sort.sortDir}
+          onPress={sort.onHeaderPress}
+          styles={styles}
+          colors={colors}
+        />
       </View>
 
       {players.length === 0 ? (
@@ -1077,6 +1300,7 @@ function OnCourtPlayerRow({
 }) {
   const setDelta = line.setsAppeared > 0 ? line.setWinPct - teamSetPct : NaN;
   const rallyDelta = line.rallies > 0 ? line.rallyWinPct - teamRallyPct : NaN;
+  const positionLabel = line.position ?? line.inferredPosition;
   return (
     <View style={styles.tableRow}>
       <Text style={[styles.cell, { flex: 2, fontWeight: '800' }]}>{line.shirt}</Text>
@@ -1085,6 +1309,12 @@ function OnCourtPlayerRow({
         numberOfLines={1}
       >
         {line.name}
+        {positionLabel ? (
+          <Text style={{ color: colors.textSecondary, fontWeight: '500' }}>
+            {' · '}
+            {positionLabel}
+          </Text>
+        ) : null}
       </Text>
       <Text style={styles.cell}>{line.matchesAppeared || '—'}</Text>
       <Text
@@ -1257,6 +1487,21 @@ function LineupComboRow({
 
 // ── Side-out & serving card ─────────────────────────────────────────────
 
+type ServerOnCourtSortKey =
+  | 'shirt'
+  | 'name'
+  | 'recvPct'
+  | 'servePct'
+  | 'recvRallies'
+  | 'serveRallies';
+type ServerPersonalSortKey =
+  | 'shirt'
+  | 'name'
+  | 'personalServes'
+  | 'personalServeWon'
+  | 'personalServeAces'
+  | 'personalServePct';
+
 function ServerSplitsCard({
   splits,
   colors,
@@ -1267,18 +1512,48 @@ function ServerSplitsCard({
   styles: ReturnType<typeof makeStyles>;
 }) {
   const [view, setView] = useState<'oncourt' | 'personal'>('oncourt');
+  // Independent sort state per sub-view so flipping between On-court and
+  // Personal-serve doesn't bleed the wrong sort key across.
+  const onCourtSort = useTableSort<ServerOnCourtSortKey>('recvPct', 'desc');
+  const personalSort = useTableSort<ServerPersonalSortKey>('personalServes', 'desc');
   const t = splits.team;
-  if (t.recvRallies === 0 && t.serveRallies === 0) return null;
 
   // Filter to players who actually contributed to the slice — the on-court
   // view wants anyone with rallies, personal view wants anyone who served.
-  const rows: ServerSplitLine[] =
-    view === 'oncourt'
-      ? splits.players.filter((p) => p.recvRallies + p.serveRallies > 0)
-      : splits.players
-          .filter((p) => p.personalServes > 0)
-          .slice()
-          .sort((a, b) => b.personalServes - a.personalServes || a.shirt - b.shirt);
+  // The active view's sort hook drives the ordering.
+  const rows: ServerSplitLine[] = useMemo(() => {
+    if (view === 'oncourt') {
+      const filtered = splits.players.filter(
+        (p) => p.recvRallies + p.serveRallies > 0
+      );
+      filtered.sort((a, b) =>
+        compareSortValues(
+          a[onCourtSort.sortKey],
+          b[onCourtSort.sortKey],
+          onCourtSort.sortDir
+        )
+      );
+      return filtered;
+    }
+    const filtered = splits.players.filter((p) => p.personalServes > 0);
+    filtered.sort((a, b) =>
+      compareSortValues(
+        a[personalSort.sortKey],
+        b[personalSort.sortKey],
+        personalSort.sortDir
+      )
+    );
+    return filtered;
+  }, [
+    splits.players,
+    view,
+    onCourtSort.sortKey,
+    onCourtSort.sortDir,
+    personalSort.sortKey,
+    personalSort.sortDir,
+  ]);
+
+  if (t.recvRallies === 0 && t.serveRallies === 0) return null;
 
   return (
     <View style={styles.card}>
@@ -1352,24 +1627,126 @@ function ServerSplitsCard({
         </TouchableOpacity>
       </View>
 
-      {/* Header row */}
+      {/* Header row — tap to sort */}
       {view === 'oncourt' ? (
         <View style={styles.tableHeader}>
-          <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
-          <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
-          <Text style={styles.headerCell}>SO%</Text>
-          <Text style={styles.headerCell}>SP%</Text>
-          <Text style={styles.headerCell}>Rec</Text>
-          <Text style={styles.headerCell}>Srv</Text>
+          <SortableHeader
+            label="#"
+            sortKey="shirt"
+            activeKey={onCourtSort.sortKey}
+            dir={onCourtSort.sortDir}
+            onPress={onCourtSort.onHeaderPress}
+            flex={2}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Player"
+            sortKey="name"
+            activeKey={onCourtSort.sortKey}
+            dir={onCourtSort.sortDir}
+            onPress={onCourtSort.onHeaderPress}
+            flex={4}
+            align="left"
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="SO%"
+            sortKey="recvPct"
+            activeKey={onCourtSort.sortKey}
+            dir={onCourtSort.sortDir}
+            onPress={onCourtSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="SP%"
+            sortKey="servePct"
+            activeKey={onCourtSort.sortKey}
+            dir={onCourtSort.sortDir}
+            onPress={onCourtSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Rec"
+            sortKey="recvRallies"
+            activeKey={onCourtSort.sortKey}
+            dir={onCourtSort.sortDir}
+            onPress={onCourtSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Srv"
+            sortKey="serveRallies"
+            activeKey={onCourtSort.sortKey}
+            dir={onCourtSort.sortDir}
+            onPress={onCourtSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
         </View>
       ) : (
         <View style={styles.tableHeader}>
-          <Text style={[styles.headerCell, { flex: 2 }]}>#</Text>
-          <Text style={[styles.headerCell, { flex: 4 }]}>Player</Text>
-          <Text style={styles.headerCell}>Srv</Text>
-          <Text style={styles.headerCell}>Won</Text>
-          <Text style={styles.headerCell}>Aces</Text>
-          <Text style={styles.headerCell}>Pt%</Text>
+          <SortableHeader
+            label="#"
+            sortKey="shirt"
+            activeKey={personalSort.sortKey}
+            dir={personalSort.sortDir}
+            onPress={personalSort.onHeaderPress}
+            flex={2}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Player"
+            sortKey="name"
+            activeKey={personalSort.sortKey}
+            dir={personalSort.sortDir}
+            onPress={personalSort.onHeaderPress}
+            flex={4}
+            align="left"
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Srv"
+            sortKey="personalServes"
+            activeKey={personalSort.sortKey}
+            dir={personalSort.sortDir}
+            onPress={personalSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Won"
+            sortKey="personalServeWon"
+            activeKey={personalSort.sortKey}
+            dir={personalSort.sortDir}
+            onPress={personalSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Aces"
+            sortKey="personalServeAces"
+            activeKey={personalSort.sortKey}
+            dir={personalSort.sortDir}
+            onPress={personalSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
+          <SortableHeader
+            label="Pt%"
+            sortKey="personalServePct"
+            activeKey={personalSort.sortKey}
+            dir={personalSort.sortDir}
+            onPress={personalSort.onHeaderPress}
+            styles={styles}
+            colors={colors}
+          />
         </View>
       )}
 

@@ -8,11 +8,17 @@
 //     sets won, set win %.
 //   • Team totals: rallies, wins, set record.
 //
-// All cuts come from the shared `walkTeamRallies` walker in
-// `teamRallyWalk.ts` — no rotation logic lives here.
+// Rally-win / rallies-on-court still come from the `walkTeamRallies`
+// rotation walker in `teamRallyWalk.ts` — that's the only place we have
+// per-rally on-court attribution. M (matches) and Sets counts use a
+// broader "did this player participate at all" scan over all the event
+// signals (stat shirts, courtSnapshot lineups + liberos-on-floor, lineup
+// + libero events, subs) so liberos imported from Sideline HD — whose
+// data lacks explicit `libero-on` events — still count toward their
+// matches/sets played.
 // ──────────────────────────────────────────────────────────────────────────
 
-import type { Match } from '../types/match';
+import type { Match, MatchEvent, StatEvent, PointEvent, Side } from '../types/match';
 import { matchPassesFilter, teamSide, type MatchFilter } from './analytics';
 import { walkTeamRallies } from './teamRallyWalk';
 
@@ -30,6 +36,14 @@ export interface OnCourtPlayerLine {
   shirt: number;
   name: string;
   position?: string;
+  /**
+   * Position inferred from rally / lineup data when the roster doesn't
+   * carry an explicit `position` field. `'L'` if the player only ever
+   * appears as a libero (in `lineup.liberos`, `homeLiberosOnFloor`, or
+   * libero-on/off events, and never in the 6-position rotation). Empty
+   * when no strong signal exists.
+   */
+  inferredPosition?: 'L';
   matchesAppeared: number;
   setsAppeared: number;
   setsWon: number;
@@ -61,6 +75,112 @@ interface PlayerAcc {
   setsWonKey: Set<string>;
   rallies: number;
   ralliesWon: number;
+  /** Times this shirt appeared in the 6-position rotation (lineup slots
+   *  or stat courtSnapshot.homePositions). */
+  rotationSlotAppearances: number;
+  /** Times this shirt appeared as a libero (lineup.liberos,
+   *  homeLiberosOnFloor on a snapshot, or libero-on/off events). */
+  liberoMarkerAppearances: number;
+}
+
+interface MatchParticipation {
+  /** All shirts that took part in this match in any signal — used for M. */
+  byMatch: Set<number>;
+  /** Per-set shirts that took part — used for Sets / Set%. */
+  bySet: Map<number, Set<number>>;
+  /** Shirts that appeared in any 6-position rotation slot in this match. */
+  rotationShirts: Set<number>;
+  /** Shirts that appeared as a libero in this match. */
+  liberoShirts: Set<number>;
+}
+
+/**
+ * Scan every event in a match for our-side participation signals so M /
+ * Sets counts capture liberos and other players whose presence isn't
+ * fully reconstructed by the rotation walker. Distinct from
+ * `walkTeamRallies`, which only emits per-rally on-court sets from the
+ * simulated rotation.
+ */
+function gatherMatchParticipation(
+  match: Match,
+  ourSide: Side
+): MatchParticipation {
+  const byMatch = new Set<number>();
+  const bySet = new Map<number, Set<number>>();
+  const rotationShirts = new Set<number>();
+  const liberoShirts = new Set<number>();
+
+  function markShirt(shirt: number | undefined | null, setIdx: number): void {
+    if (shirt == null || shirt === 0) return;
+    byMatch.add(shirt);
+    let s = bySet.get(setIdx);
+    if (!s) {
+      s = new Set();
+      bySet.set(setIdx, s);
+    }
+    s.add(shirt);
+  }
+
+  function markRotationSlots(shirts: readonly number[], setIdx: number): void {
+    for (const shirt of shirts) {
+      if (shirt == null || shirt === 0) continue;
+      rotationShirts.add(shirt);
+      markShirt(shirt, setIdx);
+    }
+  }
+
+  function markLibero(shirt: number | undefined | null, setIdx: number): void {
+    if (shirt == null || shirt === 0) return;
+    liberoShirts.add(shirt);
+    markShirt(shirt, setIdx);
+  }
+
+  for (const ev of match.events as MatchEvent[]) {
+    const setIdx = ev.setIndex;
+    if (ev.type === 'lineup' && ev.team === ourSide) {
+      markRotationSlots(ev.positions, setIdx);
+      if (Array.isArray(ev.liberos)) {
+        for (const lib of ev.liberos) markLibero(lib, setIdx);
+      }
+    } else if (ev.type === 'sub' && ev.team === ourSide) {
+      markShirt(ev.in, setIdx);
+      markShirt(ev.out, setIdx);
+    } else if (ev.type === 'libero-on' && ev.team === ourSide) {
+      markLibero(ev.libero, setIdx);
+      markShirt(ev.replaces, setIdx);
+    } else if (ev.type === 'libero-off' && ev.team === ourSide) {
+      markLibero(ev.libero, setIdx);
+    } else if (ev.type === 'libero-officially-replaced' && ev.team === ourSide) {
+      markLibero(ev.libero, setIdx);
+    } else if (ev.type === 'stat' && (ev as StatEvent).team === ourSide) {
+      const se = ev as StatEvent;
+      markShirt(se.shirt, setIdx);
+      const snap = se.courtSnapshot;
+      if (snap) {
+        const positions = ourSide === 'home' ? snap.homePositions : snap.awayPositions;
+        const lib = ourSide === 'home' ? snap.homeLiberosOnFloor : snap.awayLiberosOnFloor;
+        if (Array.isArray(positions)) markRotationSlots(positions, setIdx);
+        if (lib != null) markLibero(lib, setIdx);
+      }
+    } else if (ev.type === 'point') {
+      const pe = ev as PointEvent;
+      // Credit the scoring shirt on our side; the courtSnapshot, when
+      // present, tells us everyone on the floor for both teams.
+      if (pe.scoringTeam === ourSide) {
+        markShirt(pe.shirt, setIdx);
+        if (pe.assistShirt != null) markShirt(pe.assistShirt, setIdx);
+      }
+      const snap = pe.courtSnapshot;
+      if (snap) {
+        const positions = ourSide === 'home' ? snap.homePositions : snap.awayPositions;
+        const lib = ourSide === 'home' ? snap.homeLiberosOnFloor : snap.awayLiberosOnFloor;
+        if (Array.isArray(positions)) markRotationSlots(positions, setIdx);
+        if (lib != null) markLibero(lib, setIdx);
+      }
+    }
+  }
+
+  return { byMatch, bySet, rotationShirts, liberoShirts };
 }
 
 export function aggregateOnCourtStats(
@@ -92,6 +212,8 @@ export function aggregateOnCourtStats(
         setsWonKey: new Set(),
         rallies: 0,
         ralliesWon: 0,
+        rotationSlotAppearances: 0,
+        liberoMarkerAppearances: 0,
       };
       accs.set(shirt, a);
     } else {
@@ -111,7 +233,15 @@ export function aggregateOnCourtStats(
 
     const walk = walkTeamRallies(match, ourSide);
     ambiguous += walk.ambiguousRallies;
-    if (!walk.contributedAny) continue;
+
+    // Broader participation scan — captures liberos / subs the rotation
+    // walker misses when the import lacks libero-on events. Used for M
+    // and Sets; rally-level stats below still use `walk.rallies`.
+    const participation = gatherMatchParticipation(match, ourSide);
+
+    const hasParticipation =
+      walk.contributedAny || participation.byMatch.size > 0;
+    if (!hasParticipation) continue;
 
     team.matchCount++;
 
@@ -126,19 +256,13 @@ export function aggregateOnCourtStats(
       }
     }
 
-    // Per-set, per-player appearance tracking.
-    const perSetAppearances = new Map<number, Set<number>>(); // setIdx → shirts on court that set
+    // Per-rally accumulation — rallies / ralliesWon / on-court rallies
+    // share. Only the rotation walker can attribute rallies to specific
+    // shirts on the floor.
     for (const r of walk.rallies) {
       team.rallies++;
       if (r.scoringTeam === ourSide) team.ralliesWon++;
-
-      let appear = perSetAppearances.get(r.setIndex);
-      if (!appear) {
-        appear = new Set();
-        perSetAppearances.set(r.setIndex, appear);
-      }
       for (const shirt of r.ourOnCourt) {
-        appear.add(shirt);
         const meta = rosterByShirt.get(shirt) ?? { name: `#${shirt}` };
         const acc = getAcc(shirt, meta.name, meta.position);
         acc.rallies++;
@@ -146,21 +270,29 @@ export function aggregateOnCourtStats(
       }
     }
 
-    // Roll set appearances + wins into the per-player accumulators.
+    // M — matches appeared in. Any participation signal counts.
+    for (const shirt of participation.byMatch) {
+      const meta = rosterByShirt.get(shirt) ?? { name: `#${shirt}` };
+      const acc = getAcc(shirt, meta.name, meta.position);
+      acc.matchesAppearedSet.add(match.id);
+      if (participation.rotationShirts.has(shirt)) acc.rotationSlotAppearances++;
+      if (participation.liberoShirts.has(shirt)) acc.liberoMarkerAppearances++;
+    }
+
+    // Sets / set wins. A player gets credit for a set whenever they
+    // appear in any signal during that set AND the set has a recorded
+    // outcome (in-progress / abandoned sets still don't count).
     const setOutcome = new Map<number, 'win' | 'loss' | null>();
     for (const r of walk.setResults) setOutcome.set(r.setIndex, r.outcome);
-
-    for (const [setIdx, shirts] of perSetAppearances) {
+    for (const [setIdx, shirts] of participation.bySet) {
       const outcome = setOutcome.get(setIdx) ?? null;
+      if (outcome !== 'win' && outcome !== 'loss') continue;
       const setKey = `${match.id}#${setIdx}`;
       for (const shirt of shirts) {
         const meta = rosterByShirt.get(shirt) ?? { name: `#${shirt}` };
         const acc = getAcc(shirt, meta.name, meta.position);
-        acc.matchesAppearedSet.add(match.id);
-        if (outcome === 'win' || outcome === 'loss') {
-          acc.setsAppearedKey.add(setKey);
-          if (outcome === 'win') acc.setsWonKey.add(setKey);
-        }
+        acc.setsAppearedKey.add(setKey);
+        if (outcome === 'win') acc.setsWonKey.add(setKey);
       }
     }
   }
@@ -172,10 +304,19 @@ export function aggregateOnCourtStats(
   for (const a of accs.values()) {
     const setsAppeared = a.setsAppearedKey.size;
     const setsWon = a.setsWonKey.size;
+    // Infer libero when the player has libero markers but never appeared
+    // in any 6-position rotation slot across the whole slice. Conservative
+    // by design — a player who occasionally subs in as libero AND plays
+    // out the rotation in other matches is not labelled.
+    const inferredPosition: 'L' | undefined =
+      a.liberoMarkerAppearances > 0 && a.rotationSlotAppearances === 0
+        ? 'L'
+        : undefined;
     players.push({
       shirt: a.shirt,
       name: a.name,
       position: a.position,
+      inferredPosition,
       matchesAppeared: a.matchesAppearedSet.size,
       setsAppeared,
       setsWon,
