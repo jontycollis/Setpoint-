@@ -144,12 +144,12 @@ export function ClubViewScreen({ event, clubName, onBack, onTeamPress }: Props) 
   const filteredClubs = q
     ? clubs.filter(
         (c) =>
-          c.clubName.toLowerCase().includes(q) ||
+          (c.clubName ?? '').toLowerCase().includes(q) ||
           c.teams.some(
             (t) =>
-              t.team.TeamText.toLowerCase().includes(q) ||
-              t.team.TeamName.toLowerCase().includes(q) ||
-              t.division.Name.toLowerCase().includes(q)
+              (t.team.TeamText ?? '').toLowerCase().includes(q) ||
+              (t.team.TeamName ?? '').toLowerCase().includes(q) ||
+              (t.division.Name ?? '').toLowerCase().includes(q)
           )
       )
     : clubs;

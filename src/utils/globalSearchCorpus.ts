@@ -72,6 +72,9 @@ export async function buildGlobalSearchCorpus(
 
   for (const snap of sortedAesSnapshots(aesIdx)) {
     for (const team of snap.teams) {
+      // Skip placeholder / withdrawn slots so they don't crash search and
+      // don't appear as empty rows.
+      if (!team.teamName && !team.teamText && !team.clubName) continue;
       const key = `aes:${snap.eventKey}:${snap.divisionId}:${team.teamId}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -92,6 +95,7 @@ export async function buildGlobalSearchCorpus(
 
   for (const snap of sortedTimuSnapshots(timuIdx)) {
     for (const team of snap.teams) {
+      if (!team.teamName) continue;
       const key = `timu:${snap.tid}:${team.teamName.toLowerCase().trim()}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -112,21 +116,21 @@ export function matchesQuery(r: GlobalSearchResult, q: string): boolean {
   switch (r.kind) {
     case 'aes-team':
       return (
-        r.teamName.toLowerCase().includes(q) ||
-        r.teamText.toLowerCase().includes(q) ||
+        (r.teamName ?? '').toLowerCase().includes(q) ||
+        (r.teamText ?? '').toLowerCase().includes(q) ||
         (r.clubName ?? '').toLowerCase().includes(q) ||
-        r.eventName.toLowerCase().includes(q) ||
-        r.divisionName.toLowerCase().includes(q)
+        (r.eventName ?? '').toLowerCase().includes(q) ||
+        (r.divisionName ?? '').toLowerCase().includes(q)
       );
     case 'timu-team':
       return (
-        r.teamName.toLowerCase().includes(q) ||
-        r.tournamentName.toLowerCase().includes(q)
+        (r.teamName ?? '').toLowerCase().includes(q) ||
+        (r.tournamentName ?? '').toLowerCase().includes(q)
       );
     case 'profile-team':
       return (
-        r.team.label.toLowerCase().includes(q) ||
-        r.team.aliases.some((a) => a.toLowerCase().includes(q)) ||
+        (r.team.label ?? '').toLowerCase().includes(q) ||
+        r.team.aliases.some((a) => (a ?? '').toLowerCase().includes(q)) ||
         (r.team.club ?? '').toLowerCase().includes(q)
       );
   }
