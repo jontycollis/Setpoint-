@@ -25,6 +25,8 @@ import type {
 } from '../api/aesClient';
 import { formatDate, formatTime } from '../utils/dates';
 import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
+import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
+import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 import type { AESEvent } from '../types/aes';
 import { WatchLiveButton } from '../components/WatchLiveButton';
 import { CourtStreamConfig } from '../components/CourtStreamConfig';
@@ -58,6 +60,19 @@ export function CourtScheduleScreen({
   const [loadingScores, setLoadingScores] = useState(false);
   // Court stream URL configuration
   const [courtStreamMap, setCourtStreamMap] = useState<CourtStreamMap>({});
+  // Venue tz for display — pulled from any indexed snapshot for this event.
+  // The court schedule screen is event-scoped (not division-scoped), so we
+  // pick the first indexed division as the source of truth (all divisions
+  // in a single event share a venue).
+  const [venueTimeZone, setVenueTimeZone] = useState<string | undefined>(undefined);
+  const [tzMode] = useTzDisplayMode();
+  const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
+  useEffect(() => {
+    loadAesSeasonIndex().then((idx) => {
+      const match = Object.values(idx).find((snap) => snap.eventKey === event.Key);
+      setVenueTimeZone(match?.venueTimeZone);
+    });
+  }, [event.Key]);
   const [showStreamConfig, setShowStreamConfig] = useState(false);
 
   useEffect(() => {
@@ -358,7 +373,7 @@ export function CourtScheduleScreen({
                     >
                       <View style={styles.entryLeft}>
                         <Text style={styles.entryTime}>
-                          {formatTime(match.ScheduledStartDateTime)}
+                          {formatTime(match.ScheduledStartDateTime, displayTz)}
                         </Text>
                         {match.HasOutcome && !hasScores && (
                           <View style={styles.completedDot} />

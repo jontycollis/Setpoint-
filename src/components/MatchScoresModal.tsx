@@ -20,6 +20,10 @@ interface Props {
   match: FlatCourtMatch | null;
   eventKey: string;
   preloadedResult?: MatchResult | null;
+  /** IANA tz used to render the start time. Optional — defaults to
+   *  device-local (preserves prior behaviour for callers that haven't
+   *  been migrated). */
+  displayTz?: string;
 }
 
 export function MatchScoresModal({
@@ -28,6 +32,7 @@ export function MatchScoresModal({
   match,
   eventKey,
   preloadedResult,
+  displayTz,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -81,9 +86,9 @@ export function MatchScoresModal({
               {match.Division?.Name || 'Match'}
             </Text>
             <Text style={styles.meta}>
-              {formatDate(match.ScheduledStartDateTime)}
+              {formatDate(match.ScheduledStartDateTime, displayTz)}
               {'  •  '}
-              {formatTime(match.ScheduledStartDateTime)}
+              {formatTime(match.ScheduledStartDateTime, displayTz)}
               {match.CourtName ? `  •  ${match.CourtName}` : ''}
             </Text>
           </View>

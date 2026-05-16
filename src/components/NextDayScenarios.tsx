@@ -27,6 +27,9 @@ interface Props {
   onScoutOpponent?: (opponentTeamId: number, opponentName: string) => void;
   /** Active bracket play IDs the team is currently in (for next-round lookup) */
   playoffPlayIds?: number[];
+  /** IANA tz used to render scheduled match times. Optional — undefined
+   *  falls back to device-local, preserving the pre-overhaul behaviour. */
+  displayTz?: string;
 }
 
 /** Opponent info extracted from a bracket match */
@@ -274,6 +277,7 @@ export function NextDayScenarios({
   onViewBrackets,
   onScoutOpponent,
   playoffPlayIds,
+  displayTz,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -466,8 +470,8 @@ export function NextDayScenarios({
                 {nr.scheduledStartDateTime != null && (
                   <View style={styles.scenarioHeader}>
                     <Text style={styles.timeText}>
-                      {formatDate(nr.scheduledStartDateTime)}{' '}
-                      {formatTime(nr.scheduledStartDateTime)}
+                      {formatDate(nr.scheduledStartDateTime, displayTz)}{' '}
+                      {formatTime(nr.scheduledStartDateTime, displayTz)}
                     </Text>
                     {nr.courtName && (
                       <View style={styles.courtBadge}>
@@ -619,8 +623,8 @@ export function NextDayScenarios({
             {nextMatch && (
               <View style={styles.scenarioHeader}>
                 <Text style={styles.timeText}>
-                  {formatDate(nextMatch.ScheduledStartDateTime)}{' '}
-                  {formatTime(nextMatch.ScheduledStartDateTime)}
+                  {formatDate(nextMatch.ScheduledStartDateTime, displayTz)}{' '}
+                  {formatTime(nextMatch.ScheduledStartDateTime, displayTz)}
                 </Text>
                 {nextMatch.Court && (
                   <View style={styles.courtBadge}>
@@ -635,7 +639,7 @@ export function NextDayScenarios({
             {/* Work assignment */}
             {workMatch ? (
               <Text style={styles.workLine}>
-                Work: {formatTime(workMatch.ScheduledStartDateTime)}{' '}
+                Work: {formatTime(workMatch.ScheduledStartDateTime, displayTz)}{' '}
                 {workMatch.Court?.Name || ''}
               </Text>
             ) : (

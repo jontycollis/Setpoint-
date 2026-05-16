@@ -16,7 +16,9 @@ import {
 } from '../api/aesClient';
 import type { TeamScheduleMatch, MatchResult, MatchSet } from '../api/aesClient';
 import { Card } from '../components/Card';
-import { formatTime, formatDate } from '../utils/dates';
+import { formatTime, formatDate, parseScheduleTime } from '../utils/dates';
+import { aesSnapshotKey, loadAesSeasonIndex } from '../utils/aesSeasonIndex';
+import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 import type { AESEvent, AESDivision } from '../types/aes';
 
 interface Props {
@@ -49,7 +51,8 @@ interface OpponentStats {
 
 function computeStats(
   matches: TeamScheduleMatch[],
-  teamId: number
+  teamId: number,
+  venueTz: string | undefined
 ): OpponentStats {
   let matchWins = 0,
     matchLosses = 0,
@@ -67,7 +70,9 @@ function computeStats(
 
   // For streak, process in chronological order
   const sorted = [...matches].filter((m) => m.HasScores).sort(
-    (a, b) => new Date(a.ScheduledStartDateTime).getTime() - new Date(b.ScheduledStartDateTime).getTime()
+    (a, b) =>
+      (parseScheduleTime(a.ScheduledStartDateTime, venueTz) ?? 0) -
+      (parseScheduleTime(b.ScheduledStartDateTime, venueTz) ?? 0)
   );
 
   let streakCount = 0;
@@ -148,8 +153,18 @@ export function OpponentScoutScreen({
   const [stats, setStats] = useState<OpponentStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedMatch, setSelectedMatch] = useState<TeamScheduleMatch | null>(null);
+  const [venueTimeZone, setVenueTimeZone] = useState<string | undefined>(undefined);
+  const [tzMode] = useTzDisplayMode();
+  const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
 
   useEffect(() => {
+    // Pull the AES snapshot for this (event, division) so we can interpret
+    // schedule strings in the venue's tz. If no snapshot exists yet we
+    // fall back to device-local, matching pre-overhaul behaviour.
+    loadAesSeasonIndex().then((idx) => {
+      const snap = idx[aesSnapshotKey(event.Key, division.DivisionId)];
+      setVenueTimeZone(snap?.venueTimeZone);
+    });
     loadOpponentData();
   }, []);
 
@@ -161,14 +176,15 @@ export function OpponentScoutScreen({
         getTeamPastSchedule(event.Key, division.DivisionId, opponentTeamId).catch(() => []),
       ]);
       const matches = extractAllScheduleMatches(currentSched, pastSched);
-      // Sort by time ascending
+      // Sort by time ascending — tz-aware so cross-day boundaries near
+      // midnight don't reorder near-simultaneous matches between venues.
       matches.sort(
         (a, b) =>
-          new Date(a.ScheduledStartDateTime).getTime() -
-          new Date(b.ScheduledStartDateTime).getTime()
+          (parseScheduleTime(a.ScheduledStartDateTime, venueTimeZone) ?? 0) -
+          (parseScheduleTime(b.ScheduledStartDateTime, venueTimeZone) ?? 0)
       );
       setAllMatches(matches);
-      setStats(computeStats(matches, opponentTeamId));
+      setStats(computeStats(matches, opponentTeamId, venueTimeZone));
     } catch {
       // all data unavailable
     }
@@ -412,7 +428,7 @@ export function OpponentScoutScreen({
               <Card key={match.MatchId} variant="outlined" style={styles.matchItem}>
                 <View style={styles.matchHeader}>
                   <Text style={styles.matchTime}>
-                    {formatDate(match.ScheduledStartDateTime)}
+                    {formatDate(match.ScheduledStartDateTime, displayTz)}
                   </Text>
                   {match.Court?.Name ? (
                     <View style={styles.courtBadge}>
@@ -441,7 +457,7 @@ export function OpponentScoutScreen({
               <Card key={match.MatchId} variant="outlined" style={styles.matchItem}>
                 <View style={styles.matchHeader}>
                   <Text style={styles.matchTime}>
-                    {formatTime(match.ScheduledStartDateTime)}
+                    {formatTime(match.ScheduledStartDateTime, displayTz)}
                   </Text>
                   {match.Court?.Name ? (
                     <View style={styles.courtBadge}>
@@ -451,7 +467,7 @@ export function OpponentScoutScreen({
                 </View>
                 <Text style={styles.matchVs}>vs {otherTeam}</Text>
                 <Text style={styles.matchDate}>
-                  {formatDate(match.ScheduledStartDateTime)}
+                  {formatDate(match.ScheduledStartDateTime, displayTz)}
                 </Text>
               </Card>
             );

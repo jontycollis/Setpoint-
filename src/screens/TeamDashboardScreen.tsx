@@ -52,7 +52,8 @@ import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
 // store key is retained in storage.ts but is read-only / dead.
 import { scheduleAllMatchNotifications } from '../utils/notifications';
 import type { MatchNotification } from '../utils/notifications';
-import { formatTime, formatDate, getRelativeTime } from '../utils/dates';
+import { formatTime, formatDate, getRelativeTime, parseScheduleTime, formatInVenueTz } from '../utils/dates';
+import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 import { ensureAesIndexed, indexAesSnapshot, loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { addMyTeamAlias } from '../utils/seasonTeamIdentity';
@@ -143,6 +144,25 @@ export function TeamDashboardScreen({
   // mount and after a successful manual add.
   const [aesIndexed, setAesIndexed] = useState<boolean>(false);
   const [adding, setAdding] = useState<boolean>(false);
+  // ─── Display tz: venue-local by default, device-local when the user
+  //     flips "Show in my time" off → on. Persisted to AsyncStorage.
+  const [tzMode, setTzMode] = useTzDisplayMode();
+  const [venueTimeZone, setVenueTimeZone] = useState<string | undefined>(undefined);
+  // When the AES snapshot lands in the index, pull its venueTimeZone so all
+  // subsequent renders pick it up. Falls back to scanning event.Location as
+  // a no-snapshot path (first paint, before the index has been written).
+  useEffect(() => {
+    let active = true;
+    loadAesSeasonIndex().then((idx) => {
+      if (!active) return;
+      const snap = idx[aesSnapshotKey(event.Key, division.DivisionId)];
+      setVenueTimeZone(snap?.venueTimeZone);
+    });
+    return () => {
+      active = false;
+    };
+  }, [event.Key, division.DivisionId, aesIndexed]);
+  const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
   const refreshIndexedFlag = useCallback(async () => {
     try {
       const idx = await loadAesSeasonIndex();
@@ -509,23 +529,31 @@ export function TeamDashboardScreen({
     );
     if (upcoming.length === 0) return;
 
-    const notifs: MatchNotification[] = upcoming.map((m) => {
-      const isFirst = m.FirstTeamId === team.TeamId;
-      return {
-        matchId: m.MatchId,
-        teamText: team.TeamText || team.TeamName,
-        opponentText: isFirst
-          ? m.SecondTeamText || m.SecondTeamName || 'TBD'
-          : m.FirstTeamText || m.FirstTeamName || 'TBD',
-        scheduledStart: m.ScheduledStartDateTime,
-        courtName: m.Court?.Name || 'TBD',
-        eventName: event.Name,
-        divisionName: division.Name,
-      };
-    });
+    const notifs: MatchNotification[] = upcoming
+      .map((m): MatchNotification | null => {
+        const isFirst = m.FirstTeamId === team.TeamId;
+        // Resolve the start as an epoch in the venue tz once, here, so the
+        // notifications layer never has to second-guess the tz of the raw
+        // schedule string.
+        const startMs = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
+        if (startMs == null) return null;
+        return {
+          matchId: m.MatchId,
+          teamText: team.TeamText || team.TeamName,
+          opponentText: isFirst
+            ? m.SecondTeamText || m.SecondTeamName || 'TBD'
+            : m.FirstTeamText || m.FirstTeamName || 'TBD',
+          scheduledStartMs: startMs,
+          venueTimeZone,
+          courtName: m.Court?.Name || 'TBD',
+          eventName: event.Name,
+          divisionName: division.Name,
+        };
+      })
+      .filter((n): n is MatchNotification => n !== null);
 
     scheduleAllMatchNotifications(notifs).catch(() => {});
-  }, [scheduleMatches]);
+  }, [scheduleMatches, venueTimeZone, team.TeamId, team.TeamText, team.TeamName, event.Name, division.Name]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -563,17 +591,25 @@ export function TeamDashboardScreen({
   const upcomingMatches = scheduleMatches
     .filter((m) => !m.HasScores && !m.FirstTeamWon && !m.SecondTeamWon)
     .filter((m) => {
-      const startMs = new Date(m.ScheduledStartDateTime).getTime();
-      if (!isFinite(startMs)) return true;
+      const startMs = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
+      if (startMs == null) return true;
       return startMs > Date.now() - 30 * 60 * 1000;
     })
-    .sort((a, b) => new Date(a.ScheduledStartDateTime).getTime() - new Date(b.ScheduledStartDateTime).getTime());
+    .sort(
+      (a, b) =>
+        (parseScheduleTime(a.ScheduledStartDateTime, venueTimeZone) ?? 0) -
+        (parseScheduleTime(b.ScheduledStartDateTime, venueTimeZone) ?? 0)
+    );
 
   // Past results (completed matches with scores from team schedule endpoints)
   // This includes BOTH pool and playoff matches — the authoritative source
   const pastResults = scheduleMatches
     .filter((m) => m.HasScores || m.FirstTeamWon || m.SecondTeamWon)
-    .sort((a, b) => new Date(b.ScheduledStartDateTime).getTime() - new Date(a.ScheduledStartDateTime).getTime());
+    .sort(
+      (a, b) =>
+        (parseScheduleTime(b.ScheduledStartDateTime, venueTimeZone) ?? 0) -
+        (parseScheduleTime(a.ScheduledStartDateTime, venueTimeZone) ?? 0)
+    );
 
   // ─── Derive all stats from pastResults (covers pools + playoffs) ──────
   let totalWins = 0;
@@ -603,20 +639,27 @@ export function TeamDashboardScreen({
   const totalScheduled = scheduleMatches.length;
 
   // ─── Day filter helpers ──────────────────────────────────────────────
+  // Day boundaries are anchored to the user's chosen display tz: when the
+  // toggle is on "venue", "today" means today in Toronto regardless of
+  // whether the user's phone is on Pacific time.
+  function calendarDayKey(ms: number): string {
+    // YYYY-MM-DD in the active display tz. Uses formatInVenueTz so it
+    // matches the rendering layer's tz exactly.
+    return formatInVenueTz(ms, displayTz, {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    });
+  }
   function isToday(dateStr: string): boolean {
-    const d = new Date(dateStr);
-    const today = new Date();
-    return d.getFullYear() === today.getFullYear() &&
-      d.getMonth() === today.getMonth() &&
-      d.getDate() === today.getDate();
+    const ms = parseScheduleTime(dateStr, venueTimeZone);
+    if (ms == null) return false;
+    return calendarDayKey(ms) === calendarDayKey(Date.now());
   }
   function isYesterday(dateStr: string): boolean {
-    const d = new Date(dateStr);
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    return d.getFullYear() === yesterday.getFullYear() &&
-      d.getMonth() === yesterday.getMonth() &&
-      d.getDate() === yesterday.getDate();
+    const ms = parseScheduleTime(dateStr, venueTimeZone);
+    if (ms == null) return false;
+    return calendarDayKey(ms) === calendarDayKey(Date.now() - 86_400_000);
   }
   function filterByDay<T extends { ScheduledStartDateTime: string }>(items: T[]): T[] {
     if (dayFilter === 'all') return items;
@@ -734,8 +777,25 @@ export function TeamDashboardScreen({
 
         {/* Last updated timestamp */}
         <Text style={styles.lastUpdated}>
-          Updated {getRelativeTime(new Date(lastRefreshTime).toISOString())}
+          Updated {getRelativeTime(new Date(lastRefreshTime).toISOString(), displayTz)}
         </Text>
+
+        {/* "Show in my time" toggle — only meaningful when we actually
+            have a venue tz to switch between. Off (default) → venue-local;
+            On → device-local. Persists across launches. */}
+        {venueTimeZone && (
+          <TouchableOpacity
+            onPress={() => setTzMode(tzMode === 'device' ? 'venue' : 'device')}
+            style={styles.tzToggleRow}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Text style={styles.tzToggleText}>
+              {tzMode === 'device'
+                ? 'Showing in your time · tap for venue time'
+                : 'Showing venue time · tap for your time'}
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {/* Match count summary — all from scheduleMatches for consistency */}
         <View style={styles.statsRow}>
@@ -778,7 +838,7 @@ export function TeamDashboardScreen({
             <Text style={{ fontWeight: '800' }}>{nextWorkDuty.CourtName}</Text>
             {' '}at{' '}
             <Text style={{ fontWeight: '800' }}>
-              {formatTime(nextWorkDuty.ScheduledStartDateTime)}
+              {formatTime(nextWorkDuty.ScheduledStartDateTime, displayTz)}
             </Text>
           </Text>
           {workDutyMatches.length > 1 && (
@@ -845,8 +905,11 @@ export function TeamDashboardScreen({
         const playoffPlayId = nextMatchEnriched?.PlayId;
         const playoffName = nextMatchEnriched?.PlayName;
 
-        // Live countdown
-        const matchMs = new Date(current.NextMatch.ScheduledStartDateTime).getTime();
+        // Live countdown — parse the schedule string via the venue tz so
+        // a 9 AM Toronto match counts down correctly even when the user's
+        // device is on Pacific time.
+        const matchMs =
+          parseScheduleTime(current.NextMatch.ScheduledStartDateTime, venueTimeZone) ?? 0;
         const diffMs = matchMs - now;
         const diffMins = Math.floor(diffMs / 60000);
         const isLive = diffMins < 0;
@@ -863,17 +926,23 @@ export function TeamDashboardScreen({
           const mins = diffMins % 60;
           countdownText = mins > 0 ? `In ${hrs}h ${mins}m` : `In ${hrs}h`;
         } else {
-          // For matches 1+ days away, use calendar-day logic
-          const matchDate = new Date(current.NextMatch.ScheduledStartDateTime);
-          const todayMid = new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate());
-          const matchMid = new Date(matchDate.getFullYear(), matchDate.getMonth(), matchDate.getDate());
-          const dayDiff = Math.round((matchMid.getTime() - todayMid.getTime()) / 86400000);
-          if (dayDiff === 1) {
+          // For matches 1+ days away, use calendar-day comparison anchored
+          // in the display tz so "Tomorrow" lines up with what the user
+          // sees on the match card.
+          const matchKey = formatInVenueTz(matchMs, displayTz, {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          });
+          const tomorrowKey = formatInVenueTz(Date.now() + 86_400_000, displayTz, {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+          });
+          if (matchKey === tomorrowKey) {
             countdownText = 'Tomorrow';
           } else {
-            // Show day name, e.g. "Thursday"
-            const dayName = matchDate.toLocaleDateString('en-US', { weekday: 'long' });
-            countdownText = dayName;
+            countdownText = formatInVenueTz(matchMs, displayTz, { weekday: 'long' });
           }
         }
 
@@ -926,9 +995,18 @@ export function TeamDashboardScreen({
                   </Text>
                 </View>
                 <Text style={styles.nextMatchTime}>
-                  {formatTime(current.NextMatch.ScheduledStartDateTime)}
+                  {formatInVenueTz(matchMs, displayTz, {
+                    hour: 'numeric',
+                    minute: '2-digit',
+                    hour12: true,
+                    timeZoneName: displayTz ? 'short' : undefined,
+                  })}
                   {'  '}
-                  {formatDate(current.NextMatch.ScheduledStartDateTime)}
+                  {formatInVenueTz(matchMs, displayTz, {
+                    weekday: 'short',
+                    month: 'short',
+                    day: 'numeric',
+                  })}
                 </Text>
                 <Text style={styles.nextMatchVs}>vs {current.OpponentTeamText}</Text>
                 {/* Head-to-head previous result */}
@@ -1183,9 +1261,9 @@ export function TeamDashboardScreen({
                   )}
                   <View style={styles.matchHeader}>
                     <Text style={styles.matchTime}>
-                      {formatDate(match.ScheduledStartDateTime)}
+                      {formatDate(match.ScheduledStartDateTime, displayTz)}
                       {'  '}
-                      {formatTime(match.ScheduledStartDateTime)}
+                      {formatTime(match.ScheduledStartDateTime, displayTz)}
                     </Text>
                     <View style={styles.courtBadge}>
                       <Text style={styles.courtBadgeText}>{match.Court?.Name || ''}</Text>
@@ -1217,6 +1295,7 @@ export function TeamDashboardScreen({
             myFinishRank={latestPool?.poolRecord.FinishRank ?? null}
             onViewBrackets={onViewBrackets}
             onScoutOpponent={onScoutOpponent}
+            displayTz={displayTz}
             playoffPlayIds={playoffPlayIds.length > 0 ? playoffPlayIds : undefined}
           />
         </View>
@@ -1359,9 +1438,9 @@ export function TeamDashboardScreen({
                   )}
                   <View style={styles.matchHeader}>
                     <Text style={styles.matchTime}>
-                      {formatDate(match.ScheduledStartDateTime)}
+                      {formatDate(match.ScheduledStartDateTime, displayTz)}
                       {'  '}
-                      {formatTime(match.ScheduledStartDateTime)}
+                      {formatTime(match.ScheduledStartDateTime, displayTz)}
                     </Text>
                     <View style={styles.courtBadge}>
                       <Text style={styles.courtBadgeText}>{match.Court?.Name || ''}</Text>
@@ -1556,6 +1635,7 @@ export function TeamDashboardScreen({
         onClose={() => setScoresModalMatch(null)}
         match={scoresModalMatch}
         eventKey={event.Key}
+        displayTz={displayTz}
         preloadedResult={
           scoresModalMatch ? matchResults.get(scoresModalMatch.MatchId) ?? null : null
         }
@@ -1945,6 +2025,16 @@ function makeStyles(colors: ThemeColors) {
     textAlign: 'center',
     marginTop: spacing.sm,
     marginBottom: spacing.xs,
+  },
+  tzToggleRow: {
+    alignSelf: 'center',
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.md,
+  },
+  tzToggleText: {
+    fontSize: fontSize.xs,
+    color: 'rgba(255,255,255,0.7)',
+    textAlign: 'center',
   },
   updateBanner: {
     // `top` is patched at render time from insets.top + 56 so the

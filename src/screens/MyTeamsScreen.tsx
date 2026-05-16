@@ -15,7 +15,9 @@ import {
   getCachedEvent,
 } from '../api/aesClient';
 import type { AESTeamAssignment, FavoriteTeam } from '../types/aes';
-import { formatTime, formatDate, getRelativeTime } from '../utils/dates';
+import { formatTime, formatDate, getRelativeTime, parseScheduleTime } from '../utils/dates';
+import { loadAesSeasonIndex } from '../utils/aesSeasonIndex';
+import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 
 interface Props {
   myTeam: FavoriteTeam | null;
@@ -60,6 +62,25 @@ export function MyTeamsScreen({
   const [teamInfos, setTeamInfos] = useState<TeamMatchInfo[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  // Per-event venue tz, keyed by AES event key. Resolved lazily from the
+  // AES season index — missing entries fall back to device-local.
+  const [tzByEventKey, setTzByEventKey] = useState<Record<string, string | undefined>>({});
+  const [tzMode] = useTzDisplayMode();
+  useEffect(() => {
+    loadAesSeasonIndex().then((idx) => {
+      const next: Record<string, string | undefined> = {};
+      for (const snap of Object.values(idx)) {
+        next[snap.eventKey] = snap.venueTimeZone;
+      }
+      setTzByEventKey(next);
+    });
+  }, []);
+  function tzForTeam(team: FavoriteTeam): string | undefined {
+    return tzByEventKey[team.eventKey];
+  }
+  function displayTzFor(team: FavoriteTeam): string | undefined {
+    return effectiveTzForDisplay(tzMode, tzForTeam(team));
+  }
 
   const trackedTeams = getAllTrackedTeams(myTeam, favoriteTeams);
 
@@ -127,7 +148,10 @@ export function MyTeamsScreen({
   interface UpcomingMatch {
     team: FavoriteTeam;
     assignment: AESTeamAssignment;
-    matchTime: Date;
+    /** Epoch ms — parsed via the event's venue tz when available so a
+     *  9 AM Toronto match is correctly placed earlier than a 9 AM
+     *  Vancouver match in the same list. */
+    matchMs: number;
     courtName: string;
     opponentName: string;
     isMyTeam: boolean;
@@ -137,16 +161,18 @@ export function MyTeamsScreen({
   for (const info of teamInfos) {
     if (!info.assignment?.NextMatch) continue;
     const nm = info.assignment.NextMatch;
+    const matchMs = parseScheduleTime(nm.ScheduledStartDateTime, tzForTeam(info.team));
+    if (matchMs == null) continue;
     upcomingMatches.push({
       team: info.team,
       assignment: info.assignment,
-      matchTime: new Date(nm.ScheduledStartDateTime),
+      matchMs,
       courtName: nm.Court?.Name || 'TBD',
       opponentName: info.assignment.OpponentTeamText || info.assignment.OpponentTeamName || 'TBD',
       isMyTeam: !!myTeam && info.team.teamId === myTeam.teamId && info.team.eventKey === myTeam.eventKey,
     });
   }
-  upcomingMatches.sort((a, b) => a.matchTime.getTime() - b.matchTime.getTime());
+  upcomingMatches.sort((a, b) => a.matchMs - b.matchMs);
 
   return (
     <ScrollView
@@ -175,10 +201,11 @@ export function MyTeamsScreen({
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Upcoming Matches</Text>
           {upcomingMatches.map((um, i) => {
-            const diffMs = um.matchTime.getTime() - Date.now();
+            const diffMs = um.matchMs - Date.now();
             const diffMins = Math.round(diffMs / 60000);
             const isImminent = diffMins >= 0 && diffMins <= 30;
             const isSoon = diffMins > 30 && diffMins <= 120;
+            const teamTz = displayTzFor(um.team);
             return (
               <TouchableOpacity
                 key={`${um.team.eventKey}-${um.team.teamId}-${i}`}
@@ -203,10 +230,10 @@ export function MyTeamsScreen({
                       ? `${diffMins}m`
                       : diffMins < 1440
                       ? `${Math.round(diffMins / 60)}h`
-                      : formatDate(um.matchTime.toISOString())}
+                      : formatDate(um.matchMs, teamTz)}
                   </Text>
                   <Text style={styles.matchTimeText}>
-                    {formatTime(um.matchTime.toISOString())}
+                    {formatTime(um.matchMs, teamTz)}
                   </Text>
                 </View>
                 <View style={styles.matchInfoCol}>
@@ -327,7 +354,7 @@ export function MyTeamsScreen({
                             </Text>
                           ) : info.assignment?.NextMatch ? (
                             <Text style={styles.teamNextMatch}>
-                              Next: {formatTime(info.assignment.NextMatch.ScheduledStartDateTime)}{' '}
+                              Next: {formatTime(info.assignment.NextMatch.ScheduledStartDateTime, displayTzFor(info.team))}{' '}
                               on {info.assignment.NextMatch.Court?.Name || 'TBD'} vs{' '}
                               {info.assignment.OpponentTeamText || 'TBD'}
                             </Text>

@@ -24,7 +24,9 @@ import type {
   CourtScheduleResponse,
 } from '../api/aesClient';
 import type { AESEvent, AESDivision } from '../types/aes';
-import { formatTime } from '../utils/dates';
+import { formatTime, parseScheduleTime, todayApiDate } from '../utils/dates';
+import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
+import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 
 interface Props {
   event: AESEvent;
@@ -51,7 +53,17 @@ export function LiveScoreboardScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdate, setLastUpdate] = useState(Date.now());
   const [now, setNow] = useState(Date.now());
+  const [venueTimeZone, setVenueTimeZone] = useState<string | undefined>(undefined);
+  const [tzMode] = useTzDisplayMode();
+  const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    loadAesSeasonIndex().then((idx) => {
+      const snap = idx[aesSnapshotKey(event.Key, division.DivisionId)];
+      setVenueTimeZone(snap?.venueTimeZone);
+    });
+  }, [event.Key, division.DivisionId]);
 
   // Tick for live time display
   useEffect(() => {
@@ -59,11 +71,20 @@ export function LiveScoreboardScreen({
     return () => clearInterval(t);
   }, []);
 
+  // Re-load when the venue tz becomes known: if we built the first request
+  // before the snapshot lookup landed we'd have keyed off device-local; a
+  // background refresh keeps the display tied to the venue's calendar.
+  // (See loadData below — gated on venueTimeZone.)
+
   const loadData = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      // Get today's date in the event's timezone (use current date)
-      const today = new Date().toISOString().split('T')[0];
+      // Today's date in the venue's calendar — `toISOString().split('T')[0]`
+      // returns UTC, which can roll back to "yesterday" for users west of
+      // UTC late at night and miss the current day's matches. Use
+      // `todayApiDate(venueTimeZone)` which respects the venue's calendar
+      // when known, falling back to device-local otherwise.
+      const today = todayApiDate(venueTimeZone);
       const scheduleData = await getCourtSchedule(event.Key, today);
       const flat = flattenCourtSchedule(scheduleData);
       const divMatches = filterMatchesForDivision(flat, division.DivisionId);
@@ -78,11 +99,11 @@ export function LiveScoreboardScreen({
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [event.Key, division.DivisionId]);
+  }, [event.Key, division.DivisionId, venueTimeZone]);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   // Poll every 60s
   useEffect(() => {
@@ -158,7 +179,7 @@ export function LiveScoreboardScreen({
         <View style={styles.matchMeta}>
           <Text style={styles.matchCourt}>{m.CourtName}</Text>
           <Text style={styles.matchTime}>
-            {formatTime(m.ScheduledStartDateTime)}
+            {formatTime(m.ScheduledStartDateTime, displayTz)}
           </Text>
           {isLive && <View style={styles.liveDot} />}
           {m.CompleteShortName ? (

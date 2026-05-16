@@ -166,6 +166,14 @@ export interface MatchVenue {
   /** ISO 3-letter country code of the host (printed top-right of every
    *  paper sheet, e.g. "CAN"). */
   countryCode?: string;
+  /**
+   * IANA time zone identifier for the venue, e.g. `"America/Toronto"`.
+   * Used to parse schedule strings without a tz suffix as wall-time at the
+   * venue (not on the user's device) and to render times in venue-local by
+   * default. Optional — when absent, consumers fall back to device-local
+   * formatting, preserving pre-overhaul behaviour for existing matches.
+   */
+  timeZone?: string;
 }
 
 /**

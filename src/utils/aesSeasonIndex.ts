@@ -26,6 +26,8 @@ import type {
   AESStanding,
   AESDivision,
 } from '../types/aes';
+import { tzForCanadianProvince, tzForVenueAddress } from './venueTimeZone';
+import { parseScheduleTime, formatInVenueTz } from './dates';
 
 const STORAGE_KEY = 'aes.seasonIndex.v1';
 
@@ -46,6 +48,13 @@ export interface AesTournamentSnapshot {
   dateText: string;        // "Apr 16 – 18"
   dateMs?: number;         // start of event in ms
   venueName: string;
+  /**
+   * IANA time zone for the event venue (e.g. `"America/Toronto"`). Resolved
+   * from the AES listing event's `address.state` (or a name heuristic) at
+   * index time. Optional — older snapshots without it fall back to
+   * device-local display.
+   */
+  venueTimeZone?: string;
 
   teams: Array<AesTeamRow>;
 
@@ -142,7 +151,14 @@ export async function removeAesSnapshot(
 export async function buildAesSnapshot(
   eventKey: string,
   divisionId: number,
-  teamId: number
+  teamId: number,
+  /**
+   * Optional venue-tz hints. Most call sites don't have these — pass them
+   * from places that have already fetched the AES listing (the listing has
+   * an `address.state` we can map to IANA tz directly). When absent we
+   * fall back to scanning `event.Location` heuristically.
+   */
+  hints?: { state?: string; address?: string }
 ): Promise<AesTournamentSnapshot | null> {
   let event: AESEvent;
   try {
@@ -180,8 +196,17 @@ export async function buildAesSnapshot(
     /* non-fatal */
   }
 
+  // Resolve a venue tz before we parse per-match times so that wall-clock
+  // strings without a tz suffix get interpreted as venue-local.
+  const venueTimeZone =
+    (hints?.state && tzForCanadianProvince(hints.state)) ||
+    (hints?.address && tzForVenueAddress(hints.address)) ||
+    (event.Location && tzForVenueAddress(event.Location)) ||
+    (event.Name && tzForVenueAddress(event.Name)) ||
+    undefined;
+
   const matches = scheduleMatches
-    .map((m) => toMatchEntry(m, teamId))
+    .map((m) => toMatchEntry(m, teamId, venueTimeZone ?? undefined))
     .filter((m): m is AesMatchEntry => m !== null)
     // Chronological (oldest first) — history screen reverses per-tournament
     .sort((a, b) => a.dateMs - b.dateMs);
@@ -204,6 +229,7 @@ export async function buildAesSnapshot(
     dateText,
     dateMs,
     venueName: event.Location || '',
+    venueTimeZone: venueTimeZone ?? undefined,
     teams,
     matches,
     indexedAt: Date.now(),
@@ -217,9 +243,10 @@ export async function buildAesSnapshot(
 export async function indexAesSnapshot(
   eventKey: string,
   divisionId: number,
-  teamId: number
+  teamId: number,
+  hints?: { state?: string; address?: string }
 ): Promise<AesSeasonIndex> {
-  const snap = await buildAesSnapshot(eventKey, divisionId, teamId);
+  const snap = await buildAesSnapshot(eventKey, divisionId, teamId, hints);
   if (!snap) return readIndex();
   const cur = await readIndex();
   const next = { ...cur, [aesSnapshotKey(eventKey, divisionId)]: snap };
@@ -235,7 +262,8 @@ export async function ensureAesIndexed(
   eventKey: string,
   divisionId: number,
   teamId: number,
-  staleMs: number = 2 * 60 * 1000
+  staleMs: number = 2 * 60 * 1000,
+  hints?: { state?: string; address?: string }
 ): Promise<AesSeasonIndex> {
   const cur = await readIndex();
   const key = aesSnapshotKey(eventKey, divisionId);
@@ -247,7 +275,7 @@ export async function ensureAesIndexed(
   ) {
     return cur;
   }
-  return indexAesSnapshot(eventKey, divisionId, teamId);
+  return indexAesSnapshot(eventKey, divisionId, teamId, hints);
 }
 
 // ── Pure helpers ──────────────────────────────────────────────────────────
@@ -268,7 +296,8 @@ function standingToTeamRow(s: AESStanding): AesTeamRow {
 
 function toMatchEntry(
   m: EnrichedScheduleMatch,
-  myTeamId: number
+  myTeamId: number,
+  venueTz: string | undefined
 ): AesMatchEntry | null {
   const iAmFirst = m.FirstTeamId === myTeamId;
   const iAmSecond = m.SecondTeamId === myTeamId;
@@ -299,17 +328,20 @@ function toMatchEntry(
   const isPool = (m.PlayType ?? 0) !== 1;
   const roundLabel =
     m.PlayName || m.MatchShortName || (isPool ? 'Pool Play' : 'Playoffs');
-  const dateMs = parseIsoDate(m.ScheduledStartDateTime) ?? 0;
-  const d = dateMs ? new Date(dateMs) : null;
-  const dateText = d
-    ? d.toLocaleDateString('en-US', {
+  // Parse the schedule string venue-tz-aware: AES feeds us `"…T09:00:00"`
+  // without a tz suffix, which actually means 9 AM at the venue. The cached
+  // dateText/time strings are stamped venue-local too so downstream renders
+  // are consistent regardless of where the user opens the snapshot from.
+  const dateMs = parseScheduleTime(m.ScheduledStartDateTime, venueTz) ?? 0;
+  const dateText = dateMs
+    ? formatInVenueTz(dateMs, venueTz, {
         weekday: 'short',
         month: 'short',
         day: 'numeric',
       })
     : '';
-  const time = d
-    ? d.toLocaleTimeString('en-US', {
+  const time = dateMs
+    ? formatInVenueTz(dateMs, venueTz, {
         hour: 'numeric',
         minute: '2-digit',
       })
