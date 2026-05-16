@@ -48,7 +48,8 @@ export function TeamSelectScreen({
       setFiltered(
         teams.filter(
           (t) =>
-            t.TeamName.toLowerCase().includes(q) ||
+            (t.TeamName ?? '').toLowerCase().includes(q) ||
+            (t.TeamText ?? '').toLowerCase().includes(q) ||
             (t.TeamClub?.Name ?? '').toLowerCase().includes(q)
         )
       );
@@ -60,8 +61,21 @@ export function TeamSelectScreen({
     setError(null);
     try {
       const data = await getTeamAssignments(event.Key, division.DivisionId);
-      setTeams(data);
-      setFiltered(data);
+      // Drop placeholder / withdrawn slots whose name fields are all empty —
+      // they crash search and otherwise render as blank rows.
+      const usable = data.filter((t) => {
+        const hasName = !!(t.TeamName || t.TeamText || t.TeamClub?.Name);
+        if (!hasName && __DEV__) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[AES] TeamAssignment with null Name in ${event.Key} / division ${division.DivisionId}`,
+            { TeamId: t.TeamId }
+          );
+        }
+        return hasName;
+      });
+      setTeams(usable);
+      setFiltered(usable);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -78,13 +92,13 @@ export function TeamSelectScreen({
         activeOpacity={0.7}
       >
         <View style={styles.teamInfo}>
-          <Text style={styles.teamName}>{item.TeamText}</Text>
+          <Text style={styles.teamName}>{item.TeamText || item.TeamName || 'Unknown Team'}</Text>
           {item.TeamClub?.Name ? (
             <Text style={styles.clubName}>{item.TeamClub.Name}</Text>
           ) : null}
           {item.NextMatch && (
             <Text style={styles.nextMatch}>
-              Next: vs {item.OpponentTeamName} - {item.NextMatch.Court.Name}
+              Next: vs {item.OpponentTeamName} - {item.NextMatch.Court?.Name || 'TBD'}
             </Text>
           )}
         </View>
