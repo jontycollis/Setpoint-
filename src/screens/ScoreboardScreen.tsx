@@ -42,6 +42,13 @@ import type { ThemeColors } from '../utils/theme';
 import { WinProbabilityBar } from '../components/WinProbabilityBar';
 
 const STORAGE_KEY = 'scoreboard.v3';
+/** Live match state (separate from config). Persisted on every meaningful
+ *  state change so the user can exit + return without losing scores. */
+const MATCH_STORAGE_KEY = 'scoreboard.match.v1';
+/** If the user re-enters within this window of `lastTouchAt`, silently
+ *  resume. Beyond this window — show a "Resume or start new?" prompt
+ *  so a stale match from yesterday doesn't auto-restore. */
+const RESUME_WINDOW_MS = 5 * 60 * 1000;
 
 type Sport = 'indoor' | 'beach';
 
@@ -68,6 +75,32 @@ interface UndoSnapshot {
   server: 'home' | 'away' | null;
   homeTimeouts: number;
   awayTimeouts: number;
+}
+
+/** Persisted live match state. `lastTouchAt` is the epoch ms of the
+ *  most-recent user-driven state change; used to decide auto-resume
+ *  vs prompt on re-entry. */
+interface SavedMatch {
+  lastTouchAt: number;
+  homePts: number;
+  awayPts: number;
+  server: 'home' | 'away' | null;
+  setHistory: SetResult[];
+  homeTimeouts: number;
+  awayTimeouts: number;
+  undoStack: UndoSnapshot[];
+}
+
+/** Does the saved match represent any actual play — i.e. enough to be
+ *  worth resuming? Empty / 0-0 saves get ignored so a clean re-entry
+ *  doesn't show the resume prompt over nothing. */
+function matchHasProgress(m: SavedMatch | null): boolean {
+  if (!m) return false;
+  if (m.setHistory.length > 0) return true;
+  if (m.homePts > 0 || m.awayPts > 0) return true;
+  if (m.homeTimeouts > 0 || m.awayTimeouts > 0) return true;
+  if (m.server !== null) return true;
+  return false;
 }
 
 interface Props {
@@ -123,6 +156,15 @@ export function ScoreboardScreen({ onBack }: Props) {
   const [colorTarget, setColorTarget] = useState<'home' | 'away' | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  /** Saved match staged on mount when the user has been away longer
+   *  than RESUME_WINDOW_MS. While this is non-null the resume modal
+   *  is open; the user picks Resume → apply, or Start new → discard. */
+  const [pendingResumeMatch, setPendingResumeMatch] =
+    useState<SavedMatch | null>(null);
+  /** Set once we've finished the initial check + restore so the
+   *  persist effect knows it's safe to start writing. Different from
+   *  `hydrated` (which gates the config persist effect). */
+  const [matchHydrated, setMatchHydrated] = useState(false);
 
   // Load saved config on mount.
   useEffect(() => {
@@ -162,6 +204,53 @@ export function ScoreboardScreen({ onBack }: Props) {
       .finally(() => setHydrated(true));
   }, []);
 
+  // ── Match-state resume gate ────────────────────────────────────────
+  // Load the persisted live match on mount, then decide:
+  //   - no saved match OR no actual progress → start fresh
+  //   - saved match with progress, `lastTouchAt` within 5 min →
+  //     silently restore (the user just stepped out for a moment)
+  //   - saved match with progress, older than 5 min → stage it in
+  //     `pendingResumeMatch` and show the modal. User picks
+  //     Resume (apply state) or Start new (clear the saved match).
+  useEffect(() => {
+    AsyncStorage.getItem(MATCH_STORAGE_KEY)
+      .then((s) => {
+        if (!s) return;
+        let saved: SavedMatch | null = null;
+        try {
+          saved = JSON.parse(s) as SavedMatch;
+        } catch {
+          // Corrupt — drop it.
+          AsyncStorage.removeItem(MATCH_STORAGE_KEY).catch(() => {});
+          return;
+        }
+        if (!matchHasProgress(saved)) return;
+        const fresh = Date.now() - saved.lastTouchAt < RESUME_WINDOW_MS;
+        if (fresh) {
+          applySavedMatch(saved);
+        } else {
+          setPendingResumeMatch(saved);
+        }
+      })
+      .finally(() => setMatchHydrated(true));
+    // We intentionally run this once on mount; applySavedMatch is
+    // stable enough to not need to be a dep since it only calls
+    // setters captured at render time.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Apply a saved match into live state. Used by both silent restore
+  // and the modal's "Resume" button.
+  function applySavedMatch(m: SavedMatch) {
+    setHomePts(m.homePts);
+    setAwayPts(m.awayPts);
+    setServer(m.server);
+    setSetHistory(m.setHistory);
+    setHomeTimeouts(m.homeTimeouts);
+    setAwayTimeouts(m.awayTimeouts);
+    setUndoStack(m.undoStack);
+  }
+
   // Persist whenever any persisted field changes.
   useEffect(() => {
     if (!hydrated) return;
@@ -186,6 +275,41 @@ export function ScoreboardScreen({ onBack }: Props) {
     regularSetTarget,
     decidingSetTarget,
     hydrated,
+  ]);
+
+  // Persist live match state on every change. Gated on `matchHydrated`
+  // so we don't overwrite the saved match BEFORE deciding whether to
+  // resume it. The persist captures `lastTouchAt = Date.now()`, which
+  // is also implicitly bumped on silent restore — that's intentional,
+  // each session counts as a "touch" and refreshes the 5-min window.
+  useEffect(() => {
+    if (!matchHydrated) return;
+    // Don't persist while the resume prompt is still open — the user
+    // hasn't decided what they want yet, and our component state is
+    // a fresh 0-0. Writing now would clobber the saved match before
+    // they can pick Resume.
+    if (pendingResumeMatch) return;
+    const m: SavedMatch = {
+      lastTouchAt: Date.now(),
+      homePts,
+      awayPts,
+      server,
+      setHistory,
+      homeTimeouts,
+      awayTimeouts,
+      undoStack,
+    };
+    AsyncStorage.setItem(MATCH_STORAGE_KEY, JSON.stringify(m)).catch(() => {});
+  }, [
+    matchHydrated,
+    pendingResumeMatch,
+    homePts,
+    awayPts,
+    server,
+    setHistory,
+    homeTimeouts,
+    awayTimeouts,
+    undoStack,
   ]);
 
   // Auto-clear timeout overlay after 30 seconds.
@@ -303,6 +427,12 @@ export function ScoreboardScreen({ onBack }: Props) {
             setAwayTimeouts(0);
             setUndoStack([]);
             setTimeoutFor(null);
+            // Clear the persisted match too — otherwise the next
+            // re-entry would silently resume the just-reset state
+            // (within 5 min) or prompt to resume an "empty" match
+            // (older). The persist effect will write the fresh empty
+            // state right back on the next render, which is fine.
+            AsyncStorage.removeItem(MATCH_STORAGE_KEY).catch(() => {});
           },
         },
       ]
@@ -545,6 +675,67 @@ export function ScoreboardScreen({ onBack }: Props) {
         </TouchableOpacity>
       )}
 
+      {/* Resume-previous-match modal. Shows on re-entry when the
+          saved match has progress AND the last touch was more than
+          RESUME_WINDOW_MS ago. Within the 5-min window the saved
+          match is restored silently — this modal never appears.
+          Two destinations:
+            Resume — apply pendingResumeMatch into live state.
+            Start new — clear the saved match; live state is already
+              the default (0-0). */}
+      <Modal
+        visible={!!pendingResumeMatch}
+        transparent
+        animationType="fade"
+        // Tapping the OS back button on Android is "Resume" by
+        // default — most users coming back to a paused match want
+        // their points still on the board.
+        onRequestClose={() => {
+          if (pendingResumeMatch) {
+            applySavedMatch(pendingResumeMatch);
+            setPendingResumeMatch(null);
+          }
+        }}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Resume previous match?</Text>
+            {pendingResumeMatch ? (
+              <ResumeSummary
+                match={pendingResumeMatch}
+                homeName={homeName}
+                awayName={awayName}
+                styles={styles}
+              />
+            ) : null}
+            <View style={styles.modalButtonsRow}>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnCancel]}
+                onPress={() => {
+                  AsyncStorage.removeItem(MATCH_STORAGE_KEY).catch(() => {});
+                  setPendingResumeMatch(null);
+                  // Live state is already fresh (the saved match was
+                  // never applied), so no state resets needed.
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalBtnTextCancel}>Start new</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, styles.modalBtnPrimary]}
+                onPress={() => {
+                  if (pendingResumeMatch) applySavedMatch(pendingResumeMatch);
+                  setPendingResumeMatch(null);
+                }}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.modalBtnTextPrimary}>Resume</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* Edit name + colour modal — combined in one workflow so users
           who want to "set up the home team" can pick name and jersey
           colour in a single dialog. */}
@@ -654,6 +845,44 @@ export function ScoreboardScreen({ onBack }: Props) {
           reset();
         }}
       />
+    </View>
+  );
+}
+
+/** Small summary block shown inside the Resume Match modal — lets
+ *  the user see at a glance what they're being asked to resume.
+ *  Renders "<Home> 2-1 <Away> · Set 4 · 18-15 · last touch 12 min ago". */
+function ResumeSummary({
+  match,
+  homeName,
+  awayName,
+  styles,
+}: {
+  match: SavedMatch;
+  homeName: string;
+  awayName: string;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const homeSetsWon = match.setHistory.filter((s) => s.home > s.away).length;
+  const awaySetsWon = match.setHistory.filter((s) => s.away > s.home).length;
+  const currentSetNumber = match.setHistory.length + 1;
+  const minutesAgo = Math.max(
+    1,
+    Math.round((Date.now() - match.lastTouchAt) / 60_000)
+  );
+  return (
+    <View style={styles.resumeSummary}>
+      <Text style={styles.resumeSummaryScore}>
+        {homeName}{' '}
+        <Text style={styles.resumeSummaryScoreNumeric}>
+          {homeSetsWon}–{awaySetsWon}
+        </Text>{' '}
+        {awayName}
+      </Text>
+      <Text style={styles.resumeSummaryMeta}>
+        Set {currentSetNumber} · {match.homePts}–{match.awayPts} ·{' '}
+        {minutesAgo === 1 ? '1 min ago' : `${minutesAgo} min ago`}
+      </Text>
     </View>
   );
 }
@@ -1569,6 +1798,32 @@ function makeStyles(colors: ThemeColors) {
   modalBtnPrimary: { backgroundColor: colors.primary },
   modalBtnTextCancel: { color: colors.text, fontWeight: '700' },
   modalBtnTextPrimary: { color: colors.textOnPrimary, fontWeight: '700' },
+
+  // ── Resume-match modal summary ──────────────────────────────────
+  resumeSummary: {
+    backgroundColor: colors.primaryLight,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginTop: spacing.sm,
+    marginBottom: spacing.sm,
+    gap: 4,
+  },
+  resumeSummaryScore: {
+    color: colors.text,
+    fontSize: fontSize.md,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  resumeSummaryScoreNumeric: {
+    color: colors.primary,
+    fontSize: fontSize.lg,
+    fontWeight: '900',
+  },
+  resumeSummaryMeta: {
+    color: colors.textSecondary,
+    fontSize: fontSize.sm,
+    textAlign: 'center',
+  },
 
   fieldLabel: {
     color: colors.textSecondary,
