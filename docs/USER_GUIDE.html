@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AES Score Tracker — User Guide</title>
+  <style>
+:root {
+  --primary: #1a73e8;
+  --primary-light: #e8f0fe;
+  --text: #1a1a1a;
+  --muted: #555;
+  --accent: #ff6b35;
+  --rule: #e0e0e0;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color: var(--text);
+  font-size: 12pt;
+  line-height: 1.45;
+}
+body {
+  padding: 0.75in 0.75in 1in 0.75in;
+  max-width: 7in;
+  margin: 0 auto;
+}
+header.cover {
+  border-bottom: 4px solid var(--primary);
+  padding-bottom: 14px;
+  margin-bottom: 28px;
+}
+header.cover h1 {
+  font-size: 28pt;
+  margin: 0;
+  color: var(--primary);
+  letter-spacing: -0.5px;
+}
+header.cover .subtitle {
+  font-size: 11pt;
+  color: var(--muted);
+  margin-top: 6px;
+}
+nav.toc {
+  background: var(--primary-light);
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 28px;
+  page-break-after: always;
+}
+nav.toc h2 {
+  margin: 0 0 8px 0;
+  font-size: 14pt;
+  color: var(--primary);
+}
+nav.toc ol {
+  margin: 0;
+  padding-left: 22px;
+}
+nav.toc li {
+  margin: 4px 0;
+  font-size: 11pt;
+}
+nav.toc a {
+  color: var(--text);
+  text-decoration: none;
+}
+section {
+  page-break-before: always;
+  margin-bottom: 28px;
+}
+section:first-of-type {
+  page-break-before: auto;
+}
+section h2 {
+  font-size: 18pt;
+  color: var(--primary);
+  margin: 0 0 4px 0;
+  border-bottom: 2px solid var(--rule);
+  padding-bottom: 6px;
+}
+section .summary {
+  font-style: italic;
+  color: var(--muted);
+  margin: 8px 0 14px 0;
+  font-size: 11pt;
+}
+section h3 {
+  font-size: 13pt;
+  color: var(--text);
+  margin: 18px 0 6px 0;
+}
+section p {
+  margin: 0 0 10px 0;
+}
+section ul {
+  margin: 6px 0 12px 22px;
+  padding: 0;
+}
+section li {
+  margin: 4px 0;
+}
+aside.tip, aside.note {
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 12px 0;
+  font-size: 11pt;
+  display: block;
+}
+aside.tip {
+  background: var(--primary-light);
+  border-left: 4px solid var(--primary);
+}
+aside.tip strong {
+  color: var(--primary);
+  font-size: 9pt;
+  letter-spacing: 1.4px;
+  display: block;
+  margin-bottom: 4px;
+}
+aside.note {
+  background: #f5f5f5;
+  border-left: 4px solid #888;
+}
+aside.note strong {
+  color: #555;
+  font-size: 9pt;
+  letter-spacing: 1.4px;
+  display: block;
+  margin-bottom: 4px;
+}
+footer {
+  margin-top: 36px;
+  padding-top: 14px;
+  border-top: 1px solid var(--rule);
+  font-size: 9pt;
+  color: var(--muted);
+  text-align: center;
+}
+@media print {
+  body { padding: 0; }
+  nav.toc { box-shadow: none; }
+}
+</style>
+</head>
+<body>
+  <header class="cover">
+    <h1>AES Score Tracker</h1>
+    <div class="subtitle">User Guide · v1.0.0 · 2026-05-17</div>
+  </header>
+  <nav class="toc">
+    <h2>Contents</h2>
+    <ol>
+    <li><a href="#getting-started">Getting started</a> — Add your first team, pick a tournament, see your week.</li>
+    <li><a href="#my-home">My Home</a> — Your dashboard: tracked teams, next match, upcoming events.</li>
+    <li><a href="#team-dashboard">Team Dashboard</a> — Everything about one team: next match, standings, results.</li>
+    <li><a href="#scoreboard">Scoreboard (hold-up flipboard)</a> — Quick-score a match on the bench. Works in landscape too.</li>
+    <li><a href="#score-match">Score a match (full scoresheet)</a> — Sanctioned scoring with rotations, subs, timeouts, sanctions.</li>
+    <li><a href="#analytics">Analytics &amp; stats</a> — Per-player workbook, splits, lineups, sortable columns.</li>
+    <li><a href="#season-history">Season History</a> — All your matches, both AES and Timu, in one timeline.</li>
+    <li><a href="#standings-brackets">Standings &amp; playoff brackets</a> — Pool play, division ranks, playoff seedings and brackets.</li>
+    <li><a href="#add-tournaments">Find or add tournaments</a> — Browse AES + Timu by region. Add your team’s next event.</li>
+    <li><a href="#connection">OVA MRS &amp; CAC Locker</a> — Optional logins for affiliations + NCCP cert checks.</li>
+    <li><a href="#ova-rankings">OVA Rankings</a> — Live Girls + Boys rankings across every division.</li>
+    <li><a href="#privacy">Privacy &amp; data</a> — What we store on your device, what we send, what we don’t.</li>
+    <li><a href="#faq">FAQ</a> — Common confusions and one-line answers.</li>
+    </ol>
+  </nav>
+<section id="getting-started">
+  <h2>Getting started</h2>
+  <p class="summary">Add your first team, pick a tournament, see your week.</p>
+  <p>AES Score Tracker is a companion app for volleyball families and coaches. It pulls the schedules, standings, and brackets from AES and Timu, lets you score matches yourself, and rolls up everything you do into a single per-team Season History and analytics dashboard.</p>
+  <h3>First launch</h3>
+  <ul>
+    <li>Tap “Add team” to set yourself up. Pick AES if your team plays AES-managed events; Timu if it plays Ontario tour stops. You can add both later — the app handles mixed seasons natively.</li>
+    <li>You can also tap “Browse tournaments” first if you just want to look around without committing a team. Add a team later from the hamburger menu.</li>
+  </ul>
+  <h3>Three things you should try in your first session</h3>
+  <ul>
+    <li>Open My Home — your dashboard. Your tracked teams, next match, and the upcoming-tournaments list all live here.</li>
+    <li>Open your Team Dashboard. It is the most-used screen in the app: live next-match countdown, recent results, division standings, pool play, and quick links into deeper views.</li>
+    <li>Open the Scoreboard. Even if you don’t intend to score officially, the hold-up flipboard works as a referee’s scoreboard during a friendly or warm-up.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>Every screen has a “?” button in the top-right that jumps to the relevant section of this help guide.</div></aside>
+</section>
+
+<section id="my-home">
+  <h2>My Home</h2>
+  <p class="summary">Your dashboard: tracked teams, next match, upcoming events.</p>
+  <p>My Home is the app’s landing pad. It’s organized around YOU — your tracked teams up top, the next match across all of them, and a roll-up of upcoming tournaments your teams are entered in or could enter.</p>
+  <h3>Tracked teams</h3>
+  <ul>
+    <li>A coloured chip per team. Tap to open that team’s Dashboard. Long-press for actions — Manage roster, Remove, set as “Me” vs. “Watching”.</li>
+    <li>The active team — the one whose pill is highlighted — drives the Team Analytics tile, the Quick Score tile, and the hamburger’s context.</li>
+  </ul>
+  <h3>Next match card</h3>
+  <ul>
+    <li>Shows the very next scheduled match across all your tracked teams, with a live countdown and court number. Tap it to open the scoreboard pre-wired for that match.</li>
+    <li>Times are shown in the venue’s local time zone by default. The “Show in my time” toggle in the time-zone banner switches to your device time.</li>
+  </ul>
+  <h3>Upcoming tournaments</h3>
+  <ul>
+    <li>Cards roll up tournaments your teams are entered in, plus suggestions based on division + region. Tap a card to open the tournament; if your team is in it, you land directly on your team’s pool.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>A magnifying-glass icon in the top-left of My Home opens Global Search — type any team name, club, athlete, or tournament to jump straight to it.</div></aside>
+</section>
+
+<section id="team-dashboard">
+  <h2>Team Dashboard</h2>
+  <p class="summary">Everything about one team: next match, standings, results.</p>
+  <p>The Team Dashboard is the busiest screen in the app and the one most users open first thing in the morning. It is laid out top-to-bottom in order of urgency: live status, next match, current pool / standings, recent results, season-long stats.</p>
+  <h3>Live status banner</h3>
+  <p>If the team is currently playing — at the venue, between sets, on a court — the banner lights up with the live score and a tap-to-watch link to the live scoreboard.</p>
+  <h3>Next match card</h3>
+  <ul>
+    <li>Countdown, court, opponent, set details. Tap to open the Scoreboard pre-wired for this match.</li>
+    <li>Court number reads as “TBA” until the tournament posts a court assignment. The card refreshes automatically every minute.</li>
+  </ul>
+  <h3>Pool / standings strip</h3>
+  <ul>
+    <li>Shows the team’s current pool with W-L-set ratio and points. Tap any opponent row to open their Opponent Scout — recent results, roster, head-to-head if you have prior matches against them.</li>
+  </ul>
+  <h3>Recent results</h3>
+  <ul>
+    <li>The last 10 matches across all tournaments — both AES and Timu sources mixed. Each row taps through to the per-match boxscore.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>Long-press the team pill in the top bar to switch active teams without closing the dashboard.</div></aside>
+</section>
+
+<section id="scoreboard">
+  <h2>Scoreboard (hold-up flipboard)</h2>
+  <p class="summary">Quick-score a match on the bench. Works in landscape too.</p>
+  <p>The Scoreboard is the hold-up flipboard you’d see on a referee’s stand. It is meant for casual / unofficial scoring — keeping track of a friendly, an exhibition, or just helping a player parent follow along. For full sanctioned scoresheets, use “Score a match” instead.</p>
+  <h3>Basic flow</h3>
+  <ul>
+    <li>Pick your two teams (or open from a Team Dashboard / Next Match card to pre-fill). Tap either team’s number to bump their score.</li>
+    <li>Tap and hold a number to subtract. Swipe down on the panel to start a new set.</li>
+    <li>Rotate your phone to landscape — the scoreboard expands to a full-screen flipboard with the bottom tab bar hidden, perfect for propping the phone up courtside.</li>
+  </ul>
+  <h3>Resume Match</h3>
+  <p>If you close the app or your phone locks while scoring, the live state is preserved for five minutes. Re-opening the app inside that window auto-resumes the match exactly where you left off — including current set, points, and serving team.</p>
+  <aside class="note"><strong>NOTE</strong><div>After 5 minutes the resume prompt expires. Your set history is still saved if you’ve completed any sets.</div></aside>
+</section>
+
+<section id="score-match">
+  <h2>Score a match (full scoresheet)</h2>
+  <p class="summary">Sanctioned scoring with rotations, subs, timeouts, sanctions.</p>
+  <p>Score a match is the full-fat scoring engine — rotations, libero tracking, substitutions, timeouts, sanctions, point-credit, and a proper boxscore at the end. Enable it via the hamburger → “Advanced Scoring” toggle. Off by default.</p>
+  <h3>Before the match</h3>
+  <ul>
+    <li>Make sure both teams have a roster set up (Hamburger → Manage rosters). For opposing teams you can skim a minimal roster from the AES/Timu page.</li>
+    <li>On the match setup screen, pick your starting lineup, libero(s), and captain. The court diagram previews positions 1–6.</li>
+  </ul>
+  <h3>During the match</h3>
+  <ul>
+    <li>Tap the court spot of the player who scored to credit them. The rotation walker advances automatically on a side-out.</li>
+    <li>Substitutions: tap the bench player, then the on-court player to swap. The app enforces officer rules — a player can re-enter once per set into the same spot.</li>
+    <li>Libero swap is automatic when a back-row player rotates in. You can override manually via the libero-on / libero-off buttons.</li>
+  </ul>
+  <h3>After the match</h3>
+  <ul>
+    <li>Boxscore page shows kills, errors, assists, digs, blocks, aces, plus serve-receive pass average. Tap any player row to drill into their per-set numbers.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>Match data feeds the same Season History and Analytics screens as imported AES/Timu/Sideline HD matches — no separate place to look.</div></aside>
+</section>
+
+<section id="analytics">
+  <h2>Analytics &amp; stats</h2>
+  <p class="summary">Per-player workbook, splits, lineups, sortable columns.</p>
+  <p>Analytics aggregates every match your active team has played — AES, Timu, scored-in-app, and Sideline HD imports — into a single per-player dashboard. The layout mirrors the Excel workbook coaches were already using, just live and sortable.</p>
+  <h3>SPLIT chips</h3>
+  <ul>
+    <li>A row of chips at the top filters which matches feed the numbers. Choose by Match kind (All / AES / Timu / Standalone), Match category (preseason / regular / playoff), Phase (group / playoff), or Source. Multiple splits compose.</li>
+  </ul>
+  <h3>METRICS chips</h3>
+  <ul>
+    <li>Below the splits — choose Basic (kills, blocks, aces, digs, errors), Advanced (on-court %, set win %, server splits), or Lineups (top scoring lineup combinations).</li>
+  </ul>
+  <h3>Sortable columns</h3>
+  <ul>
+    <li>Every column header in the per-player table is tappable. First tap sorts that column high → low; second tap flips low → high; tapping a different header resets to high → low. The active column is bold with a ▼ / ▲ chevron.</li>
+  </ul>
+  <h3>Drill-in to a player</h3>
+  <p>Tap a player’s name to open their Player Detail screen: per-tournament breakdown, per-position splits, libero-call accuracy if applicable, and rotation-by-rotation server stats.</p>
+  <h3>What the columns mean</h3>
+  <ul>
+    <li>M — matches the player was on court for. (Libero counts include any match where a libero marker, lineup, or court snapshot includes the player.)</li>
+    <li>Sets — same idea but at set granularity.</li>
+    <li>OC % — on-court percentage. What share of rallies in the filtered matches the player was on court for.</li>
+    <li>SW % — set-win percentage. Of the sets this player was on court for, the share that ended in a win.</li>
+    <li>Pass avg — three-point passing average (3 = perfect, 0 = ace against). Sourced from Sideline HD imports or from in-app scoring.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>Use the “?” chip next to any column header to see its full definition without leaving the screen.</div></aside>
+</section>
+
+<section id="season-history">
+  <h2>Season History</h2>
+  <p class="summary">All your matches, both AES and Timu, in one timeline.</p>
+  <p>Season History is the single cross-system view of every match your team has played this season. AES tournaments, Timu tournaments, standalone scoring, and Sideline HD imports are merged on date and rendered as a unified timeline.</p>
+  <h3>Tournament tiles</h3>
+  <ul>
+    <li>Each tournament is a card with finish, set ratio, and a tappable list of matches. Tap a match to open its boxscore.</li>
+  </ul>
+  <h3>Upcoming tournament cards</h3>
+  <ul>
+    <li>Cards for tournaments that haven’t started yet appear at the top. Tap to open the tournament page — your team’s pool is highlighted in your division’s colour.</li>
+  </ul>
+  <h3>Filtering</h3>
+  <ul>
+    <li>Use the source chip (AES / Timu / All) to focus on one system if your season mixes both.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>Pull-to-refresh re-fetches Timu and AES feeds and merges any newly-finalized matches.</div></aside>
+</section>
+
+<section id="standings-brackets">
+  <h2>Standings &amp; playoff brackets</h2>
+  <p class="summary">Pool play, division ranks, playoff seedings and brackets.</p>
+  <p>Standings shows live pool play results — match record, set ratio, points, head-to-head tiebreakers — and updates as match results come in from AES.</p>
+  <h3>Standings</h3>
+  <ul>
+    <li>Sortable by record, set ratio, or alphabetical. Tap any team row to open Opponent Scout for head-to-head context.</li>
+  </ul>
+  <h3>Playoff brackets</h3>
+  <ul>
+    <li>Renders the bracket tree once playoffs are seeded. Tap any match to drill into the boxscore. Win Probability Bar above the bracket projects your team’s path forward based on current standings.</li>
+  </ul>
+  <aside class="note"><strong>NOTE</strong><div>Both screens depend on AES publishing results in real time. If the bracket looks stale, pull-to-refresh.</div></aside>
+</section>
+
+<section id="add-tournaments">
+  <h2>Find or add tournaments</h2>
+  <p class="summary">Browse AES + Timu by region. Add your team’s next event.</p>
+  <p>The Find or add tournaments screen is how you bring new tournaments into your team’s season. Both AES and Timu can be browsed by date or region.</p>
+  <h3>Searching</h3>
+  <ul>
+    <li>Type a tournament name, city, or club. Results are de-duplicated across AES and Timu — if a tournament is listed in both, you’ll see one card with both sources.</li>
+  </ul>
+  <h3>Adding to your season</h3>
+  <ul>
+    <li>Tap a tournament to preview, then “Track this tournament” to add it. The roll-up in My Home and Season History updates immediately.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>For 2026 Nationals (Edmonton + city events), venue maps are bundled — open any 2026 Nationals tournament to see them.</div></aside>
+</section>
+
+<section id="connection">
+  <h2>OVA MRS &amp; CAC Locker</h2>
+  <p class="summary">Optional logins for affiliations + NCCP cert checks.</p>
+  <p>The Connection screens are entirely optional. They embed the OVA Member Registration System (MRS) and the Coaches Association of Canada (CAC) Locker so you can check your own affiliations, registrations, and certifications without leaving the app.</p>
+  <h3>What it does</h3>
+  <ul>
+    <li>MRS — your OVA affiliation, club membership, registration status, insurance.</li>
+    <li>CAC Locker — your NCCP coaching certifications and pathway.</li>
+  </ul>
+  <h3>What it doesn’t do</h3>
+  <ul>
+    <li>It doesn’t pull or store your credentials anywhere — the WebView simply hosts the official sites with the navigation chrome trimmed for a nicer mobile experience. Logins go directly to OVA / CAC servers.</li>
+  </ul>
+  <aside class="note"><strong>NOTE</strong><div>If you don’t coach or play officially, you can ignore both screens. They’re tucked into Connections &amp; Settings in the hamburger.</div></aside>
+</section>
+
+<section id="ova-rankings">
+  <h2>OVA Rankings</h2>
+  <p class="summary">Live Girls + Boys rankings across every division.</p>
+  <p>OVA Rankings mirrors the official Ontario Volleyball Association rankings — R1, R2, R3 — for every age category and division, Girls and Boys. Numbers update as the OVA publishes new rounds.</p>
+  <ul>
+    <li>Tap any team in the rankings list to open their team page — recent results, current tournament, and a one-tap “Add to My Teams” affordance.</li>
+  </ul>
+  <aside class="tip"><strong>TIP</strong><div>Rankings is also the easiest way to discover a team if you don’t know which tournament they’re currently in.</div></aside>
+</section>
+
+<section id="privacy">
+  <h2>Privacy &amp; data</h2>
+  <p class="summary">What we store on your device, what we send, what we don’t.</p>
+  <p>Short version: your data stays on your device. The app contacts AES, Timu, OVA, and CAC to fetch tournament + ranking data. It does not send your data anywhere except anonymized crash reports.</p>
+  <h3>On-device storage</h3>
+  <ul>
+    <li>Your tracked teams, scored matches, roster, preferences, and a small storage snapshot (for the Restore-from-backup affordance) live in the app’s sandbox. They never leave your phone unless you explicitly share a screen.</li>
+  </ul>
+  <h3>Crash reports</h3>
+  <ul>
+    <li>If the app crashes, Sentry collects a stack trace and a redacted snapshot of the app state. IPs are dropped before the report leaves your phone.</li>
+  </ul>
+  <p>See Hamburger → About &amp; privacy for the full privacy policy and links to the hosted version.</p>
+</section>
+
+<section id="faq">
+  <h2>FAQ</h2>
+  <p class="summary">Common confusions and one-line answers.</p>
+  <h3>Why doesn’t my libero show match counts?</h3>
+  <p>Fixed in the May 2026 update. Sideline HD exports strip libero-on events; the app now infers libero participation from lineup snapshots, point credits, and substitution events.</p>
+  <h3>Why does the Scoreboard look cramped in landscape?</h3>
+  <p>It shouldn’t — the bottom tab bar is hidden in landscape and content padding clears the system nav buttons. If you see it covered, pull to portrait and back to refresh the layout, then update if a newer version is available.</p>
+  <h3>How do I share a screen / boxscore?</h3>
+  <p>Most analytics and match screens have a share button in the header. Tap it to export a snapshot card to Messages, Mail, or AirDrop.</p>
+  <h3>My next match is showing the wrong time zone.</h3>
+  <p>Times default to the venue’s local zone. Toggle “Show in my time” in the time-zone banner on My Home to switch to your device time.</p>
+  <h3>Where is my team’s data after I delete the app?</h3>
+  <p>Gone — everything is on-device. Use Hamburger → Restore from backup before deleting if you want a recovery point. There is no cloud backup.</p>
+  <h3>How do I report a bug or suggest a feature?</h3>
+  <p>Email jontycollis@gmail.com or use the contact link in About &amp; privacy. Bug reports with a screenshot and the in-app version number (About → Version) are easiest to action.</p>
+</section>
+  <footer>
+    AES Score Tracker User Guide · Generated from in-app help · © 2026 Jon Collis
+  </footer>
+</body>
+</html>

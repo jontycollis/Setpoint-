@@ -60,6 +60,8 @@ import { StatsScreen } from './src/screens/StatsScreen';
 import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
+import { HelpScreen } from './src/screens/HelpScreen';
+import type { HelpSectionId } from './src/help/content';
 import {
   OnboardingScreen,
   ONBOARDING_STORAGE_KEY,
@@ -78,6 +80,8 @@ import { TournamentDetailScreen } from './src/screens/TournamentDetailScreen';
 import { GlobalSearchScreen } from './src/screens/GlobalSearchScreen';
 import type { GlobalSearchResult } from './src/screens/GlobalSearchScreen';
 import { HamburgerMenu } from './src/components/HamburgerMenu';
+import { HelpButton } from './src/components/HelpButton';
+import { HELP_SECTION_IDS } from './src/help/content';
 import type { MenuDestination } from './src/components/HamburgerMenu';
 import { TopBar } from './src/components/TopBar';
 import { BottomTabBar, BOTTOM_TAB_BAR_HEIGHT } from './src/components/BottomTabBar';
@@ -196,6 +200,7 @@ type Screen =
   | 'GlobalSearch'
   | 'StorageSnapshot'
   | 'HistoricalImport'
+  | 'Help'
   | 'About';
 
 // AES navigation scope: an event can stand alone (DivisionSelect view), an
@@ -266,6 +271,7 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'PlayerDetail',
   'TournamentDetail',
   'About',
+  'Help',
 ]);
 
 // Screens where the bottom tab bar is hidden (focused full-screen flows).
@@ -295,6 +301,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'GlobalSearch':
     case 'StorageSnapshot':
     case 'HistoricalImport':
+    case 'Help':
     case 'About':
       return 'home';
     default:
@@ -323,6 +330,8 @@ const SEARCH_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'CacConnection',
   // About — slim disclaimer screen; search has no purpose here.
   'About',
+  // Help — has its own in-screen search bar.
+  'Help',
 ]);
 
 // ── Pre-migration snapshot guard ──────────────────────────────────────────
@@ -376,6 +385,9 @@ function AppInner() {
 
   const [screen, setScreen] = useState<Screen>('TournamentSelect');
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
+  // Help deep-link target — set by per-screen ? buttons before navigating
+  // to the Help screen. Cleared when the user opens Help via the menu.
+  const [helpSectionId, setHelpSectionId] = useState<HelpSectionId | string | undefined>(undefined);
 
   // ── AES navigation scope ────────────────────────────────────────────────
   // Three nested selections (event → division → team) move together: an
@@ -1261,6 +1273,17 @@ function AppInner() {
     });
   }, []);
 
+  // Open the Help screen, scrolling to a specific section. Used by per-screen
+  // HelpButton ? icons. Pushes the current screen so goBack returns there.
+  const openHelp = useCallback(
+    (sectionId?: string) => {
+      setScreenHistory((prev) => [...prev, screen]);
+      setHelpSectionId(sectionId);
+      setScreen('Help');
+    },
+    [screen]
+  );
+
   // Clear context whenever we navigate back to higher-level screens
   useEffect(() => {
     if (screen === 'TournamentSelect') {
@@ -1795,6 +1818,11 @@ function AppInner() {
         case 'HistoricalImport':
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('HistoricalImport');
+          break;
+        case 'Help':
+          setScreenHistory((prev) => [...prev, screen]);
+          setHelpSectionId(undefined);
+          setScreen('Help');
           break;
         case 'About':
           setScreenHistory((prev) => [...prev, screen]);
@@ -2681,6 +2709,10 @@ function AppInner() {
         );
       case 'About':
         return <AboutScreen onBack={goBack} />;
+      case 'Help':
+        return (
+          <HelpScreen onBack={goBack} initialSectionId={helpSectionId} />
+        );
       case 'SeasonHistory':
         if (!currentHistoryTeamName) return null;
         return (
@@ -2843,6 +2875,7 @@ function AppInner() {
         }}
         onOpenRosterEditor={handleOpenRosterEditor}
         onTeamMenu={handleLongPressTeam}
+        onOpenHelp={openHelp}
       />
       )}
       <DiscoveryConfirmModal pending={confirmDiscovery} />
@@ -3023,6 +3056,7 @@ function AppContent({
   onTeamMenu,
   onTabSelect,
   onOpenGlobalSearch,
+  onOpenHelp,
 }: any) {
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
@@ -3037,6 +3071,28 @@ function AppContent({
   const showPill =
     !PILL_SUPPRESSED_SCREENS.has(screen) && !!userProfile?.activeTeamId;
   const showSearch = !SEARCH_SUPPRESSED_SCREENS.has(screen);
+  // Per-screen ? button → which help section to open. Screens not in this
+  // map don't show the floating help affordance (Help screen itself, focused
+  // flows, modals, etc.). Users can always reach Help via the hamburger.
+  const helpSectionForScreen: Partial<Record<Screen, string>> = {
+    MyHome: HELP_SECTION_IDS.MY_HOME,
+    TeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
+    TimuTeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
+    Scoreboard: HELP_SECTION_IDS.SCOREBOARD,
+    MatchScoring: HELP_SECTION_IDS.SCORE_MATCH,
+    MatchSetup: HELP_SECTION_IDS.SCORE_MATCH,
+    Stats: HELP_SECTION_IDS.ANALYTICS,
+    PlayerDetail: HELP_SECTION_IDS.ANALYTICS,
+    SeasonHistory: HELP_SECTION_IDS.SEASON_HISTORY,
+    Standings: HELP_SECTION_IDS.STANDINGS_BRACKETS,
+    Brackets: HELP_SECTION_IDS.STANDINGS_BRACKETS,
+    AddTournaments: HELP_SECTION_IDS.ADD_TOURNAMENTS,
+    OvaRankings: HELP_SECTION_IDS.OVA_RANKINGS,
+    MrsConnection: HELP_SECTION_IDS.CONNECTION,
+    CacConnection: HELP_SECTION_IDS.CONNECTION,
+  };
+  const helpSection = helpSectionForScreen[screen as Screen];
+  const showHelpButton = !!helpSection && !!onOpenHelp;
   // Reserve space at the bottom for the tab bar so screens don't render
   // under it. Tab bar height is fixed; the safe-area bottom is added inside
   // the bar component itself. When the tab bar is hidden, fall back to
@@ -3112,6 +3168,18 @@ function AppContent({
           menuContext={menuContextForScreen(screen)}
         />
       </View>
+      {showHelpButton && (
+        <View
+          style={[styles.helpOverlay, { top: insets.top + 8 + 38 }]}
+          pointerEvents="box-none"
+        >
+          <HelpButton
+            sectionId={helpSection as string}
+            onPress={onOpenHelp}
+            light={lightHeader}
+          />
+        </View>
+      )}
       {showTabBar && (
         <BottomTabBar activeTab={tabForScreen(screen)} onSelect={onTabSelect} />
       )}
@@ -3147,6 +3215,16 @@ const styles = StyleSheet.create({
     zIndex: 100,
     alignItems: 'flex-end',
     // Do not set left/width — keep it tight to the right side
+  },
+  helpOverlay: {
+    // Sits directly under the hamburger button (which is ~26pt tall with
+    // its own padding) so the two affordances stack vertically on the
+    // top-right edge without overlapping. Same zIndex as the menu overlay
+    // so neither can mask the other.
+    position: 'absolute',
+    right: 14,
+    zIndex: 100,
+    alignItems: 'flex-end',
   },
   topBarOverlay: {
     position: 'absolute',

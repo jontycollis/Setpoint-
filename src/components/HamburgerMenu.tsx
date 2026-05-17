@@ -41,6 +41,7 @@ export type MenuDestination =
   | 'TeamAnalytics'
   | 'StorageSnapshot'
   | 'HistoricalImport'
+  | 'Help'
   | 'About';
 
 /**
@@ -664,6 +665,14 @@ export function HamburgerMenu({
                   available={true}
                   isCurrent={isCurrentScreen('StorageSnapshot')}
                   onPress={() => handleSelect('StorageSnapshot')}
+                />
+                <MenuRow
+                  icon={'\u{2753}'}
+                  label="Help & user guide"
+                  subtitle="How each screen works · FAQ"
+                  available={true}
+                  isCurrent={isCurrentScreen('Help')}
+                  onPress={() => handleSelect('Help')}
                 />
                 <MenuRow
                   icon={'\u{2139}️'}
