@@ -290,12 +290,22 @@ export function NextDayScenarios({
 }: Props) {
   // Render scheduled match times with dual-tz support when the parent has
   // wired the new props; otherwise fall back to the single-string helpers.
-  const renderTime = (ms: number) =>
-    venueTz && tzMode
+  // Inputs can be either an epoch ms (from `BracketMatch`) or an ISO
+  // string (from `TeamFutureScheduleRow`) — `formatDualTime` needs ms so
+  // we parse strings up front; the fallback `formatTime`/`formatDate`
+  // accept both via their own `Date.parse` paths.
+  const renderTime = (raw: number | string) => {
+    const ms = typeof raw === 'number' ? raw : Date.parse(raw);
+    return venueTz && tzMode
       ? formatDualTime(ms, venueTz, { hour: 'numeric', minute: '2-digit', hour12: true }, tzMode)
-      : formatTime(ms, displayTz);
-  const renderDate = (ms: number) =>
-    venueTz && tzMode ? formatDualDate(ms, venueTz, tzMode) : formatDate(ms, displayTz);
+      : formatTime(raw, displayTz);
+  };
+  const renderDate = (raw: number | string) => {
+    const ms = typeof raw === 'number' ? raw : Date.parse(raw);
+    return venueTz && tzMode
+      ? formatDualDate(ms, venueTz, tzMode)
+      : formatDate(raw, displayTz);
+  };
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);

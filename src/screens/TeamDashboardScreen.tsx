@@ -848,7 +848,7 @@ export function TeamDashboardScreen({
             {' '}at{' '}
             <Text style={{ fontWeight: '800' }}>
               {formatDualTime(
-                parseScheduleTime(nextWorkDuty.ScheduledStartDateTime, venueTimeZone) ?? 0,
+                nextWorkDuty.ScheduledStartDateTime,
                 venueTimeZone,
                 { hour: 'numeric', minute: '2-digit', hour12: true },
                 tzMode,
