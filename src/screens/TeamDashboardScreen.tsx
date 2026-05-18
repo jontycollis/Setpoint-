@@ -52,8 +52,8 @@ import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
 // store key is retained in storage.ts but is read-only / dead.
 import { scheduleAllMatchNotifications } from '../utils/notifications';
 import type { MatchNotification } from '../utils/notifications';
-import { formatTime, formatDate, getRelativeTime, parseScheduleTime, formatInVenueTz } from '../utils/dates';
-import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
+import { formatTime, formatDate, getRelativeTime, parseScheduleTime, formatInVenueTz, formatDualTime, formatDualDate } from '../utils/dates';
+import { useTzDisplayMode, effectiveTzForDisplay, nextTzDisplayMode } from '../utils/tzDisplayPreference';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 import { ensureAesIndexed, indexAesSnapshot, loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { addMyTeamAlias } from '../utils/seasonTeamIdentity';
@@ -89,6 +89,11 @@ interface Props {
    *  tournament's TeamDashboard (AES or Timu, depending on the entry's
    *  source). When omitted the cards stay non-interactive. */
   onOpenUpcomingTournament?: (entry: UnifiedTournamentEntry) => void;
+  /** Open the venue map for the current event. Caller is responsible for
+   *  resolving the per-event `venueMapUrl` / `infoPageUrl` (or showing
+   *  the empty-state UI when neither is configured). Surfaced as an
+   *  always-visible chip in the Action Buttons section. */
+  onViewVenueMap?: () => void;
 }
 
 export function TeamDashboardScreen({
@@ -109,6 +114,7 @@ export function TeamDashboardScreen({
   meTeamCount = 0,
   onManageRoster,
   onOpenUpcomingTournament,
+  onViewVenueMap,
 }: Props) {
   const { colors } = useTheme();
   const insets = useSafeAreaInsets();
@@ -780,19 +786,22 @@ export function TeamDashboardScreen({
           Updated {getRelativeTime(new Date(lastRefreshTime).toISOString(), displayTz)}
         </Text>
 
-        {/* "Show in my time" toggle — only meaningful when we actually
-            have a venue tz to switch between. Off (default) → venue-local;
-            On → device-local. Persists across launches. */}
+        {/* 3-state tz toggle — only meaningful when we actually have a
+            venue tz to compare against. Default 'dual' shows venue +
+            user-in-parens when they differ; tap cycles → venue-only →
+            user-only → dual. Persists across launches. */}
         {venueTimeZone && (
           <TouchableOpacity
-            onPress={() => setTzMode(tzMode === 'device' ? 'venue' : 'device')}
+            onPress={() => setTzMode(nextTzDisplayMode(tzMode))}
             style={styles.tzToggleRow}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
           >
             <Text style={styles.tzToggleText}>
-              {tzMode === 'device'
-                ? 'Showing in your time · tap for venue time'
-                : 'Showing venue time · tap for your time'}
+              {tzMode === 'dual'
+                ? 'Showing both times · tap for venue only'
+                : tzMode === 'venue'
+                  ? 'Showing venue time · tap for your time'
+                  : 'Showing your time · tap for both'}
             </Text>
           </TouchableOpacity>
         )}
@@ -838,7 +847,12 @@ export function TeamDashboardScreen({
             <Text style={{ fontWeight: '800' }}>{nextWorkDuty.CourtName}</Text>
             {' '}at{' '}
             <Text style={{ fontWeight: '800' }}>
-              {formatTime(nextWorkDuty.ScheduledStartDateTime, displayTz)}
+              {formatDualTime(
+                parseScheduleTime(nextWorkDuty.ScheduledStartDateTime, venueTimeZone) ?? 0,
+                venueTimeZone,
+                { hour: 'numeric', minute: '2-digit', hour12: true },
+                tzMode,
+              )}
             </Text>
           </Text>
           {workDutyMatches.length > 1 && (
@@ -995,18 +1009,19 @@ export function TeamDashboardScreen({
                   </Text>
                 </View>
                 <Text style={styles.nextMatchTime}>
-                  {formatInVenueTz(matchMs, displayTz, {
-                    hour: 'numeric',
-                    minute: '2-digit',
-                    hour12: true,
-                    timeZoneName: displayTz ? 'short' : undefined,
-                  })}
+                  {formatDualTime(
+                    matchMs,
+                    venueTimeZone,
+                    {
+                      hour: 'numeric',
+                      minute: '2-digit',
+                      hour12: true,
+                      timeZoneName: venueTimeZone ? 'short' : undefined,
+                    },
+                    tzMode,
+                  )}
                   {'  '}
-                  {formatInVenueTz(matchMs, displayTz, {
-                    weekday: 'short',
-                    month: 'short',
-                    day: 'numeric',
-                  })}
+                  {formatDualDate(matchMs, venueTimeZone, tzMode)}
                 </Text>
                 <Text style={styles.nextMatchVs}>vs {current.OpponentTeamText}</Text>
                 {/* Head-to-head previous result */}
@@ -1261,9 +1276,14 @@ export function TeamDashboardScreen({
                   )}
                   <View style={styles.matchHeader}>
                     <Text style={styles.matchTime}>
-                      {formatDate(match.ScheduledStartDateTime, displayTz)}
+                      {formatDualDate(match.ScheduledStartDateTime, venueTimeZone, tzMode)}
                       {'  '}
-                      {formatTime(match.ScheduledStartDateTime, displayTz)}
+                      {formatDualTime(
+                        parseScheduleTime(match.ScheduledStartDateTime, venueTimeZone) ?? 0,
+                        venueTimeZone,
+                        { hour: 'numeric', minute: '2-digit', hour12: true },
+                        tzMode,
+                      )}
                     </Text>
                     <View style={styles.courtBadge}>
                       <Text style={styles.courtBadgeText}>{match.Court?.Name || ''}</Text>
@@ -1296,6 +1316,8 @@ export function TeamDashboardScreen({
             onViewBrackets={onViewBrackets}
             onScoutOpponent={onScoutOpponent}
             displayTz={displayTz}
+            venueTz={venueTimeZone}
+            tzMode={tzMode}
             playoffPlayIds={playoffPlayIds.length > 0 ? playoffPlayIds : undefined}
           />
         </View>
@@ -1438,9 +1460,14 @@ export function TeamDashboardScreen({
                   )}
                   <View style={styles.matchHeader}>
                     <Text style={styles.matchTime}>
-                      {formatDate(match.ScheduledStartDateTime, displayTz)}
+                      {formatDualDate(match.ScheduledStartDateTime, venueTimeZone, tzMode)}
                       {'  '}
-                      {formatTime(match.ScheduledStartDateTime, displayTz)}
+                      {formatDualTime(
+                        parseScheduleTime(match.ScheduledStartDateTime, venueTimeZone) ?? 0,
+                        venueTimeZone,
+                        { hour: 'numeric', minute: '2-digit', hour12: true },
+                        tzMode,
+                      )}
                     </Text>
                     <View style={styles.courtBadge}>
                       <Text style={styles.courtBadgeText}>{match.Court?.Name || ''}</Text>
@@ -1529,6 +1556,18 @@ export function TeamDashboardScreen({
         >
           <Text style={styles.actionButtonText}>Playoff Brackets</Text>
         </TouchableOpacity>
+        {onViewVenueMap && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.actionButtonSecondary]}
+            onPress={onViewVenueMap}
+            accessibilityRole="button"
+            accessibilityLabel="View venue map"
+          >
+            <Text style={styles.actionButtonTextSecondary}>
+              {'\u{1F5FA} '} Venue Map
+            </Text>
+          </TouchableOpacity>
+        )}
         {/* Manual "Add to Season History" — shown for any team. For MyTeam
             this also runs automatically on dashboard mount, so the button
             doubles as a confirmation badge. */}
@@ -1636,6 +1675,8 @@ export function TeamDashboardScreen({
         match={scoresModalMatch}
         eventKey={event.Key}
         displayTz={displayTz}
+        venueTz={venueTimeZone}
+        tzMode={tzMode}
         preloadedResult={
           scoresModalMatch ? matchResults.get(scoresModalMatch.MatchId) ?? null : null
         }

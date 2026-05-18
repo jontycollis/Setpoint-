@@ -2290,6 +2290,7 @@ function AppInner() {
               return () => handleOpenRosterEditor(profileMatch);
             })()}
             onOpenUpcomingTournament={handleOpenUnifiedEntry}
+            onViewVenueMap={() => handleMenuNavigate('VenueMap')}
           />
         );
       case 'MyTeams':

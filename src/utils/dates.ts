@@ -17,6 +17,11 @@
 //   • Every existing formatter now takes an optional trailing `venueTz`
 //     argument. Default-undefined preserves device-local behaviour for
 //     code that hasn't been migrated yet.
+//
+//   • `formatDualTime` / `formatDualDate` — render venue tz primary with
+//     user-local tz alongside in parens when offsets differ. Default
+//     behaviour for schedule-time displays so cross-country viewers
+//     don't have to do mental arithmetic.
 // ────────────────────────────────────────────────────────────────────────────
 
 import { DateTime } from 'luxon';
@@ -219,4 +224,126 @@ function calendarDayDiff(refMs: number, targetMs: number, venueTz?: string): num
   const refStart = ref.startOf('day');
   const targetStart = target.startOf('day');
   return Math.round(targetStart.diff(refStart, 'days').days);
+}
+
+// ── Dual-tz rendering ──────────────────────────────────────────────────────
+//
+// Default for schedule-time displays: render *both* venue and user tz when
+// they differ, single string when they match. Solves the cross-country
+// volleyball-parent case ("kickoff 3 PM EST" → "12 PM PST at home").
+//
+// The 3-state `mode` lets the user opt out via the TeamDashboard toggle:
+//   • 'dual'   (default) — `"3:00 PM (12:00 PM PDT)"` when offsets differ,
+//                          `"3:00 PM"` when they match.
+//   • 'venue'            — single venue time, never paren'd.
+//   • 'device'           — single user-local time.
+// ────────────────────────────────────────────────────────────────────────────
+
+export type DualTzMode = 'dual' | 'venue' | 'device';
+
+let cachedDeviceTz: string | null = null;
+function getDeviceTimeZone(): string | undefined {
+  if (cachedDeviceTz !== null) return cachedDeviceTz || undefined;
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    cachedDeviceTz = typeof tz === 'string' ? tz : '';
+    return cachedDeviceTz || undefined;
+  } catch {
+    cachedDeviceTz = '';
+    return undefined;
+  }
+}
+
+/**
+ * Test-only — reset the cached device-tz lookup. The cache exists because
+ * `Intl.DateTimeFormat().resolvedOptions().timeZone` never changes within
+ * a session; tests need to clear it to swap in a mocked Intl.
+ */
+export function _resetDeviceTzCacheForTests(): void {
+  cachedDeviceTz = null;
+}
+
+/** Active offset (minutes from UTC) of `tz` at instant `ms`, or null. */
+function offsetMinutesAt(ms: number, tz: string): number | null {
+  const dt = DateTime.fromMillis(ms, { zone: tz });
+  return dt.isValid ? dt.offset : null;
+}
+
+/**
+ * Render an epoch with optional dual-tz display. Defaults to `'dual'`,
+ * which emits `"<venue> (<user>)"` when venue and user tz currently
+ * resolve to different offsets, and a single string when they match (or
+ * when `venueTz` is undefined).
+ *
+ * Use this at user-facing match-time call sites. Keep `formatInVenueTz`
+ * for sorting keys and other internal comparisons.
+ */
+export function formatDualTime(
+  ms: number,
+  venueTz: string | undefined,
+  opts?: Intl.DateTimeFormatOptions,
+  mode: DualTzMode = 'dual'
+): string {
+  if (!isFinite(ms)) return '';
+
+  // No venue tz known — nothing to compare against; render device-local
+  // for every mode (matches `formatInVenueTz(ms, undefined)`).
+  if (!venueTz) return formatInVenueTz(ms, undefined, opts);
+
+  if (mode === 'venue') return formatInVenueTz(ms, venueTz, opts);
+
+  const userTz = getDeviceTimeZone();
+
+  if (mode === 'device') return formatInVenueTz(ms, userTz, opts);
+
+  // mode === 'dual'. If we couldn't resolve the device tz, or both tzs
+  // resolve to the same offset right now, return single venue time.
+  if (!userTz) return formatInVenueTz(ms, venueTz, opts);
+  const venueOffset = offsetMinutesAt(ms, venueTz);
+  const userOffset = offsetMinutesAt(ms, userTz);
+  if (venueOffset !== null && userOffset !== null && venueOffset === userOffset) {
+    return formatInVenueTz(ms, venueTz, opts);
+  }
+
+  // Different offsets — dual string. We attach `timeZoneName: 'short'`
+  // to the user half so the reader can tell which is which at a glance;
+  // the venue half stays compact.
+  const venueStr = formatInVenueTz(ms, venueTz, opts);
+  const userOpts: Intl.DateTimeFormatOptions = {
+    ...(opts ?? { hour: 'numeric', minute: '2-digit', hour12: true }),
+    timeZoneName: 'short',
+  };
+  const userStr = formatInVenueTz(ms, userTz, userOpts);
+  return `${venueStr} (${userStr})`;
+}
+
+/**
+ * Date-only sibling of `formatDualTime`. Returns a single string when
+ * the instant falls on the same calendar day in both tzs; otherwise emits
+ * `"<venueDate> (<userDate>)"`.
+ */
+export function formatDualDate(
+  date: string | number,
+  venueTz: string | undefined,
+  mode: DualTzMode = 'dual'
+): string {
+  const ms = typeof date === 'number' ? date : Date.parse(date);
+  if (!isFinite(ms)) return '';
+  const opts: Intl.DateTimeFormatOptions = {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  };
+  if (!venueTz || mode === 'venue') return formatInVenueTz(ms, venueTz, opts);
+
+  const userTz = getDeviceTimeZone();
+  if (mode === 'device') return formatInVenueTz(ms, userTz, opts);
+
+  if (!userTz) return formatInVenueTz(ms, venueTz, opts);
+  const venueDay = DateTime.fromMillis(ms, { zone: venueTz }).toISODate();
+  const userDay = DateTime.fromMillis(ms, { zone: userTz }).toISODate();
+  if (venueDay && userDay && venueDay === userDay) {
+    return formatInVenueTz(ms, venueTz, opts);
+  }
+  return `${formatInVenueTz(ms, venueTz, opts)} (${formatInVenueTz(ms, userTz, opts)})`;
 }

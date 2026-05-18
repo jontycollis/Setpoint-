@@ -18,6 +18,9 @@ import {
 import type { PlayDay, FlatBracketMatch, BracketMatch } from '../api/aesClient';
 import { Card } from '../components/Card';
 import type { AESEvent, AESDivision } from '../types/aes';
+import { formatDualTime, formatDualDate, formatTime, formatDate } from '../utils/dates';
+import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
+import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 
 interface Props {
   event: AESEvent;
@@ -41,9 +44,18 @@ export function BracketScreen({ event, division, myTeamId, onBack, initialPlayId
   const [error, setError] = useState<string | null>(null);
   const [brackets, setBrackets] = useState<BracketInfo[]>([]);
   const [selectedBracket, setSelectedBracket] = useState<number>(0);
+  // Venue tz — used to render scheduled bracket match times in either
+  // single-string or dual form depending on the user's tzMode.
+  const [venueTimeZone, setVenueTimeZone] = useState<string | undefined>(undefined);
+  const [tzMode] = useTzDisplayMode();
+  const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
 
   useEffect(() => {
     loadBrackets();
+    loadAesSeasonIndex().then((idx) => {
+      const snap = idx[aesSnapshotKey(event.Key, division.DivisionId)];
+      setVenueTimeZone(snap?.venueTimeZone);
+    });
   }, []);
 
   async function loadBrackets() {
@@ -265,10 +277,47 @@ export function BracketScreen({ event, division, myTeamId, onBack, initialPlayId
 
   function renderMatchCard(item: FlatBracketMatch, maxRound: number, idx?: number) {
     const m = item.match;
+    // AES bracket records include `ScheduledStartDateTime` (epoch ms) and
+    // `Court` once the bracket has been seeded. Earlier rounds (still
+    // open / not yet drawn) come back without either — keep the row
+    // hidden when both are missing to avoid an empty meta strip.
+    const hasTime = typeof m.ScheduledStartDateTime === 'number' && isFinite(m.ScheduledStartDateTime);
+    const hasCourt = !!m.Court?.Name;
+    const showMeta = hasTime || hasCourt;
+    const timeStr = hasTime
+      ? venueTimeZone
+        ? formatDualTime(
+            m.ScheduledStartDateTime!,
+            venueTimeZone,
+            { hour: 'numeric', minute: '2-digit', hour12: true },
+            tzMode,
+          )
+        : formatTime(m.ScheduledStartDateTime!, displayTz)
+      : '';
+    const dateStr = hasTime
+      ? venueTimeZone
+        ? formatDualDate(m.ScheduledStartDateTime!, venueTimeZone, tzMode)
+        : formatDate(m.ScheduledStartDateTime!, displayTz)
+      : '';
 
     return (
       <View key={`${item.rootIndex}-${item.round}-${item.position}-${m.MatchId || ''}-${idx ?? ''}`} style={styles.matchCard}>
         <Text style={styles.matchName}>{m.FullName}</Text>
+
+        {showMeta && (
+          <View style={styles.matchMetaRow}>
+            {hasTime && (
+              <Text style={styles.matchMetaText} numberOfLines={1}>
+                {dateStr}  {timeStr}
+              </Text>
+            )}
+            {hasCourt && (
+              <View style={styles.matchCourtBadge}>
+                <Text style={styles.matchCourtBadgeText}>{m.Court!.Name}</Text>
+              </View>
+            )}
+          </View>
+        )}
 
         {renderTeamRow(m.FirstTeam, m.FirstTeamText, m.FirstTeamWon, m.HasScores, m.Sets, true)}
 
@@ -587,6 +636,30 @@ function makeStyles(colors: ThemeColors) {
     fontWeight: '600',
     marginBottom: spacing.sm,
     textAlign: 'center',
+  },
+  matchMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.sm,
+  },
+  matchMetaText: {
+    flex: 1,
+    fontSize: fontSize.xs,
+    color: colors.textSecondary,
+    fontWeight: '600',
+  },
+  matchCourtBadge: {
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    backgroundColor: colors.primaryLight,
+    marginLeft: spacing.sm,
+  },
+  matchCourtBadgeText: {
+    fontSize: fontSize.xs,
+    fontWeight: '700',
+    color: colors.primary,
   },
   teamRow: {
     flexDirection: 'row',

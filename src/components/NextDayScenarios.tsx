@@ -14,7 +14,8 @@ import { getTeamFutureSchedule, getPlayDetail, getPoolByPlayId } from '../api/ae
 import type { TeamFutureScheduleRow, BracketNode, PoolTeam } from '../api/aesClient';
 import { Card } from './Card';
 import { PoolStandings } from './PoolStandings';
-import { formatTime, formatDate } from '../utils/dates';
+import { formatTime, formatDate, formatDualTime, formatDualDate } from '../utils/dates';
+import type { TzDisplayMode } from '../utils/tzDisplayPreference';
 
 interface Props {
   eventKey: string;
@@ -30,6 +31,12 @@ interface Props {
   /** IANA tz used to render scheduled match times. Optional — undefined
    *  falls back to device-local, preserving the pre-overhaul behaviour. */
   displayTz?: string;
+  /** Raw venue tz — required (alongside `tzMode`) for dual-tz rendering. */
+  venueTz?: string;
+  /** User's tz-display preference. When supplied with `venueTz`, time and
+   *  date displays use `formatDualTime`/`formatDualDate` so 'dual' mode
+   *  appends the user-local time in parens when offsets differ. */
+  tzMode?: TzDisplayMode;
 }
 
 /** Opponent info extracted from a bracket match */
@@ -278,7 +285,17 @@ export function NextDayScenarios({
   onScoutOpponent,
   playoffPlayIds,
   displayTz,
+  venueTz,
+  tzMode,
 }: Props) {
+  // Render scheduled match times with dual-tz support when the parent has
+  // wired the new props; otherwise fall back to the single-string helpers.
+  const renderTime = (ms: number) =>
+    venueTz && tzMode
+      ? formatDualTime(ms, venueTz, { hour: 'numeric', minute: '2-digit', hour12: true }, tzMode)
+      : formatTime(ms, displayTz);
+  const renderDate = (ms: number) =>
+    venueTz && tzMode ? formatDualDate(ms, venueTz, tzMode) : formatDate(ms, displayTz);
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const [loading, setLoading] = useState(true);
@@ -470,8 +487,8 @@ export function NextDayScenarios({
                 {nr.scheduledStartDateTime != null && (
                   <View style={styles.scenarioHeader}>
                     <Text style={styles.timeText}>
-                      {formatDate(nr.scheduledStartDateTime, displayTz)}{' '}
-                      {formatTime(nr.scheduledStartDateTime, displayTz)}
+                      {renderDate(nr.scheduledStartDateTime)}{' '}
+                      {renderTime(nr.scheduledStartDateTime)}
                     </Text>
                     {nr.courtName && (
                       <View style={styles.courtBadge}>
@@ -623,8 +640,8 @@ export function NextDayScenarios({
             {nextMatch && (
               <View style={styles.scenarioHeader}>
                 <Text style={styles.timeText}>
-                  {formatDate(nextMatch.ScheduledStartDateTime, displayTz)}{' '}
-                  {formatTime(nextMatch.ScheduledStartDateTime, displayTz)}
+                  {renderDate(nextMatch.ScheduledStartDateTime)}{' '}
+                  {renderTime(nextMatch.ScheduledStartDateTime)}
                 </Text>
                 {nextMatch.Court && (
                   <View style={styles.courtBadge}>
@@ -639,7 +656,7 @@ export function NextDayScenarios({
             {/* Work assignment */}
             {workMatch ? (
               <Text style={styles.workLine}>
-                Work: {formatTime(workMatch.ScheduledStartDateTime, displayTz)}{' '}
+                Work: {renderTime(workMatch.ScheduledStartDateTime)}{' '}
                 {workMatch.Court?.Name || ''}
               </Text>
             ) : (

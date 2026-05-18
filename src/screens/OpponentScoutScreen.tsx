@@ -16,7 +16,7 @@ import {
 } from '../api/aesClient';
 import type { TeamScheduleMatch, MatchResult, MatchSet } from '../api/aesClient';
 import { Card } from '../components/Card';
-import { formatTime, formatDate, parseScheduleTime } from '../utils/dates';
+import { formatTime, formatDate, parseScheduleTime, formatDualTime, formatDualDate } from '../utils/dates';
 import { aesSnapshotKey, loadAesSeasonIndex } from '../utils/aesSeasonIndex';
 import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 import type { AESEvent, AESDivision } from '../types/aes';
@@ -428,7 +428,9 @@ export function OpponentScoutScreen({
               <Card key={match.MatchId} variant="outlined" style={styles.matchItem}>
                 <View style={styles.matchHeader}>
                   <Text style={styles.matchTime}>
-                    {formatDate(match.ScheduledStartDateTime, displayTz)}
+                    {venueTimeZone
+                      ? formatDualDate(match.ScheduledStartDateTime, venueTimeZone, tzMode)
+                      : formatDate(match.ScheduledStartDateTime, displayTz)}
                   </Text>
                   {match.Court?.Name ? (
                     <View style={styles.courtBadge}>
@@ -457,7 +459,14 @@ export function OpponentScoutScreen({
               <Card key={match.MatchId} variant="outlined" style={styles.matchItem}>
                 <View style={styles.matchHeader}>
                   <Text style={styles.matchTime}>
-                    {formatTime(match.ScheduledStartDateTime, displayTz)}
+                    {venueTimeZone
+                      ? formatDualTime(
+                          parseScheduleTime(match.ScheduledStartDateTime, venueTimeZone) ?? 0,
+                          venueTimeZone,
+                          { hour: 'numeric', minute: '2-digit', hour12: true },
+                          tzMode,
+                        )
+                      : formatTime(match.ScheduledStartDateTime, displayTz)}
                   </Text>
                   {match.Court?.Name ? (
                     <View style={styles.courtBadge}>
@@ -467,7 +476,9 @@ export function OpponentScoutScreen({
                 </View>
                 <Text style={styles.matchVs}>vs {otherTeam}</Text>
                 <Text style={styles.matchDate}>
-                  {formatDate(match.ScheduledStartDateTime, displayTz)}
+                  {venueTimeZone
+                    ? formatDualDate(match.ScheduledStartDateTime, venueTimeZone, tzMode)
+                    : formatDate(match.ScheduledStartDateTime, displayTz)}
                 </Text>
               </Card>
             );

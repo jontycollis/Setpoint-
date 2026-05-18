@@ -12,7 +12,8 @@ import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { getMatchResult } from '../api/aesClient';
 import type { MatchResult, FlatCourtMatch } from '../api/aesClient';
-import { formatTime, formatDate } from '../utils/dates';
+import { formatTime, formatDate, formatDualTime, formatDualDate } from '../utils/dates';
+import type { TzDisplayMode } from '../utils/tzDisplayPreference';
 
 interface Props {
   visible: boolean;
@@ -24,6 +25,11 @@ interface Props {
    *  device-local (preserves prior behaviour for callers that haven't
    *  been migrated). */
   displayTz?: string;
+  /** Raw venue tz — required (alongside `tzMode`) for dual-tz rendering. */
+  venueTz?: string;
+  /** User's tz-display preference. When supplied with `venueTz`, the
+   *  start-time display switches to `formatDualTime`/`formatDualDate`. */
+  tzMode?: TzDisplayMode;
 }
 
 export function MatchScoresModal({
@@ -33,6 +39,8 @@ export function MatchScoresModal({
   eventKey,
   preloadedResult,
   displayTz,
+  venueTz,
+  tzMode,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -86,9 +94,18 @@ export function MatchScoresModal({
               {match.Division?.Name || 'Match'}
             </Text>
             <Text style={styles.meta}>
-              {formatDate(match.ScheduledStartDateTime, displayTz)}
+              {venueTz && tzMode
+                ? formatDualDate(match.ScheduledStartDateTime, venueTz, tzMode)
+                : formatDate(match.ScheduledStartDateTime, displayTz)}
               {'  •  '}
-              {formatTime(match.ScheduledStartDateTime, displayTz)}
+              {venueTz && tzMode
+                ? formatDualTime(
+                    match.ScheduledStartDateTime,
+                    venueTz,
+                    { hour: 'numeric', minute: '2-digit', hour12: true },
+                    tzMode,
+                  )
+                : formatTime(match.ScheduledStartDateTime, displayTz)}
               {match.CourtName ? `  •  ${match.CourtName}` : ''}
             </Text>
           </View>

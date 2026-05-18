@@ -24,7 +24,7 @@ import type {
   CourtScheduleResponse,
 } from '../api/aesClient';
 import type { AESEvent, AESDivision } from '../types/aes';
-import { formatTime, parseScheduleTime, todayApiDate } from '../utils/dates';
+import { formatTime, parseScheduleTime, todayApiDate, formatDualTime } from '../utils/dates';
 import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 
@@ -179,7 +179,14 @@ export function LiveScoreboardScreen({
         <View style={styles.matchMeta}>
           <Text style={styles.matchCourt}>{m.CourtName}</Text>
           <Text style={styles.matchTime}>
-            {formatTime(m.ScheduledStartDateTime, displayTz)}
+            {venueTimeZone
+              ? formatDualTime(
+                  m.ScheduledStartDateTime,
+                  venueTimeZone,
+                  { hour: 'numeric', minute: '2-digit', hour12: true },
+                  tzMode,
+                )
+              : formatTime(m.ScheduledStartDateTime, displayTz)}
           </Text>
           {isLive && <View style={styles.liveDot} />}
           {m.CompleteShortName ? (

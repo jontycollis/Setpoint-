@@ -15,7 +15,7 @@ import {
   getCachedEvent,
 } from '../api/aesClient';
 import type { AESTeamAssignment, FavoriteTeam } from '../types/aes';
-import { formatTime, formatDate, getRelativeTime, parseScheduleTime } from '../utils/dates';
+import { formatTime, formatDate, getRelativeTime, parseScheduleTime, formatDualTime, formatDualDate } from '../utils/dates';
 import { loadAesSeasonIndex } from '../utils/aesSeasonIndex';
 import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 
@@ -230,10 +230,19 @@ export function MyTeamsScreen({
                       ? `${diffMins}m`
                       : diffMins < 1440
                       ? `${Math.round(diffMins / 60)}h`
-                      : formatDate(um.matchMs, teamTz)}
+                      : (tzForTeam(um.team)
+                          ? formatDualDate(um.matchMs, tzForTeam(um.team), tzMode)
+                          : formatDate(um.matchMs, teamTz))}
                   </Text>
                   <Text style={styles.matchTimeText}>
-                    {formatTime(um.matchMs, teamTz)}
+                    {tzForTeam(um.team)
+                      ? formatDualTime(
+                          um.matchMs,
+                          tzForTeam(um.team),
+                          { hour: 'numeric', minute: '2-digit', hour12: true },
+                          tzMode,
+                        )
+                      : formatTime(um.matchMs, teamTz)}
                   </Text>
                 </View>
                 <View style={styles.matchInfoCol}>
@@ -354,7 +363,17 @@ export function MyTeamsScreen({
                             </Text>
                           ) : info.assignment?.NextMatch ? (
                             <Text style={styles.teamNextMatch}>
-                              Next: {formatTime(info.assignment.NextMatch.ScheduledStartDateTime, displayTzFor(info.team))}{' '}
+                              Next: {(() => {
+                                const teamVenueTz = tzForTeam(info.team);
+                                return teamVenueTz
+                                  ? formatDualTime(
+                                      parseScheduleTime(info.assignment.NextMatch.ScheduledStartDateTime, teamVenueTz) ?? 0,
+                                      teamVenueTz,
+                                      { hour: 'numeric', minute: '2-digit', hour12: true },
+                                      tzMode,
+                                    )
+                                  : formatTime(info.assignment.NextMatch.ScheduledStartDateTime, displayTzFor(info.team));
+                              })()}{' '}
                               on {info.assignment.NextMatch.Court?.Name || 'TBD'} vs{' '}
                               {info.assignment.OpponentTeamText || 'TBD'}
                             </Text>

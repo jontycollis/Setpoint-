@@ -23,7 +23,7 @@ import type {
   FlatCourtMatch,
   MatchResult,
 } from '../api/aesClient';
-import { formatDate, formatTime } from '../utils/dates';
+import { formatDate, formatTime, formatDualTime } from '../utils/dates';
 import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
 import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
@@ -67,6 +67,12 @@ export function CourtScheduleScreen({
   const [venueTimeZone, setVenueTimeZone] = useState<string | undefined>(undefined);
   const [tzMode] = useTzDisplayMode();
   const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
+  // Wrapper for dual-tz time rendering at user-facing call sites.
+  // Falls back to single-string formatTime when no venue tz is known.
+  const renderMatchTime = (ms: number) =>
+    venueTimeZone
+      ? formatDualTime(ms, venueTimeZone, { hour: 'numeric', minute: '2-digit', hour12: true }, tzMode)
+      : formatTime(ms, displayTz);
   useEffect(() => {
     loadAesSeasonIndex().then((idx) => {
       const match = Object.values(idx).find((snap) => snap.eventKey === event.Key);
@@ -373,7 +379,7 @@ export function CourtScheduleScreen({
                     >
                       <View style={styles.entryLeft}>
                         <Text style={styles.entryTime}>
-                          {formatTime(match.ScheduledStartDateTime, displayTz)}
+                          {renderMatchTime(match.ScheduledStartDateTime)}
                         </Text>
                         {match.HasOutcome && !hasScores && (
                           <View style={styles.completedDot} />
