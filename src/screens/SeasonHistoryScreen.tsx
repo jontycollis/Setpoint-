@@ -79,6 +79,10 @@ interface Props {
    * data (e.g. "Defensa U17 Rob" in 2024–25 vs "Defensa Rob" today).
    */
   onOpenTimuTournament?: (tid: number, myTeamAsSeen?: string) => void;
+  /** Tap on an "Upcoming Tournaments" card → caller routes to that
+   *  tournament's TeamDashboard (AES or Timu, depending on the entry's
+   *  source). When omitted the cards stay non-interactive. */
+  onOpenUpcomingTournament?: (entry: UnifiedTournamentEntry) => void;
   onScoutOpponent: (teamName: string) => void;
   onManageSeason: () => void;
   /**
@@ -115,6 +119,7 @@ export function SeasonHistoryScreen({
   onBack,
   onOpenAesTournament,
   onOpenTimuTournament,
+  onOpenUpcomingTournament,
   onScoutOpponent,
   onManageSeason,
   onFindMoreTournaments,
@@ -280,6 +285,7 @@ export function SeasonHistoryScreen({
             <UpcomingTournamentsSection
               aliases={[primaryName, ...(aliasesProp ?? [])]}
               debugLabel={primaryName}
+              onOpenEntry={onOpenUpcomingTournament}
             />
 
             {/* Action buttons: scan + manual add */}
