@@ -118,7 +118,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'li',
         text:
-          'Times are shown in the venue’s local time zone by default. The “Show in my time” toggle in the time-zone banner switches to your device time.',
+          'Times default to the venue’s local zone. When your device is in a different zone, you’ll see both — venue time first, your local time in parentheses (e.g. “3:00 PM EDT (12:00 PM PDT)”). The toggle to switch between dual / venue-only / your-time-only lives on Team Dashboard and is remembered across launches.',
       },
       { type: 'h3', text: 'Upcoming tournaments' },
       {
@@ -171,6 +171,34 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: 'li',
         text:
           'The last 10 matches across all tournaments — both AES and Timu sources mixed. Each row taps through to the per-match boxscore.',
+      },
+      { type: 'h3', text: 'Action buttons' },
+      {
+        type: 'li',
+        text:
+          'A row of buttons drops you straight into deeper tournament views: Standings, Playoff Brackets, and 🗺 Venue Map. Venue Map opens the bundled court / venue layout for the current tournament when one is available (e.g. 2026 Nationals).',
+      },
+      { type: 'h3', text: 'Upcoming tournaments' },
+      {
+        type: 'li',
+        text:
+          'Cards for the team’s next tournaments sit below recent results. Tap any card to drill straight into that tournament — your pool is highlighted in your division’s colour. The cards are tappable here, on Timu Team Dashboard, and on Season History.',
+      },
+      { type: 'h3', text: 'Times and time zones' },
+      {
+        type: 'p',
+        text:
+          'Tournament times default to the venue’s local time. When your device is in a different time zone, the next-match card and the schedule show both — venue time first, your local time in parentheses (e.g. “3:00 PM EDT (12:00 PM PDT)”). When the two zones match, you just see one time.',
+      },
+      {
+        type: 'li',
+        text:
+          'A small toggle under the next-match block cycles through three modes: dual (both times) → venue-only → your-time-only → back to dual. Tap to switch. The choice is remembered across launches.',
+      },
+      {
+        type: 'li',
+        text:
+          'Notifications fire at the correct real-world moment regardless of your device time zone — a 9:00 AM PDT match notifies at 9:00 AM PDT even if your phone is set to Eastern.',
       },
       {
         type: 'tip',
@@ -260,6 +288,22 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: 'li',
         text:
           'Boxscore page shows kills, errors, assists, digs, blocks, aces, plus serve-receive pass average. Tap any player row to drill into their per-set numbers.',
+      },
+      { type: 'h3', text: 'Export an OVA-format scoresheet PDF' },
+      {
+        type: 'p',
+        text:
+          'When a match is complete, you can export a printable OVA-format scoresheet as PDF. The button (🖨 Export OVA scoresheet PDF) appears in three places: on the match-end banner inside the scoring screen, on the post-match save sheet, and as a “🖨 PDF” chip on each completed match in the Match List.',
+      },
+      {
+        type: 'li',
+        text:
+          'The PDF includes: header (tournament / division / court / date), team cards with coaches, captains, libero(s) and full roster, officials block, per-set lineup grid with point progression, sub log, libero replacements, timeouts and sanctions, match summary, and signature lines for captains / coaches / referees / scorer.',
+      },
+      {
+        type: 'li',
+        text:
+          'Generation uses the system print dialog and then hands off to your phone’s share sheet — email it to your coach, save to Files, or send straight to a printer.',
       },
       {
         type: 'tip',
@@ -351,7 +395,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'li',
         text:
-          'Cards for tournaments that haven’t started yet appear at the top. Tap to open the tournament page — your team’s pool is highlighted in your division’s colour.',
+          'Cards for tournaments that haven’t started yet appear at the top. They are tappable — open the AES or Timu tournament directly, with your team’s pool highlighted in your division’s colour.',
+      },
+      { type: 'h3', text: 'Finding more tournaments' },
+      {
+        type: 'li',
+        text:
+          'Two buttons sit alongside the upcoming-tournaments list. “Scan for Tournaments” re-runs the auto-search across AES and Timu for events your team could be in. “Manually Add a Tournament” lets you paste a URL for a tournament that auto-search didn’t catch.',
       },
       { type: 'h3', text: 'Filtering' },
       {
@@ -387,6 +437,11 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: 'li',
         text:
           'Renders the bracket tree once playoffs are seeded. Tap any match to drill into the boxscore. Win Probability Bar above the bracket projects your team’s path forward based on current standings.',
+      },
+      {
+        type: 'p',
+        text:
+          'Bracket match cards now show the court and scheduled time when AES has them. Open rounds (e.g. championship match TBD) hide the strip when the data isn’t available, so the bracket stays clean.',
       },
       {
         type: 'note',
@@ -536,7 +591,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'Times default to the venue’s local zone. Toggle “Show in my time” in the time-zone banner on My Home to switch to your device time.',
+          'Times default to the venue’s local zone. When your device is in a different zone, you should see both — venue time first, your local time in parentheses. The dual / venue-only / your-time toggle lives on Team Dashboard, just under the next-match block. Notifications fire at the correct real-world moment regardless of which mode you pick.',
+      },
+      { type: 'h3', text: 'How do I get help on a specific screen?' },
+      {
+        type: 'p',
+        text:
+          'Every screen has a “?” button in the top-right that opens this help guide deep-linked to the relevant section. Inside the help screen there is also a search bar at the top — type a keyword (“libero”, “PDF”, “time zone”) and the matching sections expand inline.',
       },
       { type: 'h3', text: 'Where is my team’s data after I delete the app?' },
       {
