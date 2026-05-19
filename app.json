@@ -59,7 +59,7 @@
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a73e8"
       },
-      "versionCode": 14,
+      "versionCode": 17,
       "package": "com.aesscoretracker.app",
       "permissions": [
         "INTERNET"
