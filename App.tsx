@@ -2721,6 +2721,7 @@ function AppInner() {
             primaryName={currentHistoryTeamName}
             aliases={currentHistoryAliases}
             onBack={goBack}
+            onOpenUpcomingTournament={handleOpenUnifiedEntry}
             onOpenTimuTournament={(tid, myTeamAsSeen) => {
               setCurrentTimuTid(tid);
               // Use the team's name AS IT APPEARED in this specific

@@ -75,6 +75,7 @@ import {
   canApplySub,
 } from '../utils/matchEngine';
 import { saveMatch, deleteMatch } from '../utils/scoredMatchStore';
+import { exportMatchScoresheetPdf } from '../utils/scoresheetPrint';
 import { CourtDiagram } from '../components/CourtDiagram';
 import { WinProbabilityBar } from '../components/WinProbabilityBar';
 import { snapshotFromState } from '../utils/statAggregator';
@@ -1236,6 +1237,13 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
               ? `Match · Tied ${state.setsWon.home}–${state.setsWon.away}`
               : `Match · ${winner === 'home' ? homeMeta.label : awayMeta.label} wins ${state.setsWon.home}–${state.setsWon.away}`}
           </Text>
+          <TouchableOpacity
+            onPress={() => exportMatchScoresheetPdf(match)}
+            style={[styles.betweenSetsBtnSecondary, { marginTop: spacing.sm, alignSelf: 'stretch' }]}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.betweenSetsBtnSecondaryText}>🖨 Export OVA scoresheet PDF</Text>
+          </TouchableOpacity>
           {!state.abandoned && state.setHistory.length > 0 ? (
             <TouchableOpacity onPress={reopenPreviousSet} style={[styles.betweenSetsBtnSecondary, { marginTop: spacing.sm, alignSelf: 'stretch' }]} activeOpacity={0.7}>
               <Text style={styles.betweenSetsBtnSecondaryText}>↶ Reopen Set {state.setHistory.length} (oops, didn't mean to end)</Text>
@@ -1600,6 +1608,7 @@ export function MatchScoringScreen({ initialMatch, onBack }: Props) {
         awayLabel={awayMeta.label}
         onSave={applyPostMatchSave}
         onDontSave={discardMatchAndExit}
+        onExportPdf={() => exportMatchScoresheetPdf(match)}
         colors={colors}
         styles={styles}
       />
@@ -3400,6 +3409,7 @@ function PostMatchSaveSheet({
   awayLabel,
   onSave,
   onDontSave,
+  onExportPdf,
   colors,
   styles,
 }: {
@@ -3415,6 +3425,7 @@ function PostMatchSaveSheet({
     includeInStats: boolean;
   }) => void;
   onDontSave: () => void;
+  onExportPdf: () => void | Promise<void>;
   colors: ThemeColors;
   styles: ReturnType<typeof makeStyles>;
 }) {
@@ -3713,6 +3724,26 @@ function PostMatchSaveSheet({
               <Text style={styles.modalBtnTextPrimary}>Save</Text>
             </TouchableOpacity>
           </View>
+          <TouchableOpacity
+            onPress={() => {
+              void onExportPdf();
+            }}
+            style={[
+              styles.modalBtn,
+              {
+                marginTop: spacing.sm,
+                alignSelf: 'stretch',
+                backgroundColor: colors.surface,
+                borderWidth: 1,
+                borderColor: colors.primary,
+              },
+            ]}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.modalBtnTextPrimary, { color: colors.primary }]}>
+              🖨 Export OVA scoresheet PDF
+            </Text>
+          </TouchableOpacity>
         </View>
       </View>
     </Modal>

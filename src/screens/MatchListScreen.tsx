@@ -25,6 +25,7 @@ import type { ThemeColors } from '../utils/theme';
 import type { Match } from '../types/match';
 import { deleteMatch } from '../utils/scoredMatchStore';
 import { deriveMatchState } from '../utils/matchEngine';
+import { exportMatchScoresheetPdf } from '../utils/scoresheetPrint';
 // Use the normalising loader so legacy matches missing the new
 // classification fields (matchKind / includeInStats / source) still
 // render with sensible defaults. The "In analytics" chip relies on
@@ -248,6 +249,18 @@ function MatchRow({
             {include ? '✓ In analytics' : 'Excluded'}
           </Text>
         </TouchableOpacity>
+        {status === 'complete' ? (
+          <TouchableOpacity
+            style={styles.printChip}
+            onPress={() => void exportMatchScoresheetPdf(match)}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityLabel="Export scoresheet PDF"
+          >
+            <Text style={styles.printChipText}>🖨 PDF</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
     </View>
   );
@@ -320,6 +333,7 @@ function makeStyles(colors: ThemeColors) {
     matchCardActions: {
       flexDirection: 'row',
       justifyContent: 'flex-end',
+      gap: spacing.sm,
       marginTop: spacing.sm,
     },
     includeChip: {
@@ -341,5 +355,19 @@ function makeStyles(colors: ThemeColors) {
       letterSpacing: 0.3,
     },
     includeChipTextOn: { color: '#ffffff' },
+    printChip: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      backgroundColor: colors.background,
+    },
+    printChipText: {
+      fontSize: fontSize.xs,
+      fontWeight: '700',
+      color: colors.primary,
+      letterSpacing: 0.3,
+    },
   });
 }
