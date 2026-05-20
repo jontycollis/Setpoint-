@@ -347,3 +347,25 @@ export function getTournamentYear(
 ): TournamentYear | undefined {
   return tournament.years.find((y) => y.year === year);
 }
+
+/** Helper: find an event (with its surrounding year context) by AES event
+ *  key, searching across the entire registry. Used by the menu navigation
+ *  path where `selectedTournamentYear` is null — e.g. entering via MyTeams
+ *  → TeamDashboard, which loads events directly without going through the
+ *  TournamentSelect picker. Returning the year as well lets callers fall
+ *  back to year-level `venueMapUrl` / `infoPageUrl` when the event itself
+ *  doesn't carry one. */
+export function findEventByKey(
+  registry: Country[],
+  eventKey: string
+): { event: TournamentEvent; year: TournamentYear } | undefined {
+  for (const country of registry) {
+    for (const tournament of country.tournaments) {
+      for (const year of tournament.years) {
+        const event = year.events.find((e) => e.key === eventKey);
+        if (event) return { event, year };
+      }
+    }
+  }
+  return undefined;
+}
