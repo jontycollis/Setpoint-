@@ -145,6 +145,7 @@ import type {
 } from './src/types/aes';
 import {
   TOURNAMENT_REGISTRY,
+  findEventByKey,
 } from './src/config/tournaments';
 import type {
   Country,
@@ -1719,18 +1720,27 @@ function AppInner() {
             setHighlightCourt(undefined);
             setCourtMatchInfo(undefined);
           }
-          // Set venue info page URL from current tournament context
-          if (selectedTournamentYear) {
-            // Find the current event's infoPageUrl, falling back to year-level
+          // Resolve venue map / info page from the registry. We search the
+          // full registry (preferring the AES-merged copy) by the current
+          // AES event key, because `selectedTournamentYear` is only set
+          // when the user walked through the TournamentSelect picker —
+          // entering via MyTeams → TeamDashboard leaves it null, which
+          // previously meant `venueMapUrl` never got set even though the
+          // event's map was configured in TOURNAMENT_REGISTRY.
+          {
             const currentEventKey = currentEvent?.Key;
-            const matchingEvent = currentEventKey
-              ? selectedTournamentYear.events.find((e) => e.key === currentEventKey)
+            const registryForLookup = discoveredRegistry ?? TOURNAMENT_REGISTRY;
+            const match = currentEventKey
+              ? findEventByKey(registryForLookup, currentEventKey)
               : undefined;
+            // Prefer the selected-year context (when present) for fallback,
+            // otherwise use the year we found via the key search.
+            const fallbackYear = selectedTournamentYear ?? match?.year;
             setVenueInfoPageUrl(
-              matchingEvent?.infoPageUrl || selectedTournamentYear.infoPageUrl
+              match?.event.infoPageUrl || fallbackYear?.infoPageUrl
             );
             setVenueMapUrl(
-              matchingEvent?.venueMapUrl || selectedTournamentYear.venueMapUrl
+              match?.event.venueMapUrl || fallbackYear?.venueMapUrl
             );
           }
           setScreenHistory((prev) => [...prev, screen]);
