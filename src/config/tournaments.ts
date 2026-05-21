@@ -202,7 +202,7 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 dates: 'May 2026',
                 venue: 'BMO Centre, Calgary',
                 venueMapUrl:
-                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4-MAY19-Checkin-Right.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
               },
@@ -214,7 +214,7 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 dates: 'May 2026',
                 venue: 'BMO Centre, Calgary',
                 venueMapUrl:
-                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4-MAY19-Checkin-Right.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
               },
@@ -226,7 +226,7 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 dates: 'May 2026',
                 venue: 'BMO Centre, Calgary',
                 venueMapUrl:
-                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf',
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4-MAY19-Checkin-Right.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
               },
