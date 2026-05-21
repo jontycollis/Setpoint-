@@ -386,16 +386,51 @@ export async function discoverVenueMaps(
 }
 
 /**
+ * Pure picker — given discovered maps and the registry's configured URL
+ * (if any), decide which URL to show.
+ *
+ * Rules:
+ *   1. No discovered candidates → fall back to `configuredUrl` (may be null).
+ *   2. `configuredUrl` is a PDF → defend it. Only override with a discovered
+ *      PDF (PDF-to-PDF swap is fine); a discovered image must NOT win,
+ *      because configured registry PDFs are intentional and discovered
+ *      images are often stale, 404, or hotlink-blocked. This is the
+ *      Calgary-Nationals root-cause fix: VC's competition page had a stale
+ *      image matching MAP_URL_PATTERNS, and the existing image-first sort
+ *      was promoting it over the configured tournament map PDF.
+ *   3. Otherwise (no configured, or configured is an image / bundled asset)
+ *      → preserve the existing discovery sort (images first, then PDFs).
+ *
+ * Extracted as a pure function so it can be unit-tested without mocking
+ * fetch or AsyncStorage.
+ */
+export function pickBestMap(
+  maps: DiscoveredVenueMap[],
+  configuredUrl: string | null = null
+): string | null {
+  if (maps.length === 0) return configuredUrl;
+
+  if (configuredUrl && PDF_EXTENSION.test(configuredUrl)) {
+    const discoveredPdf = maps.find((m) => m.type === 'pdf');
+    return discoveredPdf ? discoveredPdf.url : configuredUrl;
+  }
+
+  return maps[0].url;
+}
+
+/**
  * Convenience: get the best venue map URL for a given page.
- * Returns the first image map found, or the first PDF, or null.
+ *
+ * Pass `configuredUrl` to defend a registry-configured PDF against stale
+ * images discovered on the source page — see `pickBestMap` for the rules.
  */
 export async function getBestVenueMapUrl(
   pageUrl: string,
-  forceRefresh = false
+  options: { configuredUrl?: string | null; forceRefresh?: boolean } = {}
 ): Promise<string | null> {
+  const { configuredUrl = null, forceRefresh = false } = options;
   const result = await discoverVenueMaps(pageUrl, forceRefresh);
-  if (result.maps.length === 0) return null;
-  return result.maps[0].url;
+  return pickBestMap(result.maps, configuredUrl);
 }
 
 /**

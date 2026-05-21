@@ -191,7 +191,12 @@ export function VenueMapScreen({
 
     (async () => {
       try {
-        const mapUrl = await getBestVenueMapUrl(infoPageUrl);
+        // Pass the registry-configured URL so the picker can defend a
+        // configured PDF against stale/broken discovered images (see
+        // pickBestMap in venueMapDiscovery.ts for the rules).
+        const mapUrl = await getBestVenueMapUrl(infoPageUrl, {
+          configuredUrl: venueMapUrl ?? null,
+        });
         if (!cancelled && mapUrl) {
           setDiscoveredMapUrl(mapUrl);
         }
@@ -205,7 +210,7 @@ export function VenueMapScreen({
     return () => {
       cancelled = true;
     };
-  }, [infoPageUrl]);
+  }, [infoPageUrl, venueMapUrl]);
 
   // Priority: discovered map > configured static URL > nothing
   // For bundled assets, we render with <Image> directly rather than WebView
