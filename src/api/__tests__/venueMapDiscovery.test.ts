@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { pickBestMap, type DiscoveredVenueMap } from '../venueMapDiscovery';
 
 const CONFIG_PDF =
-  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf';
+  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4-MAY19-Checkin-Right.pdf';
 
 const DISCOVERED_IMAGE: DiscoveredVenueMap = {
   url: 'https://volleyball.ca/some/discovered/venue-map.png',

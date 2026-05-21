@@ -129,7 +129,7 @@ describe('isPdfUrl', () => {
     ).toBe(true);
     expect(
       isPdfUrl(
-        'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4.pdf'
+        'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4-MAY19-Checkin-Right.pdf'
       )
     ).toBe(true);
     expect(
