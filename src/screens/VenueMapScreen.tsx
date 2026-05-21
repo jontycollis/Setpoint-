@@ -111,15 +111,18 @@ function buildMapHtml(url: string, highlightCourt?: string) {
     `
     : '';
 
-  // PDF branch — embed via Google Docs Viewer. The iframe takes 100%
-  // of the WebView, the viewer itself provides pinch-zoom + pan
-  // controls. Image branch keeps the existing <img> path so PNG
-  // provincials maps continue to render the same as before.
+  // PDF branch — embed via Mozilla PDF.js viewer. Google Docs Viewer
+  // (docs.google.com/viewer) was returning an empty/blocked iframe for
+  // the Nationals map PDFs, so we switched to Mozilla's hosted PDF.js
+  // build which renders the PDF client-side and has been more reliable
+  // in WebView contexts. Image branch keeps the existing <img> path so
+  // PNG provincials maps continue to render the same as before.
   const content = isPdfUrl(url)
     ? `<iframe
-         src="https://docs.google.com/viewer?url=${encodeURIComponent(url)}&embedded=true"
+         src="https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(url)}"
          style="width: 100%; height: 100%; border: 0;"
          frameborder="0"
+         allowfullscreen
        ></iframe>`
     : `<img src="${url}" alt="Venue Map" />`;
 
@@ -219,6 +222,52 @@ export function VenueMapScreen({
   const hasAnyMap = !!remoteMapUrl || !!bundledAsset;
   // Are we still checking for one dynamically?
   const stillSearching = discovering && !hasAnyMap;
+  // Is the resolved remote URL a PDF? Drives the "Open PDF in browser"
+  // fallback button — PDF.js inside the WebView can fail silently
+  // (CORS, iframe blocking), so users need a guaranteed escape hatch.
+  const remoteIsPdf = !!remoteMapUrl && isPdfUrl(remoteMapUrl);
+
+  // ---- Diagnostic log (dev only) ----------------------------------
+  // Surfaces which URL ended up driving the WebView and which rendering
+  // branch was picked, so future "broken venue map" reports can be
+  // diagnosed from a single log line instead of guessing.
+  useEffect(() => {
+    if (!__DEV__) return;
+    const branch = !hasAnyMap
+      ? 'no-map'
+      : bundledAsset
+      ? 'bundled-image'
+      : remoteMapUrl && isPdfUrl(remoteMapUrl)
+      ? 'webview-pdf'
+      : remoteMapUrl
+      ? 'webview-image'
+      : 'unknown';
+    const fileType = remoteMapUrl
+      ? isPdfUrl(remoteMapUrl)
+        ? 'pdf'
+        : 'image'
+      : hasBundledMap
+      ? 'bundled'
+      : 'none';
+    console.log('[VenueMapScreen]', {
+      configuredVenueMapUrl: venueMapUrl ?? null,
+      infoPageUrl: infoPageUrl ?? null,
+      discoveredMapUrl,
+      resolvedRemoteUrl,
+      finalRemoteUrl: remoteMapUrl,
+      fileType,
+      branch,
+    });
+  }, [
+    venueMapUrl,
+    infoPageUrl,
+    discoveredMapUrl,
+    resolvedRemoteUrl,
+    remoteMapUrl,
+    hasAnyMap,
+    bundledAsset,
+    hasBundledMap,
+  ]);
 
   return (
     <View style={styles.container}>
@@ -364,7 +413,19 @@ export function VenueMapScreen({
       </View>
 
       <View style={styles.footer}>
-        {infoPageUrl ? (
+        {remoteIsPdf && remoteMapUrl ? (
+          // PDF fallback: PDF.js inside the WebView can fail silently
+          // (CORS, iframe blocking, viewer offline). Surface a direct
+          // link so the user always has a way to see the map.
+          <TouchableOpacity
+            onPress={() => Linking.openURL(remoteMapUrl)}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.footerLink}>
+              Trouble viewing? Open PDF in browser
+            </Text>
+          </TouchableOpacity>
+        ) : infoPageUrl ? (
           <TouchableOpacity
             onPress={() => Linking.openURL(infoPageUrl)}
             activeOpacity={0.7}
