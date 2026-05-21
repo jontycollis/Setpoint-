@@ -181,7 +181,10 @@ export const TOURNAMENT_REGISTRY: Country[] = [
               //   T2: 17U Boys + 18U Girls + 18U Boys
               //   T3: 14U Boys + 15U Girls
               //   T4: 16U Boys + 16U Girls
-              // T1 has its own venue map; T2-T4 share one map.
+              // On May 19 VC consolidated to a single "Tournament2-4" PDF,
+              // and the legacy T1 PDF has been unreliable, so we point all
+              // four registry entries at the same MAY19 map. If VC ships a
+              // distinct T1 map again later, split it then.
               {
                 // 2026_Volleyball_Canada_Nationals___17UG
                 key: 'MjAyNl9Wb2xsZXliYWxsX0NhbmFkYV9OYXRpb25hbHNfX18xN1VH0',
@@ -190,7 +193,7 @@ export const TOURNAMENT_REGISTRY: Country[] = [
                 dates: 'May 2026',
                 venue: 'BMO Centre, Calgary',
                 venueMapUrl:
-                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament1.pdf',
+                  'https://volleyball.ca/uploads/Competitions/Nationals/2026/Indoor/Nationals-Map-Calgary-Tournament2-4-MAY19-Checkin-Right.pdf',
                 infoPageUrl:
                   'https://volleyball.ca/en/competitions/2026-youth-nationals/calgary-2026',
               },
