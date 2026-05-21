@@ -52,7 +52,7 @@ import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
 // store key is retained in storage.ts but is read-only / dead.
 import { scheduleAllMatchNotifications } from '../utils/notifications';
 import type { MatchNotification } from '../utils/notifications';
-import { formatTime, formatDate, getRelativeTime, parseScheduleTime, formatInVenueTz, formatDualTime, formatDualDate } from '../utils/dates';
+import { formatTime, formatDate, getRelativeTime, parseScheduleTime, formatInVenueTz, formatDualTime, formatDualDate, calendarDayKey, relativeDayLabel } from '../utils/dates';
 import { useTzDisplayMode, effectiveTzForDisplay, nextTzDisplayMode } from '../utils/tzDisplayPreference';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 import { ensureAesIndexed, indexAesSnapshot, loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
@@ -139,7 +139,10 @@ export function TeamDashboardScreen({
   const [loading, setLoading] = useState(true);
   const [scoresModalMatch, setScoresModalMatch] = useState<FlatCourtMatch | null>(null);
   const [courtStreamMap, setCourtStreamMap] = useState<CourtStreamMap>({});
-  const [dayFilter, setDayFilter] = useState<'today' | 'yesterday' | 'all'>('all');
+  // dayFilter is either 'all' or a YYYY-MM-DD key for one of the days that
+  // actually has matches. Chips are derived from match data (see below), so
+  // a tournament that hasn't started yet won't render a stale "Yesterday".
+  const [dayFilter, setDayFilter] = useState<string>('all');
   const [workDutyMatches, setWorkDutyMatches] = useState<FlatCourtMatch[]>([]);
   const [leaderboardRank, setLeaderboardRank] = useState<{ rank: number; total: number } | null>(null);
   const [divisionStandings, setDivisionStandings] = useState<import('../types/aes').AESStanding[]>([]);
@@ -645,33 +648,46 @@ export function TeamDashboardScreen({
   const totalScheduled = scheduleMatches.length;
 
   // ─── Day filter helpers ──────────────────────────────────────────────
-  // Day boundaries are anchored to the user's chosen display tz: when the
-  // toggle is on "venue", "today" means today in Toronto regardless of
-  // whether the user's phone is on Pacific time.
-  function calendarDayKey(ms: number): string {
-    // YYYY-MM-DD in the active display tz. Uses formatInVenueTz so it
-    // matches the rendering layer's tz exactly.
-    return formatInVenueTz(ms, displayTz, {
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-  }
-  function isToday(dateStr: string): boolean {
-    const ms = parseScheduleTime(dateStr, venueTimeZone);
-    if (ms == null) return false;
-    return calendarDayKey(ms) === calendarDayKey(Date.now());
-  }
-  function isYesterday(dateStr: string): boolean {
-    const ms = parseScheduleTime(dateStr, venueTimeZone);
-    if (ms == null) return false;
-    return calendarDayKey(ms) === calendarDayKey(Date.now() - 86_400_000);
-  }
+  // Day boundaries are anchored to the user's chosen display tz so the
+  // chips line up with the dates shown on the match cards. Chips are
+  // generated from the unique calendar days the team's matches fall on —
+  // a team whose tournament starts tomorrow won't see a "Yesterday" chip,
+  // and a team mid-tournament gets a chip per played + scheduled day.
+  const dayChips = useMemo(() => {
+    const keyToMs = new Map<string, number>();
+    for (const m of [...pastResults, ...upcomingMatches]) {
+      const ms = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
+      if (ms == null) continue;
+      const key = calendarDayKey(ms, displayTz);
+      if (!key) continue;
+      // First-seen ms per day is enough for label generation.
+      if (!keyToMs.has(key)) keyToMs.set(key, ms);
+    }
+    const sortedKeys = Array.from(keyToMs.keys()).sort();
+    const chips: { key: string; label: string }[] = [];
+    if (sortedKeys.length >= 2) chips.push({ key: 'all', label: 'All Days' });
+    for (const key of sortedKeys) {
+      const ms = keyToMs.get(key)!;
+      chips.push({ key, label: relativeDayLabel(ms, now, displayTz) });
+    }
+    return chips;
+  }, [pastResults, upcomingMatches, venueTimeZone, displayTz, now]);
+
+  // Guard against a stale `dayFilter` once the underlying data changes
+  // (e.g. results land and yesterday's chip disappears): if the selected
+  // key is no longer in the chip set, fall back to 'all' silently.
+  useEffect(() => {
+    if (dayFilter === 'all') return;
+    if (!dayChips.some((c) => c.key === dayFilter)) setDayFilter('all');
+  }, [dayChips, dayFilter]);
+
   function filterByDay<T extends { ScheduledStartDateTime: string }>(items: T[]): T[] {
     if (dayFilter === 'all') return items;
-    return items.filter((m) =>
-      dayFilter === 'today' ? isToday(m.ScheduledStartDateTime) : isYesterday(m.ScheduledStartDateTime)
-    );
+    return items.filter((m) => {
+      const ms = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
+      if (ms == null) return false;
+      return calendarDayKey(ms, displayTz) === dayFilter;
+    });
   }
 
   const filteredPastResults = filterByDay(pastResults);
@@ -1209,25 +1225,26 @@ export function TeamDashboardScreen({
         />
       )}
 
-      {/* Day Filter Pills */}
-      {(pastResults.length > 0 || upcomingMatches.length > 0) && (
+      {/* Day Filter Pills — chip set is data-driven; hidden when the team
+          only has matches on one day (filtering would be a no-op). */}
+      {dayChips.length > 1 && (
         <View style={styles.dayFilterRow}>
-          {(['all', 'today', 'yesterday'] as const).map((filter) => (
+          {dayChips.map((chip) => (
             <TouchableOpacity
-              key={filter}
+              key={chip.key}
               style={[
                 styles.dayFilterPill,
-                dayFilter === filter && styles.dayFilterPillActive,
+                dayFilter === chip.key && styles.dayFilterPillActive,
               ]}
-              onPress={() => setDayFilter(filter)}
+              onPress={() => setDayFilter(chip.key)}
             >
               <Text
                 style={[
                   styles.dayFilterText,
-                  dayFilter === filter && styles.dayFilterTextActive,
+                  dayFilter === chip.key && styles.dayFilterTextActive,
                 ]}
               >
-                {filter === 'all' ? 'All Days' : filter === 'today' ? 'Today' : 'Yesterday'}
+                {chip.label}
               </Text>
             </TouchableOpacity>
           ))}

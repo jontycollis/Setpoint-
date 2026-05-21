@@ -213,7 +213,7 @@ export function formatInVenueTz(
  * Calendar-day difference (target − ref) in days, anchored in `venueTz` if
  * supplied (otherwise device-local). Returns an integer.
  */
-function calendarDayDiff(refMs: number, targetMs: number, venueTz?: string): number {
+export function calendarDayDiff(refMs: number, targetMs: number, venueTz?: string): number {
   const ref = venueTz
     ? DateTime.fromMillis(refMs, { zone: venueTz })
     : DateTime.fromMillis(refMs);
@@ -224,6 +224,39 @@ function calendarDayDiff(refMs: number, targetMs: number, venueTz?: string): num
   const refStart = ref.startOf('day');
   const targetStart = target.startOf('day');
   return Math.round(targetStart.diff(refStart, 'days').days);
+}
+
+/**
+ * ISO calendar day key (`YYYY-MM-DD`) for an epoch, anchored in `tz` when
+ * supplied (otherwise device-local). Useful for grouping matches by day
+ * without 24h-window drift across DST or tz boundaries.
+ */
+export function calendarDayKey(ms: number, tz?: string): string {
+  if (!isFinite(ms)) return '';
+  const dt = tz ? DateTime.fromMillis(ms, { zone: tz }) : DateTime.fromMillis(ms);
+  return dt.toISODate() ?? '';
+}
+
+/**
+ * Smart day label relative to `nowMs`, anchored in `tz` when supplied.
+ *
+ *   diff = -1 → 'Yesterday'
+ *   diff =  0 → 'Today'
+ *   diff = +1 → 'Tomorrow'
+ *   |diff| ≤ 6 → short weekday (e.g. 'Fri')
+ *   otherwise → short date (e.g. 'May 22')
+ *
+ * Both args are interpreted in `tz` so a 9 AM Calgary match labels as
+ * "Tomorrow" for an Eastern user even when their device clock hasn't
+ * crossed midnight yet.
+ */
+export function relativeDayLabel(targetMs: number, nowMs: number, tz?: string): string {
+  const diff = calendarDayDiff(nowMs, targetMs, tz);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff === -1) return 'Yesterday';
+  if (Math.abs(diff) <= 6) return formatInVenueTz(targetMs, tz, { weekday: 'short' });
+  return formatInVenueTz(targetMs, tz, { month: 'short', day: 'numeric' });
 }
 
 // ── Dual-tz rendering ──────────────────────────────────────────────────────
