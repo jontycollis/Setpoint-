@@ -183,11 +183,11 @@ function buildPdfCanvasHtml(pdfBase64: string, highlightCourt?: string) {
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { width: 100%; background: #f4f4f4; ${bodyPadding} }
     #container { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px; }
-    canvas { box-shadow: 0 2px 8px rgba(0,0,0,.15); max-width: 100%; height: auto; background: white; }
+    canvas { box-shadow: 0 2px 8px rgba(0,0,0,.15); max-width: 100%; background: white; }
     #status { padding: 24px; color: #666; font-family: -apple-system, sans-serif; font-size: 14px; text-align: center; }
     #status.error { color: #c00; }
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 </head>
 <body>
   ${courtBanner}
@@ -208,11 +208,12 @@ function buildPdfCanvasHtml(pdfBase64: string, highlightCourt?: string) {
       }
       try {
         pdfjsLib.GlobalWorkerOptions.workerSrc =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
         var b64 = "${pdfBase64}";
         var bin = atob(b64);
         var bytes = new Uint8Array(bin.length);
         for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        var dpr = window.devicePixelRatio || 1;
         pdfjsLib.getDocument({ data: bytes }).promise.then(function (pdf) {
           if (statusEl && statusEl.parentNode) statusEl.parentNode.removeChild(statusEl);
           var chain = Promise.resolve();
@@ -220,10 +221,12 @@ function buildPdfCanvasHtml(pdfBase64: string, highlightCourt?: string) {
             (function (pageNum) {
               chain = chain.then(function () {
                 return pdf.getPage(pageNum).then(function (page) {
-                  var viewport = page.getViewport({ scale: 1.5 });
+                  var viewport = page.getViewport({ scale: 1.5 * dpr });
                   var canvas = document.createElement('canvas');
                   canvas.width = viewport.width;
                   canvas.height = viewport.height;
+                  canvas.style.width = (viewport.width / dpr) + 'px';
+                  canvas.style.height = (viewport.height / dpr) + 'px';
                   container.appendChild(canvas);
                   return page.render({
                     canvasContext: canvas.getContext('2d'),
