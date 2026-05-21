@@ -570,6 +570,42 @@ export function TeamDashboardScreen({
     setRefreshing(false);
   }, []);
 
+  // ─── Day filter chips (HOOKS — must be unconditional, before any early
+  //     return). Built from raw `scheduleMatches` so we can compute them
+  //     without depending on the post-loading-guard derived arrays.
+  //     Mirrors the same staleness rule used by `upcomingMatches` below
+  //     (matches > 30 min in the past with no result are dropped) so the
+  //     chip set matches the visible match list.
+  const dayChips = useMemo(() => {
+    const keyToMs = new Map<string, number>();
+    const staleCutoff = now - 30 * 60 * 1000;
+    for (const m of scheduleMatches) {
+      const isDone = m.HasScores || m.FirstTeamWon || m.SecondTeamWon;
+      const ms = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
+      if (ms == null) continue;
+      if (!isDone && ms <= staleCutoff) continue;
+      const key = calendarDayKey(ms, displayTz);
+      if (!key) continue;
+      if (!keyToMs.has(key)) keyToMs.set(key, ms);
+    }
+    const sortedKeys = Array.from(keyToMs.keys()).sort();
+    const chips: { key: string; label: string }[] = [];
+    if (sortedKeys.length >= 2) chips.push({ key: 'all', label: 'All Days' });
+    for (const key of sortedKeys) {
+      const ms = keyToMs.get(key)!;
+      chips.push({ key, label: relativeDayLabel(ms, now, displayTz) });
+    }
+    return chips;
+  }, [scheduleMatches, venueTimeZone, displayTz, now]);
+
+  // Guard against a stale `dayFilter` once the underlying data changes
+  // (e.g. results land and yesterday's chip disappears): if the selected
+  // key is no longer in the chip set, fall back to 'all' silently.
+  useEffect(() => {
+    if (dayFilter === 'all') return;
+    if (!dayChips.some((c) => c.key === dayFilter)) setDayFilter('all');
+  }, [dayChips, dayFilter]);
+
   if (loading) {
     return (
       <View style={styles.centered}>
@@ -648,39 +684,10 @@ export function TeamDashboardScreen({
   const totalScheduled = scheduleMatches.length;
 
   // ─── Day filter helpers ──────────────────────────────────────────────
+  // `dayChips` and the stale-filter `useEffect` live above the loading
+  // guard so they're called on every render (hooks must be unconditional).
   // Day boundaries are anchored to the user's chosen display tz so the
-  // chips line up with the dates shown on the match cards. Chips are
-  // generated from the unique calendar days the team's matches fall on —
-  // a team whose tournament starts tomorrow won't see a "Yesterday" chip,
-  // and a team mid-tournament gets a chip per played + scheduled day.
-  const dayChips = useMemo(() => {
-    const keyToMs = new Map<string, number>();
-    for (const m of [...pastResults, ...upcomingMatches]) {
-      const ms = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
-      if (ms == null) continue;
-      const key = calendarDayKey(ms, displayTz);
-      if (!key) continue;
-      // First-seen ms per day is enough for label generation.
-      if (!keyToMs.has(key)) keyToMs.set(key, ms);
-    }
-    const sortedKeys = Array.from(keyToMs.keys()).sort();
-    const chips: { key: string; label: string }[] = [];
-    if (sortedKeys.length >= 2) chips.push({ key: 'all', label: 'All Days' });
-    for (const key of sortedKeys) {
-      const ms = keyToMs.get(key)!;
-      chips.push({ key, label: relativeDayLabel(ms, now, displayTz) });
-    }
-    return chips;
-  }, [pastResults, upcomingMatches, venueTimeZone, displayTz, now]);
-
-  // Guard against a stale `dayFilter` once the underlying data changes
-  // (e.g. results land and yesterday's chip disappears): if the selected
-  // key is no longer in the chip set, fall back to 'all' silently.
-  useEffect(() => {
-    if (dayFilter === 'all') return;
-    if (!dayChips.some((c) => c.key === dayFilter)) setDayFilter('all');
-  }, [dayChips, dayFilter]);
-
+  // chips line up with the dates shown on the match cards.
   function filterByDay<T extends { ScheduledStartDateTime: string }>(items: T[]): T[] {
     if (dayFilter === 'all') return items;
     return items.filter((m) => {
