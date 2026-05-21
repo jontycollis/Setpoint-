@@ -34,6 +34,88 @@ const BUNDLED_VENUE_MAPS: Record<string, any> = {
  */
 const PDF_BASE64_CACHE = new Map<string, string>();
 
+// Convert an ArrayBuffer of binary bytes to a base64 string.
+// We chunk through the Uint8Array (32k at a time) to avoid
+// `String.fromCharCode(...bytes)` stack-overflowing on multi-megabyte
+// PDFs. Uses `global.btoa` (polyfilled by RN core-js); throws if missing.
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  const chunks: string[] = [];
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const slice = bytes.subarray(i, Math.min(i + chunkSize, bytes.length));
+    chunks.push(String.fromCharCode.apply(null, Array.from(slice)));
+  }
+  const binary = chunks.join('');
+  const g: any = globalThis as any;
+  if (typeof g.btoa === 'function') return g.btoa(binary);
+  throw new Error('E_NO_BTOA');
+}
+
+// XHR fallback for `fetch().arrayBuffer()` — historically more reliable
+// for binary downloads on older Android RN builds. Returns the bytes
+// as an ArrayBuffer or rejects with a short code.
+function xhrArrayBuffer(url: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url);
+    xhr.responseType = 'arraybuffer';
+    xhr.timeout = 30000;
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(xhr.response as ArrayBuffer);
+      } else {
+        reject(new Error(`E_XHR_HTTP_${xhr.status}`));
+      }
+    };
+    xhr.onerror = () => reject(new Error('E_XHR_NETWORK'));
+    xhr.ontimeout = () => reject(new Error('E_XHR_TIMEOUT'));
+    xhr.send();
+  });
+}
+
+// Download a PDF as base64. Tries `fetch().arrayBuffer()` first (modern,
+// fast), then falls back to XHR if fetch errors out OR returns 0 bytes
+// (Android RN has historically had both failure modes). Returns the
+// base64 body (no data: prefix) ready to inline into the WebView HTML.
+async function downloadPdfAsBase64(url: string): Promise<string> {
+  let arrayBuffer: ArrayBuffer | null = null;
+  let primaryErr: unknown = null;
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`E_FETCH_HTTP_${response.status}`);
+    arrayBuffer = await response.arrayBuffer();
+    if (arrayBuffer.byteLength === 0) {
+      primaryErr = new Error('E_FETCH_EMPTY');
+      arrayBuffer = null;
+    }
+  } catch (err) {
+    primaryErr = err;
+  }
+
+  if (!arrayBuffer) {
+    if (__DEV__) {
+      console.log(
+        '[venue-map] fetch path failed, trying XHR:',
+        primaryErr instanceof Error ? primaryErr.message : String(primaryErr),
+      );
+    }
+    arrayBuffer = await xhrArrayBuffer(url);
+    if (arrayBuffer.byteLength === 0) throw new Error('E_XHR_EMPTY');
+  }
+
+  if (__DEV__) {
+    console.log('[venue-map] arrayBuffer length:', arrayBuffer.byteLength);
+  }
+
+  const base64 = arrayBufferToBase64(arrayBuffer);
+  if (__DEV__) {
+    console.log('[venue-map] base64 length:', base64.length);
+  }
+  return base64;
+}
+
 /**
  * Checks if a venueMapUrl is a bundled asset reference.
  */
@@ -346,28 +428,28 @@ export function VenueMapScreen({
     setPdfFetching(true);
     (async () => {
       try {
-        const response = await fetch(remoteMapUrl);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const blob = await response.blob();
-        const dataUrl = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result as string);
-          reader.onerror = () =>
-            reject(reader.error ?? new Error('FileReader failed'));
-          reader.readAsDataURL(blob);
-        });
-        const commaIdx = dataUrl.indexOf(',');
-        const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
-        if (!base64) throw new Error('Empty PDF body');
+        if (__DEV__) console.log('[venue-map] fetch start:', remoteMapUrl);
+        const base64 = await downloadPdfAsBase64(remoteMapUrl);
+        if (!base64) throw new Error('E_EMPTY_BASE64');
         if (cancelled) return;
         PDF_BASE64_CACHE.set(remoteMapUrl, base64);
         setPdfBase64(base64);
       } catch (err) {
         if (cancelled) return;
+        if (__DEV__) {
+          const e = err as { name?: string; message?: string; stack?: string };
+          console.log(
+            '[venue-map] error:',
+            e?.name,
+            e?.message,
+            e?.stack,
+          );
+        }
         console.warn('[VenueMapScreen] PDF fetch failed:', err);
-        setPdfFetchError(
-          err instanceof Error ? err.message : String(err),
-        );
+        // Surface a short code (E_FETCH_HTTP_404, E_XHR_TIMEOUT, etc.)
+        // in the user-visible error UI so we can diagnose without logs.
+        const msg = err instanceof Error ? err.message : String(err);
+        setPdfFetchError(msg || 'E_UNKNOWN');
       } finally {
         if (!cancelled) setPdfFetching(false);
       }
@@ -486,7 +568,7 @@ export function VenueMapScreen({
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>
               {pdfFailed
-                ? "Couldn't load the venue map PDF. Tap below to open it in your browser."
+                ? `Couldn't load the venue map PDF (error: ${pdfFetchError ?? 'E_UNKNOWN'}). Tap below to open it in your browser.`
                 : 'Unable to load the venue map. Please check your internet connection.'}
             </Text>
             {!pdfFailed && (
