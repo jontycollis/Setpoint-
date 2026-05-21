@@ -136,7 +136,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
           <TouchableOpacity
             onPress={() =>
               Linking.openURL(
-                `mailto:jontycollis@gmail.com?subject=SetPoint%20error&body=${encodeURIComponent(
+                `mailto:jontycollis@gmail.com?subject=Bior%20error&body=${encodeURIComponent(
                   errorMessage
                 )}`
               )
@@ -157,7 +157,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
 //
 // Self-contained styling — the boundary catches errors that may have
 // originated in the theme provider, so we can't depend on useTheme().
-// Hard-coded palette matches the light-mode SetPoint defaults.
+// Hard-coded palette matches the light-mode Bior defaults.
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },

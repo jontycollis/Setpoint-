@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>AES Score Tracker — User Guide</title>
+  <title>Bior — User Guide</title>
   <style>
 :root {
   --primary: #1a73e8;
@@ -146,8 +146,8 @@ footer {
 </head>
 <body>
   <header class="cover">
-    <h1>AES Score Tracker</h1>
-    <div class="subtitle">User Guide · v1.0.0 · 2026-05-17</div>
+    <h1>Bior</h1>
+    <div class="subtitle">User Guide · v1.0.0 · 2026-05-21</div>
   </header>
   <nav class="toc">
     <h2>Contents</h2>
@@ -170,7 +170,7 @@ footer {
 <section id="getting-started">
   <h2>Getting started</h2>
   <p class="summary">Add your first team, pick a tournament, see your week.</p>
-  <p>AES Score Tracker is a companion app for volleyball families and coaches. It pulls the schedules, standings, and brackets from AES and Timu, lets you score matches yourself, and rolls up everything you do into a single per-team Season History and analytics dashboard.</p>
+  <p>Bior (BIR — Irish Gaelic for sharp point / spike) is a companion app for volleyball families and coaches. It pulls the schedules, standings, and brackets from AES and Timu, lets you score matches yourself, and rolls up everything you do into a single per-team Season History and analytics dashboard.</p>
   <h3>First launch</h3>
   <ul>
     <li>Tap “Add team” to set yourself up. Pick AES if your team plays AES-managed events; Timu if it plays Ontario tour stops. You can add both later — the app handles mixed seasons natively.</li>
@@ -197,7 +197,7 @@ footer {
   <h3>Next match card</h3>
   <ul>
     <li>Shows the very next scheduled match across all your tracked teams, with a live countdown and court number. Tap it to open the scoreboard pre-wired for that match.</li>
-    <li>Times are shown in the venue’s local time zone by default. The “Show in my time” toggle in the time-zone banner switches to your device time.</li>
+    <li>Times default to the venue’s local zone. When your device is in a different zone, you’ll see both — venue time first, your local time in parentheses (e.g. “3:00 PM EDT (12:00 PM PDT)”). The toggle to switch between dual / venue-only / your-time-only lives on Team Dashboard and is remembered across launches.</li>
   </ul>
   <h3>Upcoming tournaments</h3>
   <ul>
@@ -224,6 +224,20 @@ footer {
   <h3>Recent results</h3>
   <ul>
     <li>The last 10 matches across all tournaments — both AES and Timu sources mixed. Each row taps through to the per-match boxscore.</li>
+  </ul>
+  <h3>Action buttons</h3>
+  <ul>
+    <li>A row of buttons drops you straight into deeper tournament views: Standings, Playoff Brackets, and 🗺 Venue Map. Venue Map opens the bundled court / venue layout for the current tournament when one is available (e.g. 2026 Nationals).</li>
+  </ul>
+  <h3>Upcoming tournaments</h3>
+  <ul>
+    <li>Cards for the team’s next tournaments sit below recent results. Tap any card to drill straight into that tournament — your pool is highlighted in your division’s colour. The cards are tappable here, on Timu Team Dashboard, and on Season History.</li>
+  </ul>
+  <h3>Times and time zones</h3>
+  <p>Tournament times default to the venue’s local time. When your device is in a different time zone, the next-match card and the schedule show both — venue time first, your local time in parentheses (e.g. “3:00 PM EDT (12:00 PM PDT)”). When the two zones match, you just see one time.</p>
+  <ul>
+    <li>A small toggle under the next-match block cycles through three modes: dual (both times) → venue-only → your-time-only → back to dual. Tap to switch. The choice is remembered across launches.</li>
+    <li>Notifications fire at the correct real-world moment regardless of your device time zone — a 9:00 AM PDT match notifies at 9:00 AM PDT even if your phone is set to Eastern.</li>
   </ul>
   <aside class="tip"><strong>TIP</strong><div>Long-press the team pill in the top bar to switch active teams without closing the dashboard.</div></aside>
 </section>
@@ -261,6 +275,12 @@ footer {
   <h3>After the match</h3>
   <ul>
     <li>Boxscore page shows kills, errors, assists, digs, blocks, aces, plus serve-receive pass average. Tap any player row to drill into their per-set numbers.</li>
+  </ul>
+  <h3>Export an OVA-format scoresheet PDF</h3>
+  <p>When a match is complete, you can export a printable OVA-format scoresheet as PDF. The button (🖨 Export OVA scoresheet PDF) appears in three places: on the match-end banner inside the scoring screen, on the post-match save sheet, and as a “🖨 PDF” chip on each completed match in the Match List.</p>
+  <ul>
+    <li>The PDF includes: header (tournament / division / court / date), team cards with coaches, captains, libero(s) and full roster, officials block, per-set lineup grid with point progression, sub log, libero replacements, timeouts and sanctions, match summary, and signature lines for captains / coaches / referees / scorer.</li>
+    <li>Generation uses the system print dialog and then hands off to your phone’s share sheet — email it to your coach, save to Files, or send straight to a printer.</li>
   </ul>
   <aside class="tip"><strong>TIP</strong><div>Match data feeds the same Season History and Analytics screens as imported AES/Timu/Sideline HD matches — no separate place to look.</div></aside>
 </section>
@@ -304,7 +324,11 @@ footer {
   </ul>
   <h3>Upcoming tournament cards</h3>
   <ul>
-    <li>Cards for tournaments that haven’t started yet appear at the top. Tap to open the tournament page — your team’s pool is highlighted in your division’s colour.</li>
+    <li>Cards for tournaments that haven’t started yet appear at the top. They are tappable — open the AES or Timu tournament directly, with your team’s pool highlighted in your division’s colour.</li>
+  </ul>
+  <h3>Finding more tournaments</h3>
+  <ul>
+    <li>Two buttons sit alongside the upcoming-tournaments list. “Scan for Tournaments” re-runs the auto-search across AES and Timu for events your team could be in. “Manually Add a Tournament” lets you paste a URL for a tournament that auto-search didn’t catch.</li>
   </ul>
   <h3>Filtering</h3>
   <ul>
@@ -325,6 +349,7 @@ footer {
   <ul>
     <li>Renders the bracket tree once playoffs are seeded. Tap any match to drill into the boxscore. Win Probability Bar above the bracket projects your team’s path forward based on current standings.</li>
   </ul>
+  <p>Bracket match cards now show the court and scheduled time when AES has them. Open rounds (e.g. championship match TBD) hide the strip when the data isn’t available, so the bracket stays clean.</p>
   <aside class="note"><strong>NOTE</strong><div>Both screens depend on AES publishing results in real time. If the bracket looks stale, pull-to-refresh.</div></aside>
 </section>
 
@@ -394,14 +419,16 @@ footer {
   <h3>How do I share a screen / boxscore?</h3>
   <p>Most analytics and match screens have a share button in the header. Tap it to export a snapshot card to Messages, Mail, or AirDrop.</p>
   <h3>My next match is showing the wrong time zone.</h3>
-  <p>Times default to the venue’s local zone. Toggle “Show in my time” in the time-zone banner on My Home to switch to your device time.</p>
+  <p>Times default to the venue’s local zone. When your device is in a different zone, you should see both — venue time first, your local time in parentheses. The dual / venue-only / your-time toggle lives on Team Dashboard, just under the next-match block. Notifications fire at the correct real-world moment regardless of which mode you pick.</p>
+  <h3>How do I get help on a specific screen?</h3>
+  <p>Every screen has a “?” button in the top-right that opens this help guide deep-linked to the relevant section. Inside the help screen there is also a search bar at the top — type a keyword (“libero”, “PDF”, “time zone”) and the matching sections expand inline.</p>
   <h3>Where is my team’s data after I delete the app?</h3>
   <p>Gone — everything is on-device. Use Hamburger → Restore from backup before deleting if you want a recovery point. There is no cloud backup.</p>
   <h3>How do I report a bug or suggest a feature?</h3>
   <p>Email jontycollis@gmail.com or use the contact link in About &amp; privacy. Bug reports with a screenshot and the in-app version number (About → Version) are easiest to action.</p>
 </section>
   <footer>
-    AES Score Tracker User Guide · Generated from in-app help · © 2026 Jon Collis
+    Bior User Guide · Generated from in-app help · © 2026 Jon Collis
   </footer>
 </body>
 </html>

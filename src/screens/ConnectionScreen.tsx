@@ -1,7 +1,7 @@
 // ── ConnectionScreen ──────────────────────────────────────────────────────
 //
 // Generic WebView host for "log in to a third-party site and view your
-// data inside Setpoint". Used by:
+// data inside Bior". Used by:
 //   - OVA MRS (mrs.ontariovolleyball.org)
 //   - CAC Locker (thelocker.coach.ca)
 //
@@ -276,7 +276,7 @@ export function ConnectionScreen({
   const handleDisconnect = () => {
     Alert.alert(
       `Disconnect ${config.serviceName}?`,
-      'Your Setpoint connection flag will be cleared. To fully sign out, also tap the service\'s own Sign Out before disconnecting.',
+      'Your Bior connection flag will be cleared. To fully sign out, also tap the service\'s own Sign Out before disconnecting.',
       [
         { text: 'Cancel', style: 'cancel' },
         {

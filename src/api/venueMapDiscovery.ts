@@ -252,7 +252,7 @@ export async function discoverVenueMaps(
   try {
     const response = await fetch(pageUrl, {
       headers: {
-        'User-Agent': 'SetPoint-App/1.0',
+        'User-Agent': 'Bior-App/1.0',
         Accept: 'text/html',
       },
     });

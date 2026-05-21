@@ -56,7 +56,7 @@ export function OnboardingScreen({ onComplete }: Props) {
         {/* Welcome header */}
         <View style={styles.hero}>
           <Text style={styles.heroEmoji}>{'🏐'}</Text>
-          <Text style={styles.heroTitle}>Welcome to SetPoint</Text>
+          <Text style={styles.heroTitle}>Welcome to Bior</Text>
           <Text style={styles.heroSubtitle}>
             Tournament browser, team dashboards, live scoring, and venue
             maps — for indoor volleyball.
@@ -68,7 +68,7 @@ export function OnboardingScreen({ onComplete }: Props) {
           <Feature
             emoji="🔎"
             title="Find your team"
-            body="Pick from the OVA rankings and SetPoint auto-discovers their AES and Timu tournaments."
+            body="Pick from the OVA rankings and Bior auto-discovers their AES and Timu tournaments."
           />
           <Feature
             emoji="📊"
@@ -94,7 +94,7 @@ export function OnboardingScreen({ onComplete }: Props) {
             One thing before you start
           </Text>
           <Text style={styles.disclaimerBody}>
-            SetPoint is an independent app.{' '}
+            Bior is an independent app.{' '}
             <Text style={styles.bold}>
               It's not affiliated with, endorsed by, or sponsored by
             </Text>{' '}
@@ -107,13 +107,13 @@ export function OnboardingScreen({ onComplete }: Props) {
             your credentials go straight to those services through an
             embedded web view.{' '}
             <Text style={styles.bold}>
-              SetPoint never sees, captures, or stores your username
+              Bior never sees, captures, or stores your username
               or password.
             </Text>
           </Text>
           <Text style={styles.disclaimerBody}>
             Match scores, rosters, and favorites stay on this device —
-            there's no SetPoint server.
+            there's no Bior server.
           </Text>
         </View>
 

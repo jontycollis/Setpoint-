@@ -31,7 +31,7 @@ import {
 } from '../utils/globalSearchCorpus';
 import type { UserProfile } from '../types/profile';
 
-const APP_LOGO = require('../../assets/setpoint-logo.png');
+const APP_LOGO = require('../../assets/bior-logo.png');
 
 type Step = 'country' | 'tournament' | 'year';
 

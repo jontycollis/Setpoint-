@@ -1,4 +1,4 @@
-# SetPoint
+# Bior
 
 Mobile companion for indoor volleyball coaches, athletes, and parents — tournament browsing, team dashboards, live scoring, season history, and venue maps for Volleyball Canada / OVA / AES-hosted events.
 
@@ -64,19 +64,19 @@ assets/                       Icon, splash, bundled venue maps
 
 ## Integrations
 
-The app embeds three third-party services. SetPoint is **not affiliated** with any of them — see `PRIVACY.md` and the in-app "About" screen for the full disclaimer.
+The app embeds three third-party services. Bior is **not affiliated** with any of them — see `PRIVACY.md` and the in-app "About" screen for the full disclaimer.
 
-| Integration | What it is | How SetPoint uses it |
+| Integration | What it is | How Bior uses it |
 |---|---|---|
 | **AES** (Advanced Event Systems, `results.advancedeventsystems.com`) | Tournament results / brackets API used by Volleyball Canada and OVA | Public read-only fetch of tournament metadata, divisions, teams, schedules |
-| **OVA MRS** (`mrs.ontariovolleyball.org`) | Ontario Volleyball Association member registration system | Embedded WebView — user signs in with their own credentials; SetPoint never sees them |
+| **OVA MRS** (`mrs.ontariovolleyball.org`) | Ontario Volleyball Association member registration system | Embedded WebView — user signs in with their own credentials; Bior never sees them |
 | **CAC Locker** (`thelocker.coach.ca`) | Coaching Association of Canada certification dashboard | Same — embedded WebView for the user's own session |
 
-For MRS and CAC, SetPoint injects display-only CSS to make the desktop layouts legible on a phone. No data is scraped, exfiltrated, or stored on a server (because there is no SetPoint server — see the next section).
+For MRS and CAC, Bior injects display-only CSS to make the desktop layouts legible on a phone. No data is scraped, exfiltrated, or stored on a server (because there is no Bior server — see the next section).
 
 ## Data + privacy
 
-SetPoint is a **client-only app**. There is no backend, no user accounts, no telemetry server. Everything is local to the device:
+Bior is a **client-only app**. There is no backend, no user accounts, no telemetry server. Everything is local to the device:
 
 - Match scores, team rosters, favorite tournaments → `AsyncStorage` on the device only.
 - MRS / CAC WebView sessions → standard cookie store inside the WebView, scoped to the embedded site.
