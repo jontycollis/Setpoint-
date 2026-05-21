@@ -1,4 +1,4 @@
-# Launch checklist — SetPoint v1.0
+# Launch checklist — Bior v1.0
 
 Pre-submission tracker covering Play Store + App Store. All code-side work for v1.0 launched in commits leading up to versionCode 14; this file is the human-side punch list + the canonical source for store-listing copy and review-team answers.
 
@@ -43,7 +43,7 @@ Once those four files are updated, every later OTA push ships them automatically
 ## 3. Sentry setup
 
 1. Sign up at https://sentry.io (free tier covers 5K events/month — plenty for launch).
-2. Create a new project → React Native platform → name "SetPoint".
+2. Create a new project → React Native platform → name "Bior".
 3. Copy the **DSN** from Project Settings → Client Keys.
 4. Paste into `src/utils/sentryInit.ts` → `SENTRY_DSN`.
 5. Commit + OTA push. Production crashes start appearing in the Sentry dashboard.
@@ -68,7 +68,7 @@ Below is launch-ready copy for both stores. Adjust voice as you like.
 
 ### 5.1 App name + tagline
 
-- **App name (both stores):** SetPoint
+- **App name (both stores):** Bior
 - **Subtitle (App Store, ≤30 chars):** Volleyball tournaments & scoring
 - **Short description (Play Store, ≤80 chars):** Tournament browser, team dashboards, and live scoring for indoor volleyball.
 
@@ -77,7 +77,7 @@ Below is launch-ready copy for both stores. Adjust voice as you like.
 Use this for both Play Store (≤4000 chars) and App Store (≤4000 chars). Trim if needed.
 
 ```
-SetPoint is a companion app for indoor volleyball coaches, athletes,
+Bior is a companion app for indoor volleyball coaches, athletes,
 and parents. Browse tournaments from AES, OVA, and Timu, follow your
 team across the season, score matches live, and find your court at
 the venue — all in one place.
@@ -94,19 +94,19 @@ KEY FEATURES
   tournaments, including the 2026 Youth Nationals (Mississauga,
   Calgary, Edmonton, Moncton, Ottawa).
 • OVA MRS + CAC Locker connectors — sign in to your membership and
-  coaching portals inside SetPoint via embedded web views. Your
-  credentials stay with the service — SetPoint never sees them.
+  coaching portals inside Bior via embedded web views. Your
+  credentials stay with the service — Bior never sees them.
 • Offline-friendly — recent tournament data is cached so the app
   works on the venue's wonky Wi-Fi.
 
 PRIVACY-FIRST
-SetPoint is a client-only app. There's no SetPoint server, no user
+Bior is a client-only app. There's no Bior server, no user
 account, and no behavioural analytics. Match scores, team rosters,
 and favorites stay on your device. See the in-app About & Privacy
 screen for full details.
 
 NOT AFFILIATED
-SetPoint is an independent companion tool. It is not affiliated with,
+Bior is an independent companion tool. It is not affiliated with,
 endorsed by, or sponsored by Volleyball Canada, the Ontario Volleyball
 Association, the Coaching Association of Canada, Advanced Event
 Systems, or Timu Sports. All trademarks and tournament data are the
@@ -135,7 +135,7 @@ Play Console asks a question-by-question form. Verbatim answers below — these 
 ### Data collection + sharing
 
 > **Does your app collect or share any of the required user data types?**
-**Yes — crash diagnostics only.** SetPoint sends anonymized crash reports to Sentry. No other data collection.
+**Yes — crash diagnostics only.** Bior sends anonymized crash reports to Sentry. No other data collection.
 
 ### Data types (per-category)
 
@@ -174,12 +174,12 @@ For "Diagnostics → Crash Data":
 ### 7.2 App Review Information notes (paste into the review-notes field)
 
 ```
-SetPoint is a companion app for indoor volleyball. It surfaces public
+Bior is a companion app for indoor volleyball. It surfaces public
 tournament data from Advanced Event Systems (AES) and Timu, and
 embeds the OVA MRS and CAC Locker member portals as web views so
 users can manage their existing memberships inside the app.
 
-SetPoint is NOT affiliated with, endorsed by, or sponsored by:
+Bior is NOT affiliated with, endorsed by, or sponsored by:
   Volleyball Canada / Ontario Volleyball Association /
   Coaching Association of Canada / Advanced Event Systems / Timu.
 
@@ -190,7 +190,7 @@ flow also surfaces it before the user reaches any other screen.
 CREDENTIALS
 The MRS and CAC Locker screens embed the third-party sign-in pages
 directly. Credentials are entered into the web view and stay in the
-web view's cookie store — SetPoint never reads, captures, stores,
+web view's cookie store — Bior never reads, captures, stores,
 or transmits the user's username or password.
 
 DEMO ACCOUNT

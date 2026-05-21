@@ -56,7 +56,7 @@ export function ShareCard({
     const setStr = setScores.map((s) => `${s.my}-${s.opp}`).join(', ');
     const context = matchLabel ? ` in ${matchLabel}` : '';
     const medal = medalLabel ? ` ${medalEmoji} ${medalLabel}!` : '';
-    const msg = `${teamName} ${result} vs ${opponentName}${context}${setStr ? ` (${setStr})` : ''}${medal}\n\n${divisionName} — ${eventName}\n\nTracked with SetPoint`;
+    const msg = `${teamName} ${result} vs ${opponentName}${context}${setStr ? ` (${setStr})` : ''}${medal}\n\n${divisionName} — ${eventName}\n\nTracked with Bior`;
     Share.share({ message: msg });
   };
 

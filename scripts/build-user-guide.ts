@@ -125,7 +125,7 @@ function renderHtmlSection(section: HelpSection): string {
 
 function buildMarkdown(): string {
   const lines: string[] = [];
-  lines.push('# AES Score Tracker — User Guide');
+  lines.push('# Bior — User Guide');
   lines.push('');
   lines.push(
     'This guide mirrors the in-app help. Open the app → hamburger → "Help & user guide" for the searchable version, or read on for the printable copy.'
@@ -298,12 +298,12 @@ function buildHtml(): string {
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>AES Score Tracker — User Guide</title>
+  <title>Bior — User Guide</title>
   <style>${PRINT_CSS}</style>
 </head>
 <body>
   <header class="cover">
-    <h1>AES Score Tracker</h1>
+    <h1>Bior</h1>
     <div class="subtitle">User Guide · v1.0.0 · ${today}</div>
   </header>
   <nav class="toc">
@@ -314,7 +314,7 @@ ${tocHtml}
   </nav>
 ${sectionsHtml}
   <footer>
-    AES Score Tracker User Guide · Generated from in-app help · © ${new Date().getFullYear()} Jon Collis
+    Bior User Guide · Generated from in-app help · © ${new Date().getFullYear()} Jon Collis
   </footer>
 </body>
 </html>

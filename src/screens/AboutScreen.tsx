@@ -39,7 +39,7 @@ interface Props {
 const PRIVACY_POLICY_URL =
   'https://jontycollis.github.io/setpoint-legal/privacy.html';
 
-// Primary contact for SetPoint support / feedback / privacy
+// Primary contact for Bior support / feedback / privacy
 // questions. Surfaced in the About screen "Contact" section, in the
 // ErrorBoundary "Report this error" mailto link, and in PRIVACY.md.
 const SUPPORT_EMAIL = 'jontycollis@gmail.com';
@@ -48,7 +48,7 @@ export function AboutScreen({ onBack }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
-  const appName = Constants.expoConfig?.name || 'SetPoint';
+  const appName = Constants.expoConfig?.name || 'Bior';
   const appVersion = Constants.expoConfig?.version || '—';
   const buildNumber =
     Constants.expoConfig?.android?.versionCode ??
@@ -68,13 +68,13 @@ export function AboutScreen({ onBack }: Props) {
         'Privacy policy',
         // Inline summary used until the hosted URL is set. Full text
         // lives in PRIVACY.md in the repo.
-        "SetPoint is a client-only app. There's no SetPoint server, no SetPoint account, and no SetPoint analytics. Match scores, team rosters, and connection state live on your device only. When you sign in to OVA MRS or CAC Locker, your credentials go to those services directly — SetPoint never sees them. Crash reports (when enabled) are anonymized and sent to Sentry to help fix bugs.\n\nFull policy: see PRIVACY.md in the project repo."
+        "Bior is a client-only app. There's no Bior server, no Bior account, and no Bior analytics. Match scores, team rosters, and connection state live on your device only. When you sign in to OVA MRS or CAC Locker, your credentials go to those services directly — Bior never sees them. Crash reports (when enabled) are anonymized and sent to Sentry to help fix bugs.\n\nFull policy: see PRIVACY.md in the project repo."
       );
     }
   };
 
   const openContact = () => {
-    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=SetPoint%20feedback`).catch(
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}?subject=Bior%20feedback`).catch(
       () => {
         Alert.alert('Could not open mail', `Reach us at ${SUPPORT_EMAIL}.`);
       }
@@ -92,7 +92,7 @@ export function AboutScreen({ onBack }: Props) {
         >
           <Text style={styles.heroBack}>{'< Back'}</Text>
         </TouchableOpacity>
-        <Text style={styles.heroTitle}>About SetPoint</Text>
+        <Text style={styles.heroTitle}>About Bior</Text>
         <Text style={styles.heroSubtitle}>
           {appName} · v{appVersion} (build {String(buildNumber)})
         </Text>
@@ -107,7 +107,7 @@ export function AboutScreen({ onBack }: Props) {
             Unofficial third-party app
           </Text>
           <Text style={styles.disclaimerBody}>
-            SetPoint is an independent companion tool. It is{' '}
+            Bior is an independent companion tool. It is{' '}
             <Text style={styles.bold}>not affiliated with, endorsed by, or sponsored by</Text>:
           </Text>
           <View style={styles.disclaimerList}>
@@ -125,10 +125,10 @@ export function AboutScreen({ onBack }: Props) {
           </View>
           <Text style={styles.disclaimerBody}>
             All trademarks and tournament data are the property of their
-            respective owners. SetPoint reads publicly-available tournament
+            respective owners. Bior reads publicly-available tournament
             information and embeds the OVA MRS / CAC Locker member portals
             inside a web view for convenience. Your credentials and session
-            cookies stay in the embedded web view — SetPoint never sees or
+            cookies stay in the embedded web view — Bior never sees or
             stores them.
           </Text>
         </View>
@@ -136,8 +136,8 @@ export function AboutScreen({ onBack }: Props) {
         {/* Privacy summary. Tap → full policy or inline summary. */}
         <Section title="Privacy">
           <Text style={styles.body}>
-            Everything SetPoint creates or fetches lives on your device.
-            There is no SetPoint server, no account system, and no
+            Everything Bior creates or fetches lives on your device.
+            There is no Bior server, no account system, and no
             cross-device sync. Match scores, team rosters, and favorites
             never leave your phone.
           </Text>

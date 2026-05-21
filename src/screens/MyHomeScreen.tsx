@@ -681,7 +681,7 @@ function renderableFor(state: RightNowState, args: RenderableArgs): Renderable {
         ? { label: 'Browse tournaments', onPress: args.onBrowseTournaments }
         : null;
       return {
-        headline: 'Welcome to Setpoint',
+        headline: 'Welcome to Bior',
         subhead: 'Pick your team from the OVA rankings to follow their tournaments, score matches, and track stats.',
         primary,
         secondary,

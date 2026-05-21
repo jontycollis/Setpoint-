@@ -52,7 +52,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'AES Score Tracker is a companion app for volleyball families and coaches. It pulls the schedules, standings, and brackets from AES and Timu, lets you score matches yourself, and rolls up everything you do into a single per-team Season History and analytics dashboard.',
+          'Bior (BIR — Irish Gaelic for sharp point / spike) is a companion app for volleyball families and coaches. It pulls the schedules, standings, and brackets from AES and Timu, lets you score matches yourself, and rolls up everything you do into a single per-team Season History and analytics dashboard.',
       },
       { type: 'h3', text: 'First launch' },
       {

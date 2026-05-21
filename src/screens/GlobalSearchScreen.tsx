@@ -13,7 +13,7 @@
 // — App.tsx routes by kind, reusing the same navigation paths as
 // "open from favorites" / "open from MyHome".
 //
-// Out of scope: MRS member directory, Setpoint-scored matches.
+// Out of scope: MRS member directory, Bior-scored matches.
 // ────────────────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useMemo, useState } from 'react';
