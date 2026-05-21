@@ -389,17 +389,12 @@ export async function discoverVenueMaps(
  * Pure picker — given discovered maps and the registry's configured URL
  * (if any), decide which URL to show.
  *
- * Rules:
- *   1. No discovered candidates → fall back to `configuredUrl` (may be null).
- *   2. `configuredUrl` is a PDF → defend it. Only override with a discovered
- *      PDF (PDF-to-PDF swap is fine); a discovered image must NOT win,
- *      because configured registry PDFs are intentional and discovered
- *      images are often stale, 404, or hotlink-blocked. This is the
- *      Calgary-Nationals root-cause fix: VC's competition page had a stale
- *      image matching MAP_URL_PATTERNS, and the existing image-first sort
- *      was promoting it over the configured tournament map PDF.
- *   3. Otherwise (no configured, or configured is an image / bundled asset)
- *      → preserve the existing discovery sort (images first, then PDFs).
+ * Rule: if a `configuredUrl` is provided, it ALWAYS wins. Discovery is
+ * only consulted as a fallback for venues that don't have a manually
+ * configured map. We tried clever override rules (PDF-to-PDF swap allowed)
+ * and they kept biting us — VC's competition page links to the wrong
+ * tournament's PDF for Calgary Nationals, and the override let it through.
+ * Configured is intentional; discovered is best-effort; configured wins.
  *
  * Extracted as a pure function so it can be unit-tested without mocking
  * fetch or AsyncStorage.
@@ -408,21 +403,16 @@ export function pickBestMap(
   maps: DiscoveredVenueMap[],
   configuredUrl: string | null = null
 ): string | null {
-  if (maps.length === 0) return configuredUrl;
-
-  if (configuredUrl && PDF_EXTENSION.test(configuredUrl)) {
-    const discoveredPdf = maps.find((m) => m.type === 'pdf');
-    return discoveredPdf ? discoveredPdf.url : configuredUrl;
-  }
-
+  if (configuredUrl) return configuredUrl;
+  if (maps.length === 0) return null;
   return maps[0].url;
 }
 
 /**
  * Convenience: get the best venue map URL for a given page.
  *
- * Pass `configuredUrl` to defend a registry-configured PDF against stale
- * images discovered on the source page — see `pickBestMap` for the rules.
+ * Pass `configuredUrl` to lock in a registry-configured map — discovery
+ * never overrides a configured URL. See `pickBestMap` for the rule.
  */
 export async function getBestVenueMapUrl(
   pageUrl: string,
@@ -430,7 +420,13 @@ export async function getBestVenueMapUrl(
 ): Promise<string | null> {
   const { configuredUrl = null, forceRefresh = false } = options;
   const result = await discoverVenueMaps(pageUrl, forceRefresh);
-  return pickBestMap(result.maps, configuredUrl);
+  const picked = pickBestMap(result.maps, configuredUrl);
+  if (__DEV__) {
+    console.log(
+      `[venueMapDiscovery] page=${pageUrl} configured=${configuredUrl ?? 'none'} discovered=[${result.maps.map((m) => m.url).join(', ')}] picked=${picked ?? 'none'}`
+    );
+  }
+  return picked;
 }
 
 /**
