@@ -52,6 +52,19 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   throw new Error('E_NO_BTOA');
 }
 
+// Browser-like headers sent on both fetch and XHR paths. volleyball.ca's
+// CDN/origin has been observed rejecting the default RN fetch UA
+// (`okhttp/...`) with 404s, while serving the same URL 200 to a normal
+// browser. Spoofing a Chrome-on-Android UA + Accept/Referer makes the
+// device request indistinguishable from a browser at the HTTP layer.
+const VENUE_MAP_REQUEST_HEADERS: Record<string, string> = {
+  'User-Agent':
+    'Mozilla/5.0 (Linux; Android 13; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+  Accept: 'application/pdf,application/octet-stream,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  Referer: 'https://volleyball.ca/',
+};
+
 // XHR fallback for `fetch().arrayBuffer()` — historically more reliable
 // for binary downloads on older Android RN builds. Returns the bytes
 // as an ArrayBuffer or rejects with a short code.
@@ -61,6 +74,16 @@ function xhrArrayBuffer(url: string): Promise<ArrayBuffer> {
     xhr.open('GET', url);
     xhr.responseType = 'arraybuffer';
     xhr.timeout = 30000;
+    // RN's XHR allows setting User-Agent (browsers don't); spoofing a
+    // browser UA dodges origin-side filters that 404 on `okhttp/...`.
+    for (const [name, value] of Object.entries(VENUE_MAP_REQUEST_HEADERS)) {
+      try {
+        xhr.setRequestHeader(name, value);
+      } catch {
+        // setRequestHeader can throw if the platform forbids a header;
+        // swallow rather than fail the whole download.
+      }
+    }
     xhr.onload = () => {
       if (xhr.status >= 200 && xhr.status < 300) {
         resolve(xhr.response as ArrayBuffer);
@@ -83,7 +106,7 @@ async function downloadPdfAsBase64(url: string): Promise<string> {
   let primaryErr: unknown = null;
 
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { headers: VENUE_MAP_REQUEST_HEADERS });
     if (!response.ok) throw new Error(`E_FETCH_HTTP_${response.status}`);
     arrayBuffer = await response.arrayBuffer();
     if (arrayBuffer.byteLength === 0) {
@@ -114,6 +137,14 @@ async function downloadPdfAsBase64(url: string): Promise<string> {
     console.log('[venue-map] base64 length:', base64.length);
   }
   return base64;
+}
+
+// Truncate a URL for the error UI: keep the first 40 chars and last 40
+// chars with an ellipsis in between, so users can read off enough of
+// both ends to identify which URL is failing.
+function truncateUrlForDisplay(url: string): string {
+  if (url.length <= 83) return url;
+  return `${url.slice(0, 40)}…${url.slice(-40)}`;
 }
 
 /**
@@ -568,7 +599,7 @@ export function VenueMapScreen({
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>
               {pdfFailed
-                ? `Couldn't load the venue map PDF (error: ${pdfFetchError ?? 'E_UNKNOWN'}). Tap below to open it in your browser.`
+                ? `Couldn't load the venue map PDF (error: ${pdfFetchError ?? 'E_UNKNOWN'}).\nURL: ${remoteMapUrl ? truncateUrlForDisplay(remoteMapUrl) : '(unknown)'}\nTap below to open it in your browser.`
                 : 'Unable to load the venue map. Please check your internet connection.'}
             </Text>
             {!pdfFailed && (
