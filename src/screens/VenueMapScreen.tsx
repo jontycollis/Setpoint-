@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
+import type { WebViewMessageEvent } from 'react-native-webview';
 import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { getBestVenueMapUrl } from '../api/venueMapDiscovery';
@@ -276,16 +277,26 @@ function buildMapHtml(url: string, highlightCourt?: string) {
 `;
 }
 
-// PDF branch — render PDF bytes (already downloaded in RN and passed in
-// as base64) to one canvas per page using PDF.js loaded from cdnjs.
-// This avoids any cross-origin fetch from inside the WebView, which is
-// what made the previous "iframe to mozilla.github.io/pdf.js" approach
-// fail: volleyball.ca's /uploads/ directory doesn't send
-// Access-Control-Allow-Origin, so PDF.js running on a different origin
-// couldn't fetch the PDF. Embedding the bytes inline sidesteps CORS.
+// PDF branch — small HTML scaffold (~3KB) that loads PDF.js from cdnjs
+// and waits for RN to deliver the PDF bytes via `injectJavaScript` ->
+// `window.__loadPdf(base64)`.
+//
+// Why not embed the base64 in the HTML directly: Android WebView's
+// `source={{ html }}` chokes on very large HTML payloads (a 2.6 MB PDF
+// is ~3.5 MB of base64); the page either fails to load, gets truncated,
+// or fires `onError`. Decoupling the scaffold from the data keeps the
+// HTML tiny and reliable.
+//
+// The scaffold posts JSON messages back to RN via
+// `window.ReactNativeWebView.postMessage(...)` at each pipeline step,
+// so RN's `onMessage` handler can drive a state machine and surface
+// granular error codes ("PDFJS_LOAD_FAIL", "RENDER_THROW", etc.) when
+// anything goes wrong.
+//
 // `baseUrl` on the WebView source is set to cdnjs so PDF.js's worker
-// (loaded from the same origin as pdf.min.js) doesn't trip up.
-function buildPdfCanvasHtml(pdfBase64: string, highlightCourt?: string) {
+// (loaded from the same origin as pdf.min.js) is same-origin to the
+// document.
+function buildPdfScaffoldHtml(highlightCourt?: string) {
   const courtBanner = buildCourtBannerHtml(highlightCourt);
   const bodyPadding = highlightCourt ? 'padding-top: 56px;' : '';
   return `<!DOCTYPE html>
@@ -298,63 +309,74 @@ function buildPdfCanvasHtml(pdfBase64: string, highlightCourt?: string) {
     #container { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px; }
     canvas { box-shadow: 0 2px 8px rgba(0,0,0,.15); max-width: 100%; background: white; }
     #status { padding: 24px; color: #666; font-family: -apple-system, sans-serif; font-size: 14px; text-align: center; }
-    #status.error { color: #c00; }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
 </head>
 <body>
   ${courtBanner}
   <div id="container">
-    <div id="status">Rendering PDF…</div>
+    <div id="status">Loading PDF…</div>
   </div>
   <script>
     (function () {
-      var statusEl = document.getElementById('status');
-      var container = document.getElementById('container');
-      var setError = function (msg) {
-        statusEl.className = 'error';
-        statusEl.textContent = msg;
+      var post = function (payload) {
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(JSON.stringify(payload));
+        }
       };
-      if (typeof pdfjsLib === 'undefined') {
-        setError('PDF viewer failed to load. Try the "Open in browser" link below.');
-        return;
-      }
-      try {
-        pdfjsLib.GlobalWorkerOptions.workerSrc =
-          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
-        var b64 = "${pdfBase64}";
-        var bin = atob(b64);
-        var bytes = new Uint8Array(bin.length);
-        for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        var dpr = window.devicePixelRatio || 1;
-        pdfjsLib.getDocument({ data: bytes }).promise.then(function (pdf) {
-          if (statusEl && statusEl.parentNode) statusEl.parentNode.removeChild(statusEl);
-          var chain = Promise.resolve();
-          for (var p = 1; p <= pdf.numPages; p++) {
-            (function (pageNum) {
-              chain = chain.then(function () {
-                return pdf.getPage(pageNum).then(function (page) {
-                  var viewport = page.getViewport({ scale: 1.5 * dpr });
-                  var canvas = document.createElement('canvas');
-                  canvas.width = viewport.width;
-                  canvas.height = viewport.height;
-                  canvas.style.width = (viewport.width / dpr) + 'px';
-                  canvas.style.height = (viewport.height / dpr) + 'px';
-                  container.appendChild(canvas);
-                  return page.render({
-                    canvasContext: canvas.getContext('2d'),
-                    viewport: viewport,
-                  }).promise;
-                });
-              });
-            })(p);
+      window.__loadPdf = function (b64) {
+        try {
+          if (typeof pdfjsLib === 'undefined') {
+            post({ kind: 'error', code: 'PDFJS_LOAD_FAIL', detail: 'pdfjsLib undefined at load time' });
+            return;
           }
-          return chain;
-        }).catch(function (err) {
-          setError('Could not render PDF: ' + (err && err.message ? err.message : err));
-        });
-      } catch (err) {
-        setError('Could not render PDF: ' + (err && err.message ? err.message : err));
+          pdfjsLib.GlobalWorkerOptions.workerSrc =
+            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js';
+          var bin = atob(b64);
+          var bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          var dpr = window.devicePixelRatio || 1;
+          var container = document.getElementById('container');
+          var statusEl = document.getElementById('status');
+          pdfjsLib.getDocument({ data: bytes }).promise.then(function (pdf) {
+            if (statusEl && statusEl.parentNode) statusEl.parentNode.removeChild(statusEl);
+            var chain = Promise.resolve();
+            for (var p = 1; p <= pdf.numPages; p++) {
+              (function (pageNum) {
+                chain = chain.then(function () {
+                  return pdf.getPage(pageNum).then(function (page) {
+                    var viewport = page.getViewport({ scale: 1.5 * dpr });
+                    var canvas = document.createElement('canvas');
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    canvas.style.width = (viewport.width / dpr) + 'px';
+                    canvas.style.height = (viewport.height / dpr) + 'px';
+                    container.appendChild(canvas);
+                    return page.render({
+                      canvasContext: canvas.getContext('2d'),
+                      viewport: viewport,
+                    }).promise;
+                  });
+                });
+              })(p);
+            }
+            return chain;
+          }).then(function () {
+            post({ kind: 'rendered' });
+          }).catch(function (err) {
+            post({ kind: 'error', code: 'RENDER_THROW', detail: String((err && err.message) || err) });
+          });
+        } catch (err) {
+          post({ kind: 'error', code: 'RENDER_THROW', detail: String((err && err.message) || err) });
+        }
+      };
+      // Parser-blocking <script src> above has already finished (success
+      // or onerror) by the time this inline script runs. If pdfjsLib is
+      // defined, the library is good to go — tell RN to inject the bytes.
+      if (typeof pdfjsLib !== 'undefined') {
+        post({ kind: 'library-loaded' });
+      } else {
+        post({ kind: 'error', code: 'PDFJS_LOAD_FAIL', detail: 'pdfjsLib undefined after script tag (cdnjs unreachable or blocked)' });
       }
     })();
   </script>
@@ -493,7 +515,94 @@ export function VenueMapScreen({
 
   const pdfReady = remoteIsPdf && !!pdfBase64;
   const pdfDownloading = remoteIsPdf && pdfFetching && !pdfBase64;
-  const pdfFailed = remoteIsPdf && !!pdfFetchError && !pdfBase64;
+  const pdfFetchFailed = remoteIsPdf && !!pdfFetchError && !pdfBase64;
+
+  // --- WebView PDF render state machine -----------------------------
+  // The scaffold HTML posts messages back at each pipeline step:
+  //   init          → WebView mounted, scaffold not yet loaded
+  //   library-loaded → PDF.js loaded inside the WebView; ready for bytes
+  //   rendered      → all pages painted
+  //   error         → with a granular code (PDFJS_LOAD_FAIL,
+  //                   RENDER_THROW, INJECT_THROW, WEBVIEW_HTTP_*,
+  //                   WEBVIEW_NETWORK) and a human-readable detail.
+  // Splitting library-loaded from rendered lets us know exactly which
+  // step broke instead of the previous catch-all "PDF viewer failed".
+  type PdfWebViewState =
+    | { kind: 'init' }
+    | { kind: 'library-loaded' }
+    | { kind: 'rendered' }
+    | { kind: 'error'; code: string; detail: string };
+  const [pdfWebViewState, setPdfWebViewState] = useState<PdfWebViewState>({
+    kind: 'init',
+  });
+  const webViewRef = useRef<WebView>(null);
+
+  // Reset the WebView state machine whenever the URL changes, so a
+  // fresh WebView (`key={remoteMapUrl}`) starts from `init` and the
+  // injection effect waits for the new scaffold's `library-loaded`.
+  useEffect(() => {
+    setPdfWebViewState({ kind: 'init' });
+  }, [remoteMapUrl]);
+
+  // Inject the PDF bytes once both sides are ready: the base64 has been
+  // downloaded in RN AND the WebView scaffold has loaded PDF.js. If
+  // either prerequisite isn't met yet, we wait — the effect will re-run
+  // when state changes. The injected snippet calls `window.__loadPdf`
+  // and posts an INJECT_THROW error if anything goes wrong on the JS
+  // bridge itself (the scaffold posts RENDER_THROW for PDF.js errors).
+  useEffect(() => {
+    if (!pdfBase64) return;
+    if (pdfWebViewState.kind !== 'library-loaded') return;
+    const js = `
+      (function () {
+        try {
+          if (typeof window.__loadPdf !== 'function') {
+            window.ReactNativeWebView.postMessage(JSON.stringify({ kind: 'error', code: 'INJECT_THROW', detail: 'window.__loadPdf missing' }));
+            return;
+          }
+          window.__loadPdf(${JSON.stringify(pdfBase64)});
+        } catch (e) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ kind: 'error', code: 'INJECT_THROW', detail: String((e && e.message) || e) }));
+        }
+      })();
+      true;
+    `;
+    webViewRef.current?.injectJavaScript(js);
+  }, [pdfBase64, pdfWebViewState]);
+
+  // Parse JSON messages from the scaffold and drive the state machine.
+  // Anything that isn't valid JSON or doesn't match a known `kind` is
+  // ignored — the WebView may also receive messages from other sources
+  // we don't control (extensions, dev-tools probes, etc.).
+  const onPdfWebViewMessage = useCallback((event: WebViewMessageEvent) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data) as {
+        kind?: string;
+        code?: string;
+        detail?: string;
+      };
+      if (data.kind === 'library-loaded') {
+        setPdfWebViewState({ kind: 'library-loaded' });
+      } else if (data.kind === 'rendered') {
+        setPdfWebViewState({ kind: 'rendered' });
+      } else if (data.kind === 'error') {
+        setPdfWebViewState({
+          kind: 'error',
+          code: data.code ?? 'UNKNOWN',
+          detail: data.detail ?? '',
+        });
+      }
+    } catch {
+      // Non-JSON message — ignore.
+    }
+  }, []);
+
+  const pdfWebViewError =
+    pdfWebViewState.kind === 'error' ? pdfWebViewState : null;
+  const pdfWebViewRendered = pdfWebViewState.kind === 'rendered';
+  const pdfWebViewRendering =
+    remoteIsPdf && pdfReady && !pdfWebViewRendered && !pdfWebViewError;
+  const pdfFailed = pdfFetchFailed || !!pdfWebViewError;
 
   // ---- Diagnostic log (dev only) ----------------------------------
   // Surfaces which URL ended up driving the WebView and which rendering
@@ -529,6 +638,7 @@ export function VenueMapScreen({
       pdfReady,
       pdfFailed,
       pdfFetchError,
+      pdfWebViewState,
     });
   }, [
     venueMapUrl,
@@ -543,6 +653,7 @@ export function VenueMapScreen({
     pdfReady,
     pdfFailed,
     pdfFetchError,
+    pdfWebViewState,
   ]);
 
   return (
@@ -581,15 +692,26 @@ export function VenueMapScreen({
       )}
 
       <View style={styles.webviewContainer}>
-        {/* Loading state — shown while WebView loads, while discovering, or
+        {/* Loading state — shown while WebView loads, while discovering,
             while downloading a PDF (PDFs are fetched in RN to avoid CORS,
-            then handed to PDF.js as base64). */}
-        {(loading && hasAnyMap && !pdfFailed) || stillSearching || pdfDownloading ? (
+            then handed to PDF.js as base64), or while the WebView's
+            PDF.js renders the canvases. */}
+        {(loading && hasAnyMap && !pdfFailed && !remoteIsPdf) ||
+        stillSearching ||
+        pdfDownloading ||
+        pdfWebViewRendering ? (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>
               {stillSearching
                 ? 'Searching for venue map...'
+                : pdfDownloading
+                ? 'Downloading PDF...'
+                : pdfWebViewRendering &&
+                  pdfWebViewState.kind === 'library-loaded'
+                ? 'Rendering PDF...'
+                : pdfWebViewRendering
+                ? 'Loading PDF viewer...'
                 : 'Loading venue map...'}
             </Text>
           </View>
@@ -598,7 +720,9 @@ export function VenueMapScreen({
         {error || pdfFailed ? (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>
-              {pdfFailed
+              {pdfWebViewError
+                ? `PDF viewer error (${pdfWebViewError.code}): ${pdfWebViewError.detail}\nURL: ${remoteMapUrl ? truncateUrlForDisplay(remoteMapUrl) : '(unknown)'}\nTap below to open it in your browser.`
+                : pdfFetchFailed
                 ? `Couldn't load the venue map PDF (error: ${pdfFetchError ?? 'E_UNKNOWN'}).\nURL: ${remoteMapUrl ? truncateUrlForDisplay(remoteMapUrl) : '(unknown)'}\nTap below to open it in your browser.`
                 : 'Unable to load the venue map. Please check your internet connection.'}
             </Text>
@@ -652,13 +776,18 @@ export function VenueMapScreen({
             )}
           </View>
         ) : remoteIsPdf && pdfReady && pdfBase64 ? (
-          /* PDF — render in WebView using inlined base64 + PDF.js → canvas.
-             baseUrl is set to cdnjs so the PDF.js worker (same origin as
-             pdf.min.js) loads without cross-origin worker gymnastics. */
+          /* PDF — load a tiny scaffold HTML, then deliver the PDF bytes
+             via `injectJavaScript` (postMessage flow). Embedding ~3.5 MB
+             of base64 directly in `source.html` is unreliable on Android
+             WebView, so we keep the HTML small and ship the data over
+             the JS bridge. The scaffold posts back state-machine events
+             so we can surface granular error codes. baseUrl is cdnjs so
+             the PDF.js worker is same-origin to the document. */
           <WebView
             key={remoteMapUrl}
+            ref={webViewRef}
             source={{
-              html: buildPdfCanvasHtml(pdfBase64, highlightCourt),
+              html: buildPdfScaffoldHtml(highlightCourt),
               baseUrl: 'https://cdnjs.cloudflare.com/',
             }}
             style={styles.webview}
@@ -666,15 +795,27 @@ export function VenueMapScreen({
             bounces={false}
             scrollEnabled={true}
             javaScriptEnabled={true}
-            onLoadEnd={() => setLoading(false)}
-            onError={() => {
-              setLoading(false);
-              setError(true);
-            }}
+            onMessage={onPdfWebViewMessage}
+            onError={(e) =>
+              setPdfWebViewState({
+                kind: 'error',
+                code: 'WEBVIEW_NETWORK',
+                detail:
+                  e?.nativeEvent?.description ??
+                  'WebView failed to load scaffold',
+              })
+            }
+            onHttpError={(e) =>
+              setPdfWebViewState({
+                kind: 'error',
+                code: `WEBVIEW_HTTP_${e?.nativeEvent?.statusCode ?? 'UNKNOWN'}`,
+                detail: e?.nativeEvent?.description ?? '',
+              })
+            }
             originWhitelist={['*']}
             allowsInlineMediaPlayback={true}
-            builtInZoomControls={true}
-            displayZoomControls={false}
+            setBuiltInZoomControls={true}
+            setDisplayZoomControls={false}
           />
         ) : remoteIsPdf ? (
           /* PDF download in progress (or queued) — spinner from loadingOverlay
