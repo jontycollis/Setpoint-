@@ -41,6 +41,7 @@ export type MenuDestination =
   | 'TeamAnalytics'
   | 'StorageSnapshot'
   | 'HistoricalImport'
+  | 'SidelineImport'
   | 'Help'
   | 'About';
 
@@ -657,6 +658,14 @@ export function HamburgerMenu({
                   available={true}
                   isCurrent={isCurrentScreen('HistoricalImport')}
                   onPress={() => handleSelect('HistoricalImport')}
+                />
+                <MenuRow
+                  icon={'\u{1F517}'}
+                  label="Import from Sideline HD"
+                  subtitle="Log in and pull your team's matches"
+                  available={true}
+                  isCurrent={isCurrentScreen('SidelineImport')}
+                  onPress={() => handleSelect('SidelineImport')}
                 />
                 <MenuRow
                   icon={'\u{1F501}'}

@@ -24,7 +24,6 @@ import { ScoreboardSectionScreen } from './src/screens/ScoreboardSectionScreen';
 import { MyTeamSectionScreen } from './src/screens/MyTeamSectionScreen';
 import { BrowseSectionScreen } from './src/screens/BrowseSectionScreen';
 import { VenueMapSelectorScreen } from './src/screens/VenueMapSelectorScreen';
-import { SidelineImportPlaceholderScreen } from './src/screens/SidelineImportPlaceholderScreen';
 import { AddTeamChooserScreen } from './src/screens/AddTeamChooserScreen';
 import {
   ConnectionScreen,
@@ -65,6 +64,7 @@ import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
+import { SidelineImportScreen } from './src/screens/SidelineImportScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { HelpScreen } from './src/screens/HelpScreen';
 import type { HelpSectionId } from './src/help/content';
@@ -175,7 +175,6 @@ type Screen =
   | 'MyTeamSection'
   | 'BrowseSection'
   | 'VenueMapSelector'
-  | 'SidelineImportPlaceholder'
   | 'MyHome'
   | 'AddTeamChooser'
   | 'MrsConnection'
@@ -213,6 +212,7 @@ type Screen =
   | 'GlobalSearch'
   | 'StorageSnapshot'
   | 'HistoricalImport'
+  | 'SidelineImport'
   | 'Help'
   | 'About';
 
@@ -266,7 +266,6 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'MyTeamSection',
   'BrowseSection',
   'VenueMapSelector',
-  'SidelineImportPlaceholder',
   // No-team-scope screens
   'MyHome',
   'AddTeamChooser',
@@ -324,7 +323,6 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'MyTeamSection':
     case 'BrowseSection':
     case 'VenueMapSelector':
-    case 'SidelineImportPlaceholder':
     case 'MyHome':
     case 'AddTeamChooser':
     case 'MrsConnection':
@@ -335,6 +333,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'GlobalSearch':
     case 'StorageSnapshot':
     case 'HistoricalImport':
+    case 'SidelineImport':
     case 'Help':
     case 'About':
       return 'home';
@@ -1866,6 +1865,10 @@ function AppInner() {
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('HistoricalImport');
           break;
+        case 'SidelineImport':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('SidelineImport');
+          break;
         case 'Help':
           setScreenHistory((prev) => [...prev, screen]);
           setHelpSectionId(undefined);
@@ -2171,7 +2174,7 @@ function AppInner() {
             }}
             onOpenSidelineImport={() => {
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('SidelineImportPlaceholder');
+              setScreen('SidelineImport');
             }}
             onAddAesEvent={() => {
               setScreenHistory((prev) => [...prev, screen]);
@@ -2279,8 +2282,6 @@ function AppInner() {
             }}
           />
         );
-      case 'SidelineImportPlaceholder':
-        return <SidelineImportPlaceholderScreen onBack={goBack} />;
       case 'MyHome':
         if (!userProfile) {
           // Profile still loading on first paint — fall through to the
@@ -2980,6 +2981,13 @@ function AppInner() {
       case 'HistoricalImport':
         return (
           <HistoricalImportScreen
+            userProfile={userProfile}
+            onBack={goBack}
+          />
+        );
+      case 'SidelineImport':
+        return (
+          <SidelineImportScreen
             userProfile={userProfile}
             onBack={goBack}
           />
