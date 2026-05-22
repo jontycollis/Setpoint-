@@ -59,6 +59,7 @@ import { OvaRankingsScreen } from './src/screens/OvaRankingsScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
+import { SidelineImportScreen } from './src/screens/SidelineImportScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { HelpScreen } from './src/screens/HelpScreen';
 import type { HelpSectionId } from './src/help/content';
@@ -201,6 +202,7 @@ type Screen =
   | 'GlobalSearch'
   | 'StorageSnapshot'
   | 'HistoricalImport'
+  | 'SidelineImport'
   | 'Help'
   | 'About';
 
@@ -302,6 +304,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'GlobalSearch':
     case 'StorageSnapshot':
     case 'HistoricalImport':
+    case 'SidelineImport':
     case 'Help':
     case 'About':
       return 'home';
@@ -1829,6 +1832,10 @@ function AppInner() {
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('HistoricalImport');
           break;
+        case 'SidelineImport':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('SidelineImport');
+          break;
         case 'Help':
           setScreenHistory((prev) => [...prev, screen]);
           setHelpSectionId(undefined);
@@ -2714,6 +2721,13 @@ function AppInner() {
       case 'HistoricalImport':
         return (
           <HistoricalImportScreen
+            userProfile={userProfile}
+            onBack={goBack}
+          />
+        );
+      case 'SidelineImport':
+        return (
+          <SidelineImportScreen
             userProfile={userProfile}
             onBack={goBack}
           />
