@@ -19,6 +19,12 @@ import * as Notifications from 'expo-notifications';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TournamentSelectScreen } from './src/screens/TournamentSelectScreen';
 import { MyHomeScreen } from './src/screens/MyHomeScreen';
+import { LauncherHomeScreen } from './src/screens/LauncherHomeScreen';
+import { ScoreboardSectionScreen } from './src/screens/ScoreboardSectionScreen';
+import { MyTeamSectionScreen } from './src/screens/MyTeamSectionScreen';
+import { BrowseSectionScreen } from './src/screens/BrowseSectionScreen';
+import { VenueMapSelectorScreen } from './src/screens/VenueMapSelectorScreen';
+import { SidelineImportPlaceholderScreen } from './src/screens/SidelineImportPlaceholderScreen';
 import { AddTeamChooserScreen } from './src/screens/AddTeamChooserScreen';
 import {
   ConnectionScreen,
@@ -164,6 +170,12 @@ import type { UnifiedTournamentEntry } from './src/utils/unifiedSeasonHistory';
 import * as Sentry from '@sentry/react-native';
 
 type Screen =
+  | 'HomeLauncher'
+  | 'ScoreboardSection'
+  | 'MyTeamSection'
+  | 'BrowseSection'
+  | 'VenueMapSelector'
+  | 'SidelineImportPlaceholder'
   | 'MyHome'
   | 'AddTeamChooser'
   | 'MrsConnection'
@@ -224,6 +236,13 @@ type AesScope = {
 // duplicated MyHome's Connections section. Its contents (Score a Match,
 // MRS, CAC Locker) live in the hamburger now.
 function tabForScreen(screen: Screen): TabKey | null {
+  // Both the new launcher and the My Team section count as the "home"
+  // destination. The Browse section landing maps onto the browse tab so
+  // the user gets visual confirmation when they enter via tile or tab.
+  if (screen === 'HomeLauncher') return 'home';
+  if (screen === 'MyTeamSection') return 'home';
+  if (screen === 'BrowseSection') return 'browse';
+  // Legacy fallbacks — still in the union but not normally entered.
   if (screen === 'MyHome') return 'home';
   if (screen === 'TournamentSelect') return 'browse';
   return null;
@@ -240,6 +259,14 @@ function tabForScreen(screen: Screen): TabKey | null {
 //     covering banners on the hold-up scoreboard)
 //   • home / browse / connection / tools / global search (no team scope)
 const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
+  // Launcher + section landings — no team scope, the screens are
+  // navigational chrome rather than team-scoped content.
+  'HomeLauncher',
+  'ScoreboardSection',
+  'MyTeamSection',
+  'BrowseSection',
+  'VenueMapSelector',
+  'SidelineImportPlaceholder',
   // No-team-scope screens
   'MyHome',
   'AddTeamChooser',
@@ -292,6 +319,12 @@ const TAB_BAR_HIDDEN_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
  */
 function menuContextForScreen(screen: Screen): 'home' | 'team' {
   switch (screen) {
+    case 'HomeLauncher':
+    case 'ScoreboardSection':
+    case 'MyTeamSection':
+    case 'BrowseSection':
+    case 'VenueMapSelector':
+    case 'SidelineImportPlaceholder':
     case 'MyHome':
     case 'AddTeamChooser':
     case 'MrsConnection':
@@ -384,7 +417,7 @@ function AppInner() {
     },
   }), [themeMode, themeColors]);
 
-  const [screen, setScreen] = useState<Screen>('TournamentSelect');
+  const [screen, setScreen] = useState<Screen>('HomeLauncher');
   const [screenHistory, setScreenHistory] = useState<Screen[]>([]);
   // Help deep-link target — set by per-screen ? buttons before navigating
   // to the Help screen. Cleared when the user opens Help via the menu.
@@ -547,14 +580,12 @@ function AppInner() {
           })
           .catch(() => {});
 
-        // Phase 4 boot decision: always land on MyHome.
-        //   - Returning user with teams → MyHome shows their teams list.
-        //   - Fresh user with no teams → MyHome shows the empty state with
-        //     '+ Add team' as the only CTA.
-        // The previous auto-jump-to-team-dashboard fallbacks have been
-        // removed — boot is now one decision, simpler and more predictable.
+        // Launcher-redesign boot: always land on the new tile-grid Home.
+        // The launcher routes the user into a section (Scoreboard / My
+        // Team / Browse) or a direct WebView (MRS / CAC / Venue maps /
+        // OVA Rankings / Help) — boot stays a single decision.
         setScreenHistory([]);
-        setScreen('MyHome');
+        setScreen('HomeLauncher');
       } catch {
         //
       } finally {
@@ -1287,7 +1318,11 @@ function AppInner() {
 
   // Clear context whenever we navigate back to higher-level screens
   useEffect(() => {
-    if (screen === 'TournamentSelect') {
+    if (
+      screen === 'HomeLauncher' ||
+      screen === 'BrowseSection' ||
+      screen === 'TournamentSelect'
+    ) {
       setAesScope(null);
       setSelectedCountry(null);
       setSelectedTournament(null);
@@ -1306,8 +1341,8 @@ function AppInner() {
     if (Platform.OS !== 'android') return;
 
     const onHardwareBack = () => {
-      if (screen === 'TournamentSelect') {
-        // On the home screen, let the default behaviour (exit app) happen
+      if (screen === 'HomeLauncher') {
+        // True root — let the OS handle (exit app on Android).
         return false;
       }
       goBack();
@@ -1645,10 +1680,10 @@ function AppInner() {
     (dest: MenuDestination) => {
       switch (dest) {
         case 'Home':
-          // "Home" is now the legacy "Browse tournaments" entry — always
-          // routes to TournamentSelect. The new landing screen for users
-          // with teams is reachable via the dedicated MyHome destination.
-          setScreen('TournamentSelect');
+          // Launcher-redesign: "Home" goes to the new tile-grid launcher.
+          // The old "Browse tournaments" home is now the Browse section,
+          // reachable from the launcher or via the bottom Browse tab.
+          setScreen('HomeLauncher');
           setScreenHistory([]);
           setAesScope(null);
           setSelectedCountry(null);
@@ -1656,7 +1691,9 @@ function AppInner() {
           setSelectedTournamentYear(null);
           break;
         case 'MyHome':
-          setScreen('MyHome');
+          // Legacy "MyHome" destination — route to the My Team section
+          // landing since that's where the old MyHome content lives now.
+          setScreen('MyTeamSection');
           setScreenHistory([]);
           setAesScope(null);
           break;
@@ -1852,8 +1889,9 @@ function AppInner() {
     setSelectedCountry(null);
     setSelectedTournament(null);
     setSelectedTournamentYear(null);
-    if (tab === 'home') setScreen('MyHome');
-    else if (tab === 'browse') setScreen('TournamentSelect');
+    // Home tab → new launcher; Browse tab → Browse section landing.
+    if (tab === 'home') setScreen('HomeLauncher');
+    else if (tab === 'browse') setScreen('BrowseSection');
   }, []);
 
   // ── Recently-viewed open ──────────────────────────────────────────────
@@ -1937,7 +1975,7 @@ function AppInner() {
           handleNavigateToFavorite(result.team.primaryRef);
         } else {
           setScreenHistory([]);
-          setScreen('MyHome');
+          setScreen('MyTeamSection');
         }
       }
     },
@@ -2015,6 +2053,234 @@ function AppInner() {
 
   function renderScreen() {
     switch (screen) {
+      case 'HomeLauncher':
+        return (
+          <LauncherHomeScreen
+            profile={userProfile}
+            onOpenScoreboardSection={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('ScoreboardSection');
+            }}
+            onOpenMyTeamSection={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MyTeamSection');
+            }}
+            onOpenMyTeamOnboarding={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTeamChooser');
+            }}
+            onOpenBrowseSection={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('BrowseSection');
+            }}
+            onOpenVenueMaps={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('VenueMapSelector');
+            }}
+            onOpenMrs={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MrsConnection');
+            }}
+            onOpenCacLocker={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('CacConnection');
+            }}
+            onOpenOvaRankings={() => {
+              setOvaInitialDivision(null);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('OvaRankings');
+            }}
+            onOpenHelp={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setHelpSectionId(undefined);
+              setScreen('Help');
+            }}
+          />
+        );
+      case 'ScoreboardSection':
+        return (
+          <ScoreboardSectionScreen
+            onBack={goBack}
+            onOpenSimple={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('Scoreboard');
+            }}
+            onOpenAdvanced={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MatchList');
+            }}
+            onResumeMatch={(m) => {
+              setActiveScoredMatch(m);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MatchScoring');
+            }}
+          />
+        );
+      case 'MyTeamSection':
+        if (!userProfile) {
+          // Profile not loaded yet — fall through to the browse path so
+          // the user isn't stuck on a blank screen.
+          return (
+            <TournamentSelectScreen
+              onTournamentSelected={onTournamentSelected}
+              initialRegistry={discoveredRegistry}
+              profile={userProfile}
+              onSearchSelect={handleGlobalSearchSelect}
+              onOpenAddTimu={() => {
+                setAddTournamentsFocusSource('timu');
+                setScreenHistory((prev) => [...prev, screen]);
+                setScreen('AddTournaments');
+              }}
+            />
+          );
+        }
+        return (
+          <MyTeamSectionScreen
+            profile={userProfile}
+            onBack={goBack}
+            onOpenAnalytics={() => {
+              const activeTeam = userProfile?.activeTeamId
+                ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
+                : null;
+              if (activeTeam) {
+                setStatsTeamProfileId(activeTeam.id);
+                setStatsTeamName(activeTeam.label);
+                setScreenHistory((prev) => [...prev, screen]);
+                setScreen('Stats');
+              }
+            }}
+            onOpenSeasonHistory={() => {
+              const activeTeam = userProfile?.activeTeamId
+                ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
+                : null;
+              if (activeTeam) {
+                openTeamSeasonHistory({ team: activeTeam });
+              }
+            }}
+            onOpenTournaments={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTournaments');
+            }}
+            onOpenRoster={() => {
+              const activeTeam = userProfile?.activeTeamId
+                ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
+                : null;
+              if (activeTeam && activeTeam.kind === 'me') {
+                handleOpenRosterEditor(activeTeam);
+              }
+            }}
+            onOpenSidelineImport={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('SidelineImportPlaceholder');
+            }}
+            onAddAesEvent={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TournamentSelect');
+            }}
+            onAddTimuEvent={() => {
+              setAddTournamentsFocusSource('timu');
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTournaments');
+            }}
+            onOpenTeam={(team) => {
+              handleSwitchActiveTeam(team.id);
+              openTeamSeasonHistory({ team });
+            }}
+            syncing={timuSyncing}
+            syncProgress={timuSyncProgress}
+            onSyncSeason={handleSyncSeason}
+            discoveringTeamLabel={discoveringTeamLabel}
+            discoveryProgress={discoveryProgress}
+            discoveryResult={discoveryResult}
+            onDismissDiscoveryResult={() => setDiscoveryResult(null)}
+            onViewDiscoveryResult={() => {
+              if (!discoveryResult) return;
+              const r = discoveryResult;
+              setDiscoveryResult(null);
+              const team = userProfile?.teams.find((t) => t.id === r.teamId);
+              if (team) {
+                openTeamSeasonHistory({ team });
+              } else {
+                openTeamSeasonHistory({ fallbackName: r.teamLabel });
+              }
+            }}
+            onLongPressTeam={handleLongPressTeam}
+            onAddTeam={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTeamChooser');
+            }}
+            onFindInOvaRankings={() => {
+              setOvaInitialDivision(null);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('OvaRankings');
+            }}
+            onBrowseTournaments={() => {
+              setScreenHistory([]);
+              setScreen('BrowseSection');
+            }}
+            onScoreAMatch={
+              userProfile?.scorerMode
+                ? () => {
+                    setScreenHistory((prev) => [...prev, screen]);
+                    setScreen('MatchList');
+                  }
+                : undefined
+            }
+            onResumeMatch={(m) => {
+              setActiveScoredMatch(m);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MatchScoring');
+            }}
+            onOpenRecent={handleOpenRecent}
+            onOpenAnalyticsForTeam={(team) => {
+              setStatsTeamProfileId(team.id);
+              setStatsTeamName(team.label);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('Stats');
+            }}
+          />
+        );
+      case 'BrowseSection':
+        return (
+          <BrowseSectionScreen
+            onBack={goBack}
+            onOpenAesEvents={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TournamentSelect');
+            }}
+            onOpenTimuEvents={() => {
+              setAddTournamentsFocusSource('timu');
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTournaments');
+            }}
+            onOpenOvaRankings={() => {
+              setOvaInitialDivision(null);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('OvaRankings');
+            }}
+            onOpenSearch={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('GlobalSearch');
+            }}
+          />
+        );
+      case 'VenueMapSelector':
+        return (
+          <VenueMapSelectorScreen
+            registry={discoveredRegistry}
+            onBack={goBack}
+            onOpenMap={(sel) => {
+              setVenueMapUrl(sel.venueMapUrl);
+              setVenueInfoPageUrl(sel.infoPageUrl);
+              setHighlightCourt(undefined);
+              setCourtMatchInfo(undefined);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('VenueMap');
+            }}
+          />
+        );
+      case 'SidelineImportPlaceholder':
+        return <SidelineImportPlaceholderScreen onBack={goBack} />;
       case 'MyHome':
         if (!userProfile) {
           // Profile still loading on first paint — fall through to the
@@ -2869,15 +3135,15 @@ function AppInner() {
         onOpenGlobalSearch={handleOpenGlobalSearch}
         onSwitchTeam={(teamId: string) => {
           handleSwitchActiveTeam(teamId);
-          // Land on the team's Season History (matches MyHome's behaviour
-          // and the new "team home" model). If the team has nothing linked
-          // yet, drop the user back to MyHome so they can add a tournament.
+          // Land on the team's Season History. If the team has nothing
+          // linked yet, drop the user back to the My Team section so they
+          // can add a tournament.
           const team = userProfile?.teams.find((t) => t.id === teamId);
           if (team) {
             openTeamSeasonHistory({ team });
           } else {
             setScreenHistory([]);
-            setScreen('MyHome');
+            setScreen('MyTeamSection');
           }
         }}
         onToggleScorerMode={(next: boolean) => {
@@ -3087,6 +3353,8 @@ function AppContent({
   // map don't show the floating help affordance (Help screen itself, focused
   // flows, modals, etc.). Users can always reach Help via the hamburger.
   const helpSectionForScreen: Partial<Record<Screen, string>> = {
+    HomeLauncher: HELP_SECTION_IDS.MY_HOME,
+    MyTeamSection: HELP_SECTION_IDS.MY_HOME,
     MyHome: HELP_SECTION_IDS.MY_HOME,
     TeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
     TimuTeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
@@ -3150,7 +3418,13 @@ function AppContent({
           hasDivision={!!currentDivision}
           hasTeam={!!currentTeam || !!currentTimuTeamName}
           onTimu={!!currentTimuTid}
-          currentScreen={screen === 'TournamentSelect' || screen === 'EventEntry' ? 'Home' : screen}
+          currentScreen={
+            screen === 'HomeLauncher' ||
+            screen === 'TournamentSelect' ||
+            screen === 'EventEntry'
+              ? 'Home'
+              : screen
+          }
           light={lightHeader}
           eventName={
             currentEvent?.Name ||
