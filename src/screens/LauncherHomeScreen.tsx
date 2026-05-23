@@ -69,7 +69,7 @@ export function LauncherHomeScreen({
     {
       key: 'myteam',
       glyph: '👥',
-      title: 'My Team',
+      title: 'My Team(s)',
       hint: hasTeams ? undefined : 'Add a team to get started',
       onPress: hasTeams ? onOpenMyTeamSection : onOpenMyTeamOnboarding,
     },
