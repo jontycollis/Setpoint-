@@ -17,9 +17,11 @@ import {
 } from 'react-native';
 import { LauncherTile } from '../components/LauncherTile';
 import { SectionHeader } from '../components/SectionHeader';
+import { TeamAvatar } from '../components/TeamAvatar';
 import { useTheme, spacing, fontSize } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import type { TeamProfile } from '../types/profile';
+import { useTeamAvatarOverrides } from '../utils/teamAvatarStore';
 
 interface Props {
   team: TeamProfile;
@@ -46,6 +48,8 @@ export function SingleTeamSectionScreen({
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const overrides = useTeamAvatarOverrides();
+  const customImageUri = overrides[team.id]?.uri;
 
   const { width, height } = useWindowDimensions();
   const wide = width >= 720 || width > height;
@@ -123,6 +127,13 @@ export function SingleTeamSectionScreen({
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
       >
+        <View style={styles.identity}>
+          <TeamAvatar
+            teamProfile={team}
+            customImageUri={customImageUri}
+            size={72}
+          />
+        </View>
         <Text style={styles.tileSectionHeading}>Team</Text>
         <View style={styles.grid}>
           {rows.map((row, rowIdx) => (
@@ -161,6 +172,11 @@ function makeStyles(colors: ThemeColors) {
     scroll: {
       paddingHorizontal: spacing.lg,
       paddingBottom: spacing.xxl,
+    },
+    identity: {
+      alignItems: 'center',
+      paddingTop: spacing.sm,
+      paddingBottom: spacing.lg,
     },
     tileSectionHeading: {
       fontSize: fontSize.sm,

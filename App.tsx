@@ -3403,9 +3403,9 @@ function AppContent({
   // map don't show the floating help affordance (Help screen itself, focused
   // flows, modals, etc.). Users can always reach Help via the hamburger.
   const helpSectionForScreen: Partial<Record<Screen, string>> = {
-    HomeLauncher: HELP_SECTION_IDS.MY_HOME,
-    MyTeamSection: HELP_SECTION_IDS.MY_HOME,
-    SingleTeamSection: HELP_SECTION_IDS.MY_HOME,
+    HomeLauncher: HELP_SECTION_IDS.HOME_LAUNCHER,
+    MyTeamSection: HELP_SECTION_IDS.MY_TEAMS_SECTION,
+    SingleTeamSection: HELP_SECTION_IDS.SINGLE_TEAM_SECTION,
     MyHome: HELP_SECTION_IDS.MY_HOME,
     TeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
     TimuTeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
@@ -3415,6 +3415,9 @@ function AppContent({
     Stats: HELP_SECTION_IDS.ANALYTICS,
     PlayerDetail: HELP_SECTION_IDS.ANALYTICS,
     SeasonHistory: HELP_SECTION_IDS.SEASON_HISTORY,
+    SidelineImport: HELP_SECTION_IDS.SIDELINE_IMPORT,
+    VenueMap: HELP_SECTION_IDS.VENUE_MAP,
+    VenueMapSelector: HELP_SECTION_IDS.VENUE_MAP,
     Standings: HELP_SECTION_IDS.STANDINGS_BRACKETS,
     Brackets: HELP_SECTION_IDS.STANDINGS_BRACKETS,
     AddTournaments: HELP_SECTION_IDS.ADD_TOURNAMENTS,
