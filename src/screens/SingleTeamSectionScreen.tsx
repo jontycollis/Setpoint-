@@ -2,9 +2,16 @@
 // Per-team landing reached from the My Team(s) section's team-tile grid.
 // Renders the section header scoped to one TeamProfile, then the feature
 // sub-tile grid (Analytics, Season History, Tournaments, Roster, Sideline
-// import, Add AES event, Add Timu event). Caller pre-scopes the team via
+// import, Add event). Caller pre-scopes the team via
 // `handleSwitchActiveTeam(teamId)` before routing here so the existing
 // feature screens pick up the right team context.
+//
+// Roster fans out into View/Manage on RosterSectionScreen; the top-level
+// tile is enabled for every team (View works on watching teams too).
+//
+// "Add event" leads to the AddTournaments chooser, which itself handles
+// the AES vs Timu split — one tile pointing at a chooser is cleaner than
+// two tiles both leading there.
 // ────────────────────────────────────────────────────────────────────────────
 
 import React, { useMemo } from 'react';
@@ -30,8 +37,7 @@ interface Props {
   onOpenTournaments: () => void;
   onOpenRoster: () => void;
   onOpenSidelineImport: () => void;
-  onAddAesEvent: () => void;
-  onAddTimuEvent: () => void;
+  onAddEvent: () => void;
   onBack: () => void;
 }
 
@@ -42,8 +48,7 @@ export function SingleTeamSectionScreen({
   onOpenTournaments,
   onOpenRoster,
   onOpenSidelineImport,
-  onAddAesEvent,
-  onAddTimuEvent,
+  onAddEvent,
   onBack,
 }: Props) {
   const { colors } = useTheme();
@@ -64,10 +69,6 @@ export function SingleTeamSectionScreen({
       : team.kind === 'watching'
       ? 'Watching'
       : undefined;
-
-  // Roster editing only applies to teams the user is on; watching teams
-  // don't surface a roster editor (mirrors prior MyTeamSectionScreen gating).
-  const meTeam = team.kind === 'me';
 
   const tiles = [
     {
@@ -93,7 +94,6 @@ export function SingleTeamSectionScreen({
       glyph: '👥',
       title: 'Roster',
       onPress: onOpenRoster,
-      disabled: !meTeam,
     },
     {
       key: 'sideline',
@@ -102,16 +102,10 @@ export function SingleTeamSectionScreen({
       onPress: onOpenSidelineImport,
     },
     {
-      key: 'add-aes',
+      key: 'add-event',
       glyph: '➕',
-      title: 'Add AES event',
-      onPress: onAddAesEvent,
-    },
-    {
-      key: 'add-timu',
-      glyph: '➕',
-      title: 'Add Timu event',
-      onPress: onAddTimuEvent,
+      title: 'Add event',
+      onPress: onAddEvent,
     },
   ];
 
@@ -144,7 +138,6 @@ export function SingleTeamSectionScreen({
                   glyph={t.glyph}
                   title={t.title}
                   onPress={t.onPress}
-                  disabled={t.disabled}
                   testID={`singleteam-tile-${t.key}`}
                 />
               ))}
