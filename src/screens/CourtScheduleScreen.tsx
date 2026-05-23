@@ -26,6 +26,7 @@ import type {
 import { formatDate, formatTime, formatDualTime } from '../utils/dates';
 import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
 import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
+import { buildCourtList } from '../utils/courtChips';
 import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 import type { AESEvent } from '../types/aes';
 import { WatchLiveButton } from '../components/WatchLiveButton';
@@ -65,6 +66,10 @@ export function CourtScheduleScreen({
   // pick the first indexed division as the source of truth (all divisions
   // in a single event share a venue).
   const [venueTimeZone, setVenueTimeZone] = useState<string | undefined>(undefined);
+  // Court filter — 'all' shows every court. Reset whenever the loaded
+  // schedule no longer contains the selected court (e.g. day change, or
+  // every match on that court finished and got filtered upstream).
+  const [selectedCourt, setSelectedCourt] = useState<string>('all');
   const [tzMode] = useTzDisplayMode();
   const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
   // Wrapper for dual-tz time rendering at user-facing call sites.
@@ -191,10 +196,28 @@ export function CourtScheduleScreen({
     }
   }
 
-  // Group matches by court name
+  // Court list drives both the filter chip strip and the section ordering.
+  // Memoised so the chip row doesn't rebuild on unrelated re-renders (e.g.
+  // score-map fills in after the schedule has already rendered).
+  const courtNames = useMemo(() => buildCourtList(allMatches), [allMatches]);
+
+  // If a court reload drops the selected court entirely, fall back to 'all'
+  // so the user isn't stuck staring at an empty-state with no obvious way
+  // out. The empty-state card below handles the in-day case (court still
+  // exists but has no matches after upstream filtering, which today never
+  // happens — kept for future-proofing).
+  useEffect(() => {
+    if (selectedCourt !== 'all' && !courtNames.includes(selectedCourt)) {
+      setSelectedCourt('all');
+    }
+  }, [courtNames, selectedCourt]);
+
+  // Group matches by court name, applying the court filter. When a single
+  // court is selected the resulting record has at most one key.
   const courtGroups: Record<string, FlatCourtMatch[]> = {};
   allMatches.forEach((match) => {
     const courtName = match.CourtName || 'Unknown';
+    if (selectedCourt !== 'all' && courtName !== selectedCourt) return;
     if (!courtGroups[courtName]) courtGroups[courtName] = [];
     courtGroups[courtName].push(match);
   });
@@ -344,6 +367,53 @@ export function CourtScheduleScreen({
         ))}
       </ScrollView>
 
+      {/* Court Filter — hidden when there's nothing meaningful to filter
+          (0 or 1 court). Sits below the date picker so it always reflects
+          the currently visible day's courts. */}
+      {courtNames.length > 1 && (
+        <ScrollView
+          horizontal
+          style={styles.courtPicker}
+          showsHorizontalScrollIndicator={false}
+        >
+          <TouchableOpacity
+            style={[
+              styles.courtChip,
+              selectedCourt === 'all' && styles.courtChipActive,
+            ]}
+            onPress={() => setSelectedCourt('all')}
+          >
+            <Text
+              style={[
+                styles.courtChipText,
+                selectedCourt === 'all' && styles.courtChipTextActive,
+              ]}
+            >
+              All courts
+            </Text>
+          </TouchableOpacity>
+          {courtNames.map((name) => (
+            <TouchableOpacity
+              key={name}
+              style={[
+                styles.courtChip,
+                selectedCourt === name && styles.courtChipActive,
+              ]}
+              onPress={() => setSelectedCourt(name)}
+            >
+              <Text
+                style={[
+                  styles.courtChipText,
+                  selectedCourt === name && styles.courtChipTextActive,
+                ]}
+              >
+                {name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      )}
+
       {error && (
         <View style={styles.centered}>
           <Text style={styles.errorText}>{error}</Text>
@@ -423,6 +493,21 @@ export function CourtScheduleScreen({
               </Text>
             </View>
           )}
+
+          {/* Day has matches but the active court filter selects an
+              empty subset. Today this can only briefly flash during the
+              render between a data swap and the stale-court useEffect
+              resetting to 'all', but a real empty-state beats a blank
+              scroll view if that timing ever lengthens. */}
+          {allMatches.length > 0 &&
+            selectedCourt !== 'all' &&
+            Object.keys(courtGroups).length === 0 && (
+              <View style={styles.centered}>
+                <Text style={styles.noData}>
+                  No matches on {selectedCourt}.
+                </Text>
+              </View>
+            )}
 
           <View style={{ height: spacing.xxxl }} />
         </ScrollView>
@@ -507,6 +592,36 @@ function makeStyles(colors: ThemeColors) {
     fontWeight: '500',
   },
   dateChipTextActive: { color: colors.textOnPrimary, fontWeight: '700' },
+  // Court chip strip — same pill geometry as the date picker so the two
+  // rows visually rhyme. Slightly tighter vertical padding so the second
+  // row of pills doesn't push the schedule down as aggressively.
+  courtPicker: {
+    flexGrow: 0,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
+    backgroundColor: colors.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.divider,
+  },
+  courtChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: borderRadius.full,
+    backgroundColor: colors.background,
+    marginRight: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  courtChipActive: {
+    backgroundColor: colors.primary,
+    borderColor: colors.primary,
+  },
+  courtChipText: {
+    fontSize: fontSize.sm,
+    color: colors.text,
+    fontWeight: '500',
+  },
+  courtChipTextActive: { color: colors.textOnPrimary, fontWeight: '700' },
   scheduleScroll: { flex: 1 },
   courtSection: { marginBottom: spacing.md },
   courtHeader: {
