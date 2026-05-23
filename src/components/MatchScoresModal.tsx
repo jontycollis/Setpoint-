@@ -12,7 +12,7 @@ import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { getMatchResult } from '../api/aesClient';
 import type { MatchResult, FlatCourtMatch } from '../api/aesClient';
-import { formatTime, formatDate, formatDualTime, formatDualDate } from '../utils/dates';
+import { formatDate, formatDualDate, formatMatchTime } from '../utils/dates';
 import type { TzDisplayMode } from '../utils/tzDisplayPreference';
 
 interface Props {
@@ -98,14 +98,7 @@ export function MatchScoresModal({
                 ? formatDualDate(match.ScheduledStartDateTime, venueTz, tzMode)
                 : formatDate(match.ScheduledStartDateTime, displayTz)}
               {'  •  '}
-              {venueTz && tzMode
-                ? formatDualTime(
-                    match.ScheduledStartDateTime,
-                    venueTz,
-                    { hour: 'numeric', minute: '2-digit', hour12: true },
-                    tzMode,
-                  )
-                : formatTime(match.ScheduledStartDateTime, displayTz)}
+              {formatMatchTime(match.ScheduledStartDateTime, venueTz, tzMode ?? 'dual', displayTz)}
               {match.CourtName ? `  •  ${match.CourtName}` : ''}
             </Text>
           </View>

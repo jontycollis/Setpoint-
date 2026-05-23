@@ -379,8 +379,15 @@ export interface CourtMatch {
   SecondTeamText: string;
   WorkTeamText: string;
   CompleteShortName: string;
-  ScheduledStartDateTime: number; // Unix timestamp in ms
-  ScheduledEndDateTime: number;
+  // AES returns these as tz-less ISO strings (e.g. `"2026-05-23T08:00:00"`),
+  // meaning "wall time at the venue" — same shape as `BracketMatch` and
+  // `TeamScheduleMatch`. The type used to claim `number`, which caused
+  // every downstream `typeof === 'number'` guard or arithmetic sort to
+  // silently misbehave on the real payload. Read these through
+  // `parseScheduleTime` with the event's `venueTimeZone` so cross-tz
+  // viewers see the correct wall time.
+  ScheduledStartDateTime: string;
+  ScheduledEndDateTime: string;
   HasOutcome: boolean;
 }
 
@@ -407,7 +414,15 @@ export function flattenCourtSchedule(response: CourtScheduleResponse): FlatCourt
       matches.push({ ...match, CourtName: court.Name, CourtVideoLink: court.VideoLink || '' });
     }
   }
-  matches.sort((a, b) => a.ScheduledStartDateTime - b.ScheduledStartDateTime);
+  // Sort by ISO string (lexical order matches chronological order for
+  // tz-less ISO timestamps from a single venue). Arithmetic subtraction
+  // worked when these were typed as ms, but the real payload is a string
+  // and `string - string` would coerce both to NaN → unsorted output.
+  matches.sort((a, b) =>
+    a.ScheduledStartDateTime < b.ScheduledStartDateTime ? -1
+    : a.ScheduledStartDateTime > b.ScheduledStartDateTime ? 1
+    : 0
+  );
   return matches;
 }
 
