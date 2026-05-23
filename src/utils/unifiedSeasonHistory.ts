@@ -269,6 +269,66 @@ export function getNextUpcomingTournament(
   return getUpcomingTournaments(indices, aliases, opts)[0] ?? null;
 }
 
+// ── Active-tournament predicate ───────────────────────────────────────────
+//
+// "Active" = the user is about to walk into this gym, or they're already
+// at the gym. Drives the pinned "Active" section at the top of Season
+// History. Looking at the user's own intent:
+//
+//   • Within the next 7 days (so they see Pool Friday at Monday breakfast)
+//   • Currently in progress (heuristic: starts within the last 48h — most
+//     OVA / Timu tournaments are one to three days)
+//
+// We use tournament `dateMs` (the start date the snapshot recorded) rather
+// than per-match scheduled times because UnifiedTournamentEntry.matches
+// only carries completed matches; scheduled future matches live in AES /
+// Timu schedule endpoints that the snapshot pipeline doesn't preserve.
+// The 48h grace covers the in-progress case without needing a separate
+// "ended" timestamp on the snapshot.
+// ──────────────────────────────────────────────────────────────────────────
+
+/** ms in a day — only used in the active-window math below. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** How far ahead we treat as "active". */
+export const ACTIVE_WINDOW_FORWARD_MS = 7 * DAY_MS;
+/** How far back a tournament start can be before we stop calling it
+ *  "currently playing". Two days covers a Sat–Sun tournament started on
+ *  Friday; longer than that and we trust the user's own past-results
+ *  view rather than the active pin. */
+export const ACTIVE_WINDOW_BACKWARD_MS = 2 * DAY_MS;
+
+/**
+ * Returns true when this tournament is either upcoming within
+ * `ACTIVE_WINDOW_FORWARD_MS` or recent enough that it's plausibly still
+ * being played (`ACTIVE_WINDOW_BACKWARD_MS`). Tournaments without a
+ * `dateMs` can't be placed on the timeline and never count as active.
+ */
+export function isActiveTournament(
+  entry: UnifiedTournamentEntry,
+  nowMs: number = Date.now()
+): boolean {
+  if (entry.dateMs == null) return false;
+  const delta = entry.dateMs - nowMs;
+  return (
+    delta <= ACTIVE_WINDOW_FORWARD_MS && delta >= -ACTIVE_WINDOW_BACKWARD_MS
+  );
+}
+
+/**
+ * Filter a history list down to the active set, sorted earliest →
+ * latest (so an in-progress tournament beats one starting next week,
+ * matching the user's mental priority). The history can include past
+ * tournaments without filtering — `isActiveTournament` excludes them.
+ */
+export function getActiveTournaments(
+  history: readonly UnifiedTournamentEntry[],
+  nowMs: number = Date.now()
+): UnifiedTournamentEntry[] {
+  return history
+    .filter((e) => isActiveTournament(e, nowMs))
+    .sort((a, b) => (a.dateMs ?? 0) - (b.dateMs ?? 0));
+}
+
 // ── Source-specific adapters ──────────────────────────────────────────────
 
 function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEntry {

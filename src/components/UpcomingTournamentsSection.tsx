@@ -41,12 +41,17 @@ interface Props {
   debugLabel?: string;
   /** Tap an upcoming card → caller routes to that tournament. */
   onOpenEntry?: (entry: UnifiedTournamentEntry) => void;
+  /** Source keys to hide from the upcoming list — used by Season
+   *  History to keep active tournaments out of the Upcoming section
+   *  once they've been pinned at the top. */
+  excludeKeys?: ReadonlySet<string>;
 }
 
 export function UpcomingTournamentsSection({
   aliases,
   debugLabel,
   onOpenEntry,
+  excludeKeys,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -69,8 +74,10 @@ export function UpcomingTournamentsSection({
 
   const upcoming = useMemo(() => {
     if (!indices) return [];
-    return getUpcomingTournaments(indices, aliases, { debugLabel });
-  }, [indices, aliases, debugLabel]);
+    const list = getUpcomingTournaments(indices, aliases, { debugLabel });
+    if (!excludeKeys || excludeKeys.size === 0) return list;
+    return list.filter((e) => !excludeKeys.has(e.sourceKey));
+  }, [indices, aliases, debugLabel, excludeKeys]);
 
   return (
     <View style={styles.section}>
