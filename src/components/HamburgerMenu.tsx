@@ -103,6 +103,15 @@ interface Props {
    */
   onOpenRosterEditor?: (team: TeamProfile) => void;
   /**
+   * "My Team" fast-path: route straight to the active team's Season
+   * History from anywhere in the app. Falls back to the team picker
+   * (MyTeamSection) when there's no active team. The launcher tile
+   * keeps its picker behaviour — this entry is the hamburger
+   * shortcut for users who know which team they care about and just
+   * want their history in two taps.
+   */
+  onOpenMyTeamFastPath?: () => void;
+  /**
    * Per-team ⋯ overflow tap. Caller surfaces an action sheet
    * mirroring the MyHome long-press (Manage roster / Remove). When
    * undefined, the overflow icon hides.
@@ -139,6 +148,7 @@ export function HamburgerMenu({
   onToggleScorerMode,
   onOpenRosterEditor,
   onTeamMenu,
+  onOpenMyTeamFastPath,
   menuContext = 'home',
 }: Props) {
   const { colors } = useTheme();
@@ -308,6 +318,30 @@ export function HamburgerMenu({
                     isCurrent={isCurrentScreen('MyHome')}
                     onPress={() => handleSelect('MyHome')}
                   />
+
+                  {/* My Team — fast-path to the active team's Season
+                      History. The active-team row below is disabled when
+                      it IS the active selection, which leaves no quick way
+                      back to its history from inside that team's screens.
+                      This entry covers that gap; falls back to the picker
+                      when there's no active team. */}
+                  {onOpenMyTeamFastPath && (
+                    <MenuRow
+                      icon={'\u{1F3C5}'}
+                      label="My Team"
+                      subtitle={
+                        userProfile?.activeTeamId
+                          ? "Active team's season history"
+                          : 'Pick a team'
+                      }
+                      available={true}
+                      isCurrent={false}
+                      onPress={() => {
+                        closeMenu();
+                        onOpenMyTeamFastPath();
+                      }}
+                    />
+                  )}
 
                   {/* Tracked teams — tap any to switch active team and
                       open its Season History. The trailing ⋯ overflow

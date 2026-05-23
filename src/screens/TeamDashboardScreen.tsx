@@ -53,6 +53,7 @@ import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
 import { scheduleAllMatchNotifications } from '../utils/notifications';
 import type { MatchNotification } from '../utils/notifications';
 import { formatTime, formatDate, getRelativeTime, parseScheduleTime, formatInVenueTz, formatDualTime, formatDualDate, calendarDayKey, relativeDayLabel } from '../utils/dates';
+import { buildDayChips } from '../utils/dayChips';
 import { useTzDisplayMode, effectiveTzForDisplay, nextTzDisplayMode } from '../utils/tzDisplayPreference';
 import type { AESEvent, AESDivision, AESTeamAssignment } from '../types/aes';
 import { ensureAesIndexed, indexAesSnapshot, loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
@@ -576,27 +577,10 @@ export function TeamDashboardScreen({
   //     Mirrors the same staleness rule used by `upcomingMatches` below
   //     (matches > 30 min in the past with no result are dropped) so the
   //     chip set matches the visible match list.
-  const dayChips = useMemo(() => {
-    const keyToMs = new Map<string, number>();
-    const staleCutoff = now - 30 * 60 * 1000;
-    for (const m of scheduleMatches) {
-      const isDone = m.HasScores || m.FirstTeamWon || m.SecondTeamWon;
-      const ms = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
-      if (ms == null) continue;
-      if (!isDone && ms <= staleCutoff) continue;
-      const key = calendarDayKey(ms, displayTz);
-      if (!key) continue;
-      if (!keyToMs.has(key)) keyToMs.set(key, ms);
-    }
-    const sortedKeys = Array.from(keyToMs.keys()).sort();
-    const chips: { key: string; label: string }[] = [];
-    if (sortedKeys.length >= 2) chips.push({ key: 'all', label: 'All Days' });
-    for (const key of sortedKeys) {
-      const ms = keyToMs.get(key)!;
-      chips.push({ key, label: relativeDayLabel(ms, now, displayTz) });
-    }
-    return chips;
-  }, [scheduleMatches, venueTimeZone, displayTz, now]);
+  const dayChips = useMemo(
+    () => buildDayChips(scheduleMatches, now, venueTimeZone, displayTz),
+    [scheduleMatches, venueTimeZone, displayTz, now]
+  );
 
   // Guard against a stale `dayFilter` once the underlying data changes
   // (e.g. results land and yesterday's chip disappears): if the selected

@@ -32,6 +32,7 @@ import {
   loadAllSeasonIndices,
   buildMySeasonHistory,
   aggregateUnifiedStats,
+  getActiveTournaments,
   type UnifiedTournamentEntry,
   type UnifiedMatchEntry,
   type UnifiedAggregateStats,
@@ -281,11 +282,32 @@ export function SeasonHistoryScreen({
               </View>
             )}
 
-            {/* Upcoming tournaments — always visible, even when empty */}
+            {/* Active tournaments — pinned above everything else when the
+                team is currently playing or about to. Drives the user's
+                immediate attention to today's gym, not last month's
+                results. Mutually exclusive with the Upcoming list below
+                (active entries filter out of Upcoming). */}
+            {(() => {
+              const active = getActiveTournaments(history);
+              if (active.length === 0) return null;
+              return (
+                <ActiveTournamentsSection
+                  entries={active}
+                  onOpenEntry={onOpenUpcomingTournament}
+                />
+              );
+            })()}
+
+            {/* Upcoming tournaments — always visible, even when empty.
+                Skips entries already shown in the Active section above so
+                a tournament starting in 3 days appears once, in Active. */}
             <UpcomingTournamentsSection
               aliases={[primaryName, ...(aliasesProp ?? [])]}
               debugLabel={primaryName}
               onOpenEntry={onOpenUpcomingTournament}
+              excludeKeys={
+                new Set(getActiveTournaments(history).map((e) => e.sourceKey))
+              }
             />
 
             {/* Action buttons: scan + manual add */}
@@ -386,6 +408,100 @@ export function SeasonHistoryScreen({
       </ScrollView>
     </View>
   );
+}
+
+// ── Active tournaments (pinned section) ───────────────────────────────────
+//
+// Visually distinct card list rendered at the very top of Season History
+// when the team is currently playing or about to. The badge labels are
+// driven by tournament `dateMs`:
+//
+//   • dateMs <= now      → "Active now"  (started up to 2 days ago)
+//   • dateMs > now       → "Starts today" | "Starts tomorrow" | "Starts in N days"
+//
+// Tap behaviour mirrors the Upcoming cards (same `onOpenEntry` callback)
+// so existing routing — Tournament Dashboard for AES, Timu equivalent —
+// applies without forking.
+// ──────────────────────────────────────────────────────────────────────────
+
+function ActiveTournamentsSection({
+  entries,
+  onOpenEntry,
+}: {
+  entries: UnifiedTournamentEntry[];
+  onOpenEntry?: (entry: UnifiedTournamentEntry) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  const now = Date.now();
+  return (
+    <View style={styles.activeSection}>
+      <Text style={styles.activeSectionLabel}>
+        {entries.some((e) => (e.dateMs ?? 0) <= now)
+          ? 'CURRENTLY PLAYING'
+          : 'ACTIVE'}
+      </Text>
+      {entries.map((entry) => (
+        <TouchableOpacity
+          key={entry.sourceKey}
+          style={styles.activeCard}
+          activeOpacity={onOpenEntry ? 0.7 : 1}
+          disabled={!onOpenEntry}
+          onPress={() => onOpenEntry?.(entry)}
+        >
+          <View
+            style={[
+              styles.sourceBadge,
+              {
+                backgroundColor:
+                  entry.source === 'timu' ? colors.accent : colors.primary,
+              },
+            ]}
+          >
+            <Text style={styles.sourceBadgeText}>{entry.source.toUpperCase()}</Text>
+          </View>
+          <View style={styles.activeCardBody}>
+            <View style={styles.activeBadgeRow}>
+              <Text style={styles.activeBadge}>
+                {activeBadgeLabel(entry.dateMs, now)}
+              </Text>
+            </View>
+            <Text style={styles.activeCardTitle} numberOfLines={2}>
+              {entry.tournamentName}
+            </Text>
+            {entry.subtitle ? (
+              <Text style={styles.activeCardSubtitle} numberOfLines={1}>
+                {entry.subtitle}
+              </Text>
+            ) : null}
+            {(entry.dateText || entry.venueName) && (
+              <Text style={styles.activeCardMeta} numberOfLines={1}>
+                {[entry.dateText, entry.venueName].filter(Boolean).join(' · ')}
+              </Text>
+            )}
+          </View>
+          {onOpenEntry ? (
+            <Text style={styles.activeChevron} accessible={false}>
+              {'›'}
+            </Text>
+          ) : null}
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
+
+/** "Active now" for tournaments whose start is in the past (with grace),
+ *  otherwise a friendly "Starts in N days" / "Starts tomorrow" /
+ *  "Starts today" countdown. */
+function activeBadgeLabel(dateMs: number | undefined, nowMs: number): string {
+  if (dateMs == null) return 'Active';
+  const delta = dateMs - nowMs;
+  if (delta <= 0) return 'Active now';
+  const days = Math.round(delta / (24 * 60 * 60 * 1000));
+  if (days === 0) return 'Starts today';
+  if (days === 1) return 'Starts tomorrow';
+  return `Starts in ${days} days`;
 }
 
 // ── Hero ──────────────────────────────────────────────────────────────────
@@ -1309,6 +1425,62 @@ function makeStyles(colors: ThemeColors) {
     color: colors.textSecondary,
     marginTop: 2,
     fontVariant: ['tabular-nums'],
+  },
+
+  // ── Active tournaments (pinned section) ────────────────────────────────
+  activeSection: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.sm,
+    backgroundColor: colors.background,
+  },
+  activeSectionLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.success,
+    letterSpacing: 1.2,
+    marginBottom: spacing.sm,
+  },
+  activeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: borderRadius.md,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.success,
+    // Subtle elevation so the active card reads as "lifted" against the
+    // flat upcoming/past cards below.
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  activeCardBody: { flex: 1 },
+  activeBadgeRow: { marginBottom: 4 },
+  activeBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: colors.success,
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: borderRadius.sm,
+    overflow: 'hidden',
+  },
+  activeCardTitle: { fontSize: fontSize.md, fontWeight: '700', color: colors.text },
+  activeCardSubtitle: { fontSize: fontSize.sm, color: colors.textSecondary, marginTop: 2 },
+  activeCardMeta: { fontSize: fontSize.xs, color: colors.textLight, marginTop: 2 },
+  activeChevron: {
+    fontSize: 24,
+    color: colors.textLight,
+    marginLeft: spacing.xs,
+    lineHeight: 24,
   },
 
   card: {},

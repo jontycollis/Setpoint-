@@ -3203,6 +3203,22 @@ function AppInner() {
         }}
         onOpenRosterEditor={handleOpenRosterEditor}
         onTeamMenu={handleLongPressTeam}
+        onOpenMyTeamFastPath={() => {
+          // Hamburger "My Team" entry — go straight to the active team's
+          // Season History. When there's no active team yet, drop the user
+          // on the team picker so they can pick one. The launcher tile
+          // keeps its picker behaviour regardless.
+          const activeId = userProfile?.activeTeamId ?? null;
+          const team = activeId
+            ? userProfile?.teams.find((t) => t.id === activeId)
+            : undefined;
+          if (team) {
+            openTeamSeasonHistory({ team });
+          } else {
+            setScreenHistory([]);
+            setScreen('MyTeamSection');
+          }
+        }}
         onOpenHelp={openHelp}
       />
       )}
@@ -3382,6 +3398,7 @@ function AppContent({
   onToggleScorerMode,
   onOpenRosterEditor,
   onTeamMenu,
+  onOpenMyTeamFastPath,
   onTabSelect,
   onOpenGlobalSearch,
   onOpenHelp,
@@ -3505,6 +3522,7 @@ function AppContent({
           onToggleScorerMode={onToggleScorerMode}
           onOpenRosterEditor={onOpenRosterEditor}
           onTeamMenu={onTeamMenu}
+          onOpenMyTeamFastPath={onOpenMyTeamFastPath}
           menuContext={menuContextForScreen(screen)}
         />
       </View>
