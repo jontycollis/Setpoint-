@@ -278,11 +278,20 @@ export type MatchCategory =
  * import).
  *
  *   • `'tier2-live'`         — produced by the live-scoring engine
- *   • `'sideline-hd-import'` — parsed out of a Sideline HD workbook
+ *   • `'sideline-hd-import'` — parsed out of a bundled Sideline HD
+ *                               workbook export (static JSON shipped
+ *                               with the app)
+ *   • `'sideline-hd-live'`   — pulled live from Sideline HD's API
+ *                               after the user logged in on the
+ *                               self-serve import screen
  *   • `'manual-entry'`       — typed in after the fact (reserved; not
  *                               written by anything in v1)
  */
-export type MatchSource = 'tier2-live' | 'sideline-hd-import' | 'manual-entry';
+export type MatchSource =
+  | 'tier2-live'
+  | 'sideline-hd-import'
+  | 'sideline-hd-live'
+  | 'manual-entry';
 
 /**
  * Cross-reference back to an indexed AES tournament snapshot. Mirrors
