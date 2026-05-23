@@ -548,6 +548,12 @@ function AppInner() {
   const [currentTimuTeamName, setCurrentTimuTeamName] = useState<string | null>(null);
   const [currentTimuScoutOpponent, setCurrentTimuScoutOpponent] = useState<string | null>(null);
   const [currentHistoryTeamName, setCurrentHistoryTeamName] = useState<string | null>(null);
+  // Mirror — the TeamProfile.id behind the hero, when the entry-point had
+  // one. SeasonHistoryScreen reads it to render the team avatar (and pick
+  // up any user-uploaded override). Null for AES-fav-only entry points.
+  const [currentHistoryTeamProfileId, setCurrentHistoryTeamProfileId] = useState<
+    string | null
+  >(null);
   const [ovaInitialDivision, setOvaInitialDivision] = useState<{ key?: string; gender?: 'girls' | 'boys' } | null>(null);
 
   useEffect(() => {
@@ -1019,23 +1025,29 @@ function AppInner() {
     (opts: { team?: TeamProfile; fav?: FavoriteTeam; fallbackName?: string }) => {
       let primary = '';
       let aliases: string[] | null = null;
+      let teamProfileId: string | null = null;
 
       if (opts.team) {
         primary = opts.team.aliases[0] || opts.team.label;
         aliases = opts.team.aliases.length > 0 ? opts.team.aliases : [primary];
+        teamProfileId = opts.team.id;
       } else if (opts.fav) {
         primary = opts.fav.teamText || opts.fav.teamName || '';
         // Try to find the matching TeamProfile so we can use its full alias
         // set (handles spelling drift like "Defensa U18 Rob" vs "Defensa Rob").
         const match = findTeamProfileByAlias(userProfile, primary);
         aliases = match?.aliases ?? null;
+        teamProfileId = match?.id ?? null;
       } else if (opts.fallbackName) {
         primary = opts.fallbackName;
+        const match = findTeamProfileByAlias(userProfile, primary);
+        teamProfileId = match?.id ?? null;
       }
 
       if (!primary) return;
       setCurrentHistoryTeamName(primary);
       setCurrentHistoryAliases(aliases);
+      setCurrentHistoryTeamProfileId(teamProfileId);
       setScreenHistory((prev) => [...prev, screen]);
       setScreen('SeasonHistory');
     },
@@ -3046,6 +3058,7 @@ function AppInner() {
           <SeasonHistoryScreen
             primaryName={currentHistoryTeamName}
             aliases={currentHistoryAliases}
+            teamProfileId={currentHistoryTeamProfileId}
             onBack={goBack}
             onOpenUpcomingTournament={handleOpenUnifiedEntry}
             onOpenTimuTournament={(tid, myTeamAsSeen) => {

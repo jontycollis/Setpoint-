@@ -30,6 +30,8 @@ import {
 import type { ThemeColors } from '../utils/theme';
 import type { TeamProfile } from '../types/profile';
 import type { RosterPlayer } from '../types/match';
+import { TeamAvatar } from '../components/TeamAvatar';
+import { useTeamAvatarOverrides } from '../utils/teamAvatarStore';
 
 type Position = NonNullable<RosterPlayer['position']>;
 const POSITION_OPTIONS: Array<Position | ''> = ['', 'S', 'OH', 'MB', 'OPP', 'L', 'DS'];
@@ -86,6 +88,8 @@ function emptyDraftPlayer(): DraftPlayer {
 export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const avatarOverrides = useTeamAvatarOverrides();
+  const customImageUri = avatarOverrides[team.id]?.uri;
 
   const [players, setPlayers] = useState<DraftPlayer[]>(() =>
     (team.roster ?? []).map(fromRosterPlayer)
@@ -224,7 +228,15 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
       </View>
 
       <View style={styles.subHeader}>
-        <Text style={styles.teamLabel} numberOfLines={1}>{team.label}</Text>
+        <View style={styles.teamHeading}>
+          <TeamAvatar
+            teamProfile={team}
+            customImageUri={customImageUri}
+            size={28}
+            style={styles.teamHeadingAvatar}
+          />
+          <Text style={styles.teamLabel} numberOfLines={1}>{team.label}</Text>
+        </View>
         <View style={styles.subHeaderRow}>
           <Text style={styles.countText}>
             {activeCount} active{inactiveCount > 0 ? ` · ${inactiveCount} inactive` : ''}
@@ -460,10 +472,19 @@ function makeStyles(colors: ThemeColors) {
       borderBottomColor: colors.divider,
       backgroundColor: colors.surface,
     },
+    teamHeading: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: spacing.xs,
+    },
+    teamHeadingAvatar: {
+      marginRight: spacing.sm,
+    },
     teamLabel: {
       fontSize: fontSize.md,
       fontWeight: '700',
       color: colors.text,
+      flexShrink: 1,
     },
     subHeaderRow: {
       flexDirection: 'row',

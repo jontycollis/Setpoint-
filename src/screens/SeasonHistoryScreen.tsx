@@ -51,6 +51,8 @@ import {
 } from '../components/DiscoveryBanners';
 import { UpcomingTournamentsSection } from '../components/UpcomingTournamentsSection';
 import type { AutoDiscoverProgress } from '../utils/teamAutoDiscover';
+import { TeamAvatar } from '../components/TeamAvatar';
+import { useTeamAvatarOverrides } from '../utils/teamAvatarStore';
 
 interface Props {
   /** Display name shown in the hero. Typically myTeam.teamText or teamName. */
@@ -63,6 +65,13 @@ interface Props {
    * we fall back to the legacy global alias store for backwards compat.
    */
   aliases?: string[] | null;
+  /**
+   * The active team's TeamProfile.id, when the entry point had one. Used
+   * to render the team avatar (and pick up any user-uploaded override).
+   * Null for AES-fav-only entry points where the TeamProfile isn't
+   * resolvable from the source data.
+   */
+  teamProfileId?: string | null;
   onBack: () => void;
   /**
    * When the user taps an AES tournament card, the second arg is the
@@ -117,6 +126,7 @@ interface Props {
 export function SeasonHistoryScreen({
   primaryName,
   aliases: aliasesProp,
+  teamProfileId,
   onBack,
   onOpenAesTournament,
   onOpenTimuTournament,
@@ -133,6 +143,10 @@ export function SeasonHistoryScreen({
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const avatarOverrides = useTeamAvatarOverrides();
+  const customImageUri = teamProfileId
+    ? avatarOverrides[teamProfileId]?.uri
+    : undefined;
   const [history, setHistory] = useState<UnifiedTournamentEntry[]>([]);
   const [stats, setStats] = useState<UnifiedAggregateStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -243,6 +257,8 @@ export function SeasonHistoryScreen({
     <View style={styles.container}>
       <Hero
         teamName={primaryName}
+        teamProfileId={teamProfileId ?? null}
+        customImageUri={customImageUri}
         onBack={onBack}
         lastDiscoveryAt={lastDiscoveryAt}
       />
@@ -508,10 +524,14 @@ function activeBadgeLabel(dateMs: number | undefined, nowMs: number): string {
 
 function Hero({
   teamName,
+  teamProfileId,
+  customImageUri,
   onBack,
   lastDiscoveryAt,
 }: {
   teamName: string;
+  teamProfileId: string | null;
+  customImageUri?: string;
   onBack: () => void;
   lastDiscoveryAt?: number;
 }) {
@@ -523,7 +543,15 @@ function Hero({
         <Text style={styles.heroBack}>{'< Back'}</Text>
       </TouchableOpacity>
       <Text style={styles.heroKicker}>SEASON HISTORY</Text>
-      <Text style={styles.heroTitle} numberOfLines={2}>{teamName}</Text>
+      <View style={styles.heroTitleRow}>
+        <TeamAvatar
+          teamProfile={{ id: teamProfileId ?? teamName, label: teamName }}
+          customImageUri={customImageUri}
+          size={40}
+          style={styles.heroAvatar}
+        />
+        <Text style={styles.heroTitle} numberOfLines={2}>{teamName}</Text>
+      </View>
       {lastDiscoveryAt ? (
         <Text style={styles.heroSyncedAt}>
           Last synced {formatRelative(lastDiscoveryAt)}
@@ -1213,7 +1241,9 @@ function makeStyles(colors: ThemeColors) {
   hero: { backgroundColor: colors.primary, padding: spacing.xxl, paddingBottom: spacing.lg },
   heroBack: { color: 'rgba(255,255,255,0.9)', fontSize: fontSize.md, fontWeight: '600', marginBottom: spacing.sm },
   heroKicker: { color: 'rgba(255,255,255,0.7)', fontSize: fontSize.xs, fontWeight: '700', letterSpacing: 1, marginBottom: 4 },
-  heroTitle: { color: colors.textOnPrimary, fontSize: fontSize.xxl, fontWeight: '800' },
+  heroTitleRow: { flexDirection: 'row', alignItems: 'center' },
+  heroAvatar: { marginRight: spacing.md },
+  heroTitle: { color: colors.textOnPrimary, fontSize: fontSize.xxl, fontWeight: '800', flexShrink: 1 },
   heroSyncedAt: {
     color: 'rgba(255,255,255,0.75)',
     fontSize: fontSize.xs,
