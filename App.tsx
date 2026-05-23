@@ -22,6 +22,7 @@ import { MyHomeScreen } from './src/screens/MyHomeScreen';
 import { LauncherHomeScreen } from './src/screens/LauncherHomeScreen';
 import { ScoreboardSectionScreen } from './src/screens/ScoreboardSectionScreen';
 import { MyTeamSectionScreen } from './src/screens/MyTeamSectionScreen';
+import { SingleTeamSectionScreen } from './src/screens/SingleTeamSectionScreen';
 import { BrowseSectionScreen } from './src/screens/BrowseSectionScreen';
 import { VenueMapSelectorScreen } from './src/screens/VenueMapSelectorScreen';
 import { AddTeamChooserScreen } from './src/screens/AddTeamChooserScreen';
@@ -173,6 +174,7 @@ type Screen =
   | 'HomeLauncher'
   | 'ScoreboardSection'
   | 'MyTeamSection'
+  | 'SingleTeamSection'
   | 'BrowseSection'
   | 'VenueMapSelector'
   | 'MyHome'
@@ -241,6 +243,7 @@ function tabForScreen(screen: Screen): TabKey | null {
   // the user gets visual confirmation when they enter via tile or tab.
   if (screen === 'HomeLauncher') return 'home';
   if (screen === 'MyTeamSection') return 'home';
+  if (screen === 'SingleTeamSection') return 'home';
   if (screen === 'BrowseSection') return 'browse';
   // Legacy fallbacks — still in the union but not normally entered.
   if (screen === 'MyHome') return 'home';
@@ -264,6 +267,7 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'HomeLauncher',
   'ScoreboardSection',
   'MyTeamSection',
+  'SingleTeamSection',
   'BrowseSection',
   'VenueMapSelector',
   // No-team-scope screens
@@ -321,6 +325,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'HomeLauncher':
     case 'ScoreboardSection':
     case 'MyTeamSection':
+    case 'SingleTeamSection':
     case 'BrowseSection':
     case 'VenueMapSelector':
     case 'MyHome':
@@ -489,6 +494,11 @@ function AppInner() {
   const [tournamentDetailMatchIds, setTournamentDetailMatchIds] = useState<string[]>([]);
   // TeamRoster screen — which TeamProfile.id is being edited.
   const [rosterEditTeamId, setRosterEditTeamId] = useState<string | null>(null);
+  // SingleTeamSection — which TeamProfile.id the per-team launcher is scoped
+  // to. Set when the user taps a tile in the My Team(s) team-picker grid.
+  const [singleTeamSectionTeamId, setSingleTeamSectionTeamId] = useState<
+    string | null
+  >(null);
   // When a team dashboard's "+ Add a tournament" button routes the user
   // to AddTournamentsScreen, this carries the dashboard's source so the
   // matching paste-card scrolls into view + flashes a highlight on
@@ -2141,53 +2151,17 @@ function AppInner() {
           <MyTeamSectionScreen
             profile={userProfile}
             onBack={goBack}
-            onOpenAnalytics={() => {
-              const activeTeam = userProfile?.activeTeamId
-                ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
-                : null;
-              if (activeTeam) {
-                setStatsTeamProfileId(activeTeam.id);
-                setStatsTeamName(activeTeam.label);
-                setScreenHistory((prev) => [...prev, screen]);
-                setScreen('Stats');
-              }
-            }}
-            onOpenSeasonHistory={() => {
-              const activeTeam = userProfile?.activeTeamId
-                ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
-                : null;
-              if (activeTeam) {
-                openTeamSeasonHistory({ team: activeTeam });
-              }
-            }}
-            onOpenTournaments={() => {
+            onOpenTeamSection={(team) => {
+              handleSwitchActiveTeam(team.id);
+              setSingleTeamSectionTeamId(team.id);
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('AddTournaments');
-            }}
-            onOpenRoster={() => {
-              const activeTeam = userProfile?.activeTeamId
-                ? userProfile.teams.find((t) => t.id === userProfile.activeTeamId) ?? null
-                : null;
-              if (activeTeam && activeTeam.kind === 'me') {
-                handleOpenRosterEditor(activeTeam);
-              }
-            }}
-            onOpenSidelineImport={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('SidelineImport');
-            }}
-            onAddAesEvent={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('TournamentSelect');
-            }}
-            onAddTimuEvent={() => {
-              setAddTournamentsFocusSource('timu');
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('AddTournaments');
+              setScreen('SingleTeamSection');
             }}
             onOpenTeam={(team) => {
               handleSwitchActiveTeam(team.id);
-              openTeamSeasonHistory({ team });
+              setSingleTeamSectionTeamId(team.id);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('SingleTeamSection');
             }}
             syncing={timuSyncing}
             syncProgress={timuSyncProgress}
@@ -2243,6 +2217,74 @@ function AppInner() {
             }}
           />
         );
+      case 'SingleTeamSection': {
+        const team = singleTeamSectionTeamId
+          ? userProfile?.teams.find((t) => t.id === singleTeamSectionTeamId) ?? null
+          : null;
+        if (!team) {
+          // Team id was dangling (deleted out from under us, etc.) — bounce
+          // back to the picker so the user isn't stranded on a blank screen.
+          return (
+            <MyTeamSectionScreen
+              profile={userProfile!}
+              onBack={goBack}
+              onOpenTeamSection={(t) => {
+                handleSwitchActiveTeam(t.id);
+                setSingleTeamSectionTeamId(t.id);
+                setScreenHistory((prev) => [...prev, screen]);
+                setScreen('SingleTeamSection');
+              }}
+              onOpenTeam={(t) => {
+                handleSwitchActiveTeam(t.id);
+                setSingleTeamSectionTeamId(t.id);
+                setScreenHistory((prev) => [...prev, screen]);
+                setScreen('SingleTeamSection');
+              }}
+              onAddTeam={() => {
+                setScreenHistory((prev) => [...prev, screen]);
+                setScreen('AddTeamChooser');
+              }}
+            />
+          );
+        }
+        return (
+          <SingleTeamSectionScreen
+            team={team}
+            onBack={goBack}
+            onOpenAnalytics={() => {
+              setStatsTeamProfileId(team.id);
+              setStatsTeamName(team.label);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('Stats');
+            }}
+            onOpenSeasonHistory={() => {
+              openTeamSeasonHistory({ team });
+            }}
+            onOpenTournaments={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTournaments');
+            }}
+            onOpenRoster={() => {
+              if (team.kind === 'me') {
+                handleOpenRosterEditor(team);
+              }
+            }}
+            onOpenSidelineImport={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('SidelineImport');
+            }}
+            onAddAesEvent={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TournamentSelect');
+            }}
+            onAddTimuEvent={() => {
+              setAddTournamentsFocusSource('timu');
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTournaments');
+            }}
+          />
+        );
+      }
       case 'BrowseSection':
         return (
           <BrowseSectionScreen
@@ -3363,6 +3405,7 @@ function AppContent({
   const helpSectionForScreen: Partial<Record<Screen, string>> = {
     HomeLauncher: HELP_SECTION_IDS.MY_HOME,
     MyTeamSection: HELP_SECTION_IDS.MY_HOME,
+    SingleTeamSection: HELP_SECTION_IDS.MY_HOME,
     MyHome: HELP_SECTION_IDS.MY_HOME,
     TeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
     TimuTeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
