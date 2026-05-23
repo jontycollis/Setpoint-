@@ -18,9 +18,9 @@ import {
 import type { PlayDay, FlatBracketMatch, BracketMatch } from '../api/aesClient';
 import { Card } from '../components/Card';
 import type { AESEvent, AESDivision } from '../types/aes';
-import { formatDualTime, formatDualDate, formatTime, formatDate } from '../utils/dates';
 import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
+import { formatBracketMatchMeta } from '../utils/bracketMatchMeta';
 
 interface Props {
   event: AESEvent;
@@ -277,28 +277,8 @@ export function BracketScreen({ event, division, myTeamId, onBack, initialPlayId
 
   function renderMatchCard(item: FlatBracketMatch, maxRound: number, idx?: number) {
     const m = item.match;
-    // AES bracket records include `ScheduledStartDateTime` (epoch ms) and
-    // `Court` once the bracket has been seeded. Earlier rounds (still
-    // open / not yet drawn) come back without either — keep the row
-    // hidden when both are missing to avoid an empty meta strip.
-    const hasTime = typeof m.ScheduledStartDateTime === 'number' && isFinite(m.ScheduledStartDateTime);
-    const hasCourt = !!m.Court?.Name;
-    const showMeta = hasTime || hasCourt;
-    const timeStr = hasTime
-      ? venueTimeZone
-        ? formatDualTime(
-            m.ScheduledStartDateTime!,
-            venueTimeZone,
-            { hour: 'numeric', minute: '2-digit', hour12: true },
-            tzMode,
-          )
-        : formatTime(m.ScheduledStartDateTime!, displayTz)
-      : '';
-    const dateStr = hasTime
-      ? venueTimeZone
-        ? formatDualDate(m.ScheduledStartDateTime!, venueTimeZone, tzMode)
-        : formatDate(m.ScheduledStartDateTime!, displayTz)
-      : '';
+    const meta = formatBracketMatchMeta(m, venueTimeZone, tzMode, displayTz);
+    const showMeta = meta.hasTime || meta.hasCourt;
 
     return (
       <View key={`${item.rootIndex}-${item.round}-${item.position}-${m.MatchId || ''}-${idx ?? ''}`} style={styles.matchCard}>
@@ -306,14 +286,14 @@ export function BracketScreen({ event, division, myTeamId, onBack, initialPlayId
 
         {showMeta && (
           <View style={styles.matchMetaRow}>
-            {hasTime && (
+            {meta.hasTime && (
               <Text style={styles.matchMetaText} numberOfLines={1}>
-                {dateStr}  {timeStr}
+                {meta.dateStr}  {meta.timeStr}
               </Text>
             )}
-            {hasCourt && (
+            {meta.hasCourt && (
               <View style={styles.matchCourtBadge}>
-                <Text style={styles.matchCourtBadgeText}>{m.Court!.Name}</Text>
+                <Text style={styles.matchCourtBadgeText}>{meta.courtName}</Text>
               </View>
             )}
           </View>

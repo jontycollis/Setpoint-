@@ -14,7 +14,7 @@ import { getTeamFutureSchedule, getPlayDetail, getPoolByPlayId } from '../api/ae
 import type { TeamFutureScheduleRow, BracketNode, PoolTeam } from '../api/aesClient';
 import { Card } from './Card';
 import { PoolStandings } from './PoolStandings';
-import { formatTime, formatDate, formatDualTime, formatDualDate } from '../utils/dates';
+import { formatTime, formatDate, formatDualTime, formatDualDate, parseScheduleTime } from '../utils/dates';
 import type { TzDisplayMode } from '../utils/tzDisplayPreference';
 
 interface Props {
@@ -54,7 +54,9 @@ interface NextRoundInfo {
   potentialOpponentText: string; // e.g. "Winner of QF2" or actual team name
   potentialOpponentId?: number;
   potentialOpponentName?: string;
-  scheduledStartDateTime?: number;
+  // ISO string — AES gives us the bracket-match time the same way as
+  // `TeamScheduleMatch.ScheduledStartDateTime`. Parsed at render time.
+  scheduledStartDateTime?: string;
   courtName?: string;
   /** 'win' = if team wins current match, 'loss' = if team loses */
   outcome: 'win' | 'loss';
@@ -290,21 +292,21 @@ export function NextDayScenarios({
 }: Props) {
   // Render scheduled match times with dual-tz support when the parent has
   // wired the new props; otherwise fall back to the single-string helpers.
-  // Inputs can be either an epoch ms (from `BracketMatch`) or an ISO
-  // string (from `TeamFutureScheduleRow`) — `formatDualTime` needs ms so
-  // we parse strings up front; the fallback `formatTime`/`formatDate`
-  // accept both via their own `Date.parse` paths.
-  const renderTime = (raw: number | string) => {
-    const ms = typeof raw === 'number' ? raw : Date.parse(raw);
+  // Inputs are ISO strings (from `BracketMatch` and `TeamFutureScheduleRow`).
+  // `parseScheduleTime` honours `venueTz` for non-tz-suffixed AES strings.
+  const renderTime = (raw: string) => {
+    const ms = parseScheduleTime(raw, venueTz);
+    if (ms == null) return '';
     return venueTz && tzMode
       ? formatDualTime(ms, venueTz, { hour: 'numeric', minute: '2-digit', hour12: true }, tzMode)
-      : formatTime(raw, displayTz);
+      : formatTime(ms, displayTz);
   };
-  const renderDate = (raw: number | string) => {
-    const ms = typeof raw === 'number' ? raw : Date.parse(raw);
+  const renderDate = (raw: string) => {
+    const ms = parseScheduleTime(raw, venueTz);
+    if (ms == null) return '';
     return venueTz && tzMode
       ? formatDualDate(ms, venueTz, tzMode)
-      : formatDate(raw, displayTz);
+      : formatDate(ms, displayTz);
   };
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
