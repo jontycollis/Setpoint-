@@ -453,7 +453,13 @@ export interface BracketMatch {
   FirstTeamWon: boolean;
   SecondTeamWon: boolean;
   Sets: BracketSet[];
-  ScheduledStartDateTime?: number;
+  // ISO datetime string — AES serialises bracket match times the same way
+  // it does for every other match endpoint (`TeamScheduleMatch`,
+  // `AESMatch`, etc.). Until v2026-05 this was typed `number`, which
+  // matched no real response and silently disabled the bracket-cell time
+  // row because `typeof str === 'number'` is false. Parse via
+  // `parseScheduleTime(str, venueTz)` to honour venue wall-time.
+  ScheduledStartDateTime?: string;
   Court?: { Name: string; VideoLink?: string } | null;
 }
 
