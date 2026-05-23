@@ -329,6 +329,32 @@ export function getActiveTournaments(
     .sort((a, b) => (a.dateMs ?? 0) - (b.dateMs ?? 0));
 }
 
+/**
+ * Friendly badge text for the Current Tournament tile and equivalent
+ * active-tournament chips. Returns:
+ *   • "Currently playing"   when start is in the past (still inside the
+ *                            in-progress grace window)
+ *   • "Starts today"        when start is later today
+ *   • "Starts tomorrow"     when start is the next calendar day
+ *   • "Starts in N days"    otherwise
+ *   • "Active"              when no dateMs is known
+ *
+ * The countdown rounds to the nearest day so a tournament 36 hours out
+ * reads "Starts in 2 days" rather than "Starts in 1.5 days".
+ */
+export function currentTournamentBadgeLabel(
+  dateMs: number | undefined,
+  nowMs: number = Date.now()
+): string {
+  if (dateMs == null) return 'Active';
+  const delta = dateMs - nowMs;
+  if (delta <= 0) return 'Currently playing';
+  const days = Math.round(delta / DAY_MS);
+  if (days === 0) return 'Starts today';
+  if (days === 1) return 'Starts tomorrow';
+  return `Starts in ${days} days`;
+}
+
 // ── Source-specific adapters ──────────────────────────────────────────────
 
 function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEntry {
