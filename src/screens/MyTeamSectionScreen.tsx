@@ -1,7 +1,10 @@
 // ── MyTeamSectionScreen ───────────────────────────────────────────────────
 // "My Team(s)" landing — a team-picker. Each followed team gets its own
-// LauncherTile; tapping one drills into SingleTeamSectionScreen scoped to
-// that team. A trailing "Add team" tile routes to the add-team chooser.
+// tile rendered as a TeamAvatar (auto-generated initials + hashed color)
+// or, when the user has picked one, their own image. Tapping a tile
+// drills into SingleTeamSectionScreen scoped to that team; long-pressing
+// opens the "change image" action sheet. A trailing "Add team" tile
+// routes to the add-team chooser.
 //
 // Below the tile grid we keep the legacy MyHome content (Live Now,
 // recently viewed, watching list, career card) so the user still sees
@@ -10,6 +13,8 @@
 
 import React, { useMemo } from 'react';
 import {
+  Alert,
+  Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -17,13 +22,29 @@ import {
 } from 'react-native';
 import { LauncherTile } from '../components/LauncherTile';
 import { SectionHeader } from '../components/SectionHeader';
+import { TeamAvatar } from '../components/TeamAvatar';
 import { MyHomeScreen } from './MyHomeScreen';
-import { useTheme, spacing, fontSize } from '../utils/theme';
+import {
+  useTheme,
+  spacing,
+  fontSize,
+  borderRadius,
+} from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import type { UserProfile, TeamProfile } from '../types/profile';
 import type { Match } from '../types/match';
 import type { RecentItem } from '../utils/recentlyViewed';
 import type { AutoDiscoverProgress } from '../utils/teamAutoDiscover';
+import {
+  clearOverride,
+  setOverride,
+  useTeamAvatarOverrides,
+} from '../utils/teamAvatarStore';
+import {
+  isImagePickerAvailable,
+  pickFromLibrary,
+  takePhoto,
+} from '../utils/imagePickerModule';
 
 interface Props {
   profile: UserProfile;
@@ -86,6 +107,8 @@ export function MyTeamSectionScreen({
   const wide = width >= 720 || width > height;
   const numColumns = wide ? 3 : 2;
 
+  const overrides = useTeamAvatarOverrides();
+
   // 'me' teams render first, then 'watching'. Both sort newest-first inside
   // their bucket so a freshly-added team surfaces at the top of the grid.
   const teamsSorted = useMemo(() => {
@@ -108,6 +131,10 @@ export function MyTeamSectionScreen({
   for (let i = 0; i < tiles.length; i += numColumns) {
     rows.push(tiles.slice(i, i + numColumns));
   }
+
+  const handleEditAvatar = (team: TeamProfile) => {
+    showAvatarActionSheet(team, overrides[team.id]?.uri != null);
+  };
 
   return (
     <View style={styles.container}>
@@ -140,13 +167,13 @@ export function MyTeamSectionScreen({
                   );
                 }
                 return (
-                  <LauncherTile
+                  <TeamTile
                     key={t.team.id}
-                    glyph={teamGlyph(t.team)}
-                    title={t.team.label}
-                    hint={teamSubtitle(t.team)}
+                    team={t.team}
+                    customImageUri={overrides[t.team.id]?.uri}
                     onPress={() => onOpenTeamSection(t.team)}
-                    testID={`myteams-tile-${t.team.id}`}
+                    onLongPress={() => handleEditAvatar(t.team)}
+                    colors={colors}
                   />
                 );
               })}
@@ -194,11 +221,134 @@ export function MyTeamSectionScreen({
   );
 }
 
-// Glyph hint per team: differentiate 'me' from 'watching' so the picker
-// reads at a glance which teams roll up into Career.
-function teamGlyph(team: TeamProfile): string {
-  if (team.kind === 'watching') return '👀';
-  return '🏐';
+// ── TeamTile ──────────────────────────────────────────────────────────────
+// Tile that renders the team's avatar (or uploaded image) above the label.
+// Same outer affordance as LauncherTile so the picker grid stays visually
+// consistent with the "Add team" tile sitting alongside it. Tap drills
+// into the team section; long-press opens the change-image action sheet.
+
+interface TeamTileProps {
+  team: TeamProfile;
+  customImageUri?: string;
+  onPress: () => void;
+  onLongPress: () => void;
+  colors: ThemeColors;
+}
+
+function TeamTile({
+  team,
+  customImageUri,
+  onPress,
+  onLongPress,
+  colors,
+}: TeamTileProps) {
+  const styles = useMemo(() => makeTileStyles(colors), [colors]);
+  return (
+    <Pressable
+      onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={400}
+      style={({ pressed }) => [
+        styles.tile,
+        pressed && styles.tilePressed,
+      ]}
+      accessibilityRole="button"
+      accessibilityLabel={team.label}
+      accessibilityHint="Long-press to change image"
+      testID={`myteams-tile-${team.id}`}
+    >
+      <TeamAvatar
+        teamProfile={team}
+        customImageUri={customImageUri}
+        size={56}
+        style={styles.avatar}
+      />
+      <Text style={styles.title} numberOfLines={2}>
+        {team.label}
+      </Text>
+      {(() => {
+        const sub = teamSubtitle(team);
+        return sub ? (
+          <Text style={styles.hint} numberOfLines={2}>
+            {sub}
+          </Text>
+        ) : null;
+      })()}
+      {team.kind === 'watching' ? (
+        <Text style={styles.watchingBadge}>Watching</Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
+// ── Action sheet for the "change image" affordance ────────────────────────
+//
+// Uses RN's Alert with up to four buttons. iOS shows them all; Android's
+// material dialog renders the first three (positive/neutral/negative
+// slots) — when the camera button gets clipped, the user still has
+// library + reset reachable and can capture-then-pick via the library
+// flow. If expo-image-picker isn't compiled into the APK at all we just
+// show a Reset / Cancel sheet so the user can still revert to the
+// auto-generated avatar.
+async function showAvatarActionSheet(
+  team: TeamProfile,
+  hasOverride: boolean
+): Promise<void> {
+  const pickerOn = isImagePickerAvailable();
+
+  const buttons: Array<{
+    text: string;
+    onPress?: () => void;
+    style?: 'default' | 'cancel' | 'destructive';
+  }> = [];
+
+  if (pickerOn) {
+    buttons.push({
+      text: 'Choose photo',
+      onPress: async () => {
+        const result = await pickFromLibrary();
+        if (result) await setOverride(team.id, result.uri);
+      },
+    });
+    buttons.push({
+      text: 'Take photo',
+      onPress: async () => {
+        const result = await takePhoto();
+        if (result) await setOverride(team.id, result.uri);
+      },
+    });
+  }
+
+  if (hasOverride) {
+    buttons.push({
+      text: 'Reset to auto',
+      style: 'destructive',
+      onPress: () => {
+        void clearOverride(team.id);
+      },
+    });
+  }
+
+  buttons.push({ text: 'Cancel', style: 'cancel' });
+
+  if (!pickerOn && !hasOverride) {
+    // Nothing actionable — let the user know rather than showing a sheet
+    // that only contains Cancel.
+    Alert.alert(
+      team.label,
+      'Custom team images are available in the next app version.'
+    );
+    return;
+  }
+
+  Alert.alert(
+    team.label,
+    pickerOn
+      ? 'Replace the auto-generated icon for this team.'
+      : 'Reset this team to the auto-generated icon.',
+    buttons,
+    { cancelable: true }
+  );
 }
 
 // Short identifier shown under the team name in the tile. Falls back from
@@ -239,6 +389,55 @@ function makeStyles(colors: ThemeColors) {
     },
     embeddedHome: {
       flex: 1,
+    },
+  });
+}
+
+function makeTileStyles(colors: ThemeColors) {
+  return StyleSheet.create({
+    tile: {
+      flex: 1,
+      minHeight: 128,
+      backgroundColor: colors.surface,
+      borderRadius: borderRadius.lg,
+      borderWidth: 1,
+      borderColor: colors.border,
+      paddingVertical: spacing.lg,
+      paddingHorizontal: spacing.md,
+      alignItems: 'center',
+      justifyContent: 'center',
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.08,
+      shadowRadius: 6,
+      elevation: 2,
+    },
+    tilePressed: {
+      backgroundColor: colors.surfaceElevated,
+      opacity: 0.85,
+      transform: [{ scale: 0.98 }],
+    },
+    avatar: {
+      marginBottom: spacing.sm,
+    },
+    title: {
+      fontSize: fontSize.lg,
+      fontWeight: '700',
+      color: colors.text,
+      textAlign: 'center',
+    },
+    hint: {
+      fontSize: fontSize.xs,
+      color: colors.textSecondary,
+      textAlign: 'center',
+      marginTop: spacing.xs,
+    },
+    watchingBadge: {
+      fontSize: fontSize.xs,
+      color: colors.textLight,
+      marginTop: spacing.xs,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
     },
   });
 }
