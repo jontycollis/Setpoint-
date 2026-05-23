@@ -8,6 +8,7 @@ import {
   Image,
   Linking,
   ScrollView,
+  NativeModules,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { WebViewMessageEvent } from 'react-native-webview';
@@ -15,6 +16,32 @@ import { useTheme, spacing, fontSize, borderRadius } from '../utils/theme';
 import type { ThemeColors } from '../utils/theme';
 import { getBestVenueMapUrl } from '../api/venueMapDiscovery';
 import { isPdfUrl } from '../utils/webViewUrls';
+
+// --- Native PDF viewer (react-native-pdf) ---------------------------
+// We prefer the native PDF viewer over the WebView+PDF.js pipeline: it
+// renders directly without a CORS-defeating base64 round-trip, ships
+// natively with pinch-to-zoom, and avoids the giant catalog of failure
+// modes the WebView path accumulated.
+//
+// However, OTA updates ship JS bundles to OLDER APKs that don't have the
+// native module linked. To survive that, we resolve the component at
+// module-load time and ALSO check `NativeModules.PdfManager` is present
+// — `require('react-native-pdf')` returns JS code regardless, but the
+// native side is only present after a fresh APK build. If either check
+// fails, we fall back to the legacy WebView+PDF.js path so OTA users on
+// the previous APK don't crash.
+type RNPdfComponentType =
+  | typeof import('react-native-pdf').default
+  | null;
+let RNPdfComponent: RNPdfComponentType = null;
+try {
+  const mod = require('react-native-pdf');
+  if (NativeModules?.PdfManager) {
+    RNPdfComponent = mod?.default ?? null;
+  }
+} catch {
+  RNPdfComponent = null;
+}
 
 /**
  * Bundled venue map assets — keyed by the identifier after "bundled:" prefix.
@@ -451,6 +478,23 @@ export function VenueMapScreen({
   // escape hatch.
   const remoteIsPdf = !!remoteMapUrl && isPdfUrl(remoteMapUrl);
 
+  // If react-native-pdf's native module is linked, we render PDFs with
+  // it instead of the WebView+PDF.js pipeline. The WebView branch stays
+  // intact below as the OTA-fallback for older APKs that ship a new JS
+  // bundle but don't yet have the native module.
+  const useNativePdf = remoteIsPdf && !!RNPdfComponent;
+
+  // Native PDF render state. The native viewer handles its own download
+  // (we just pass URL + headers), so we don't need a base64 fetch step.
+  const [nativePdfReady, setNativePdfReady] = useState(false);
+  const [nativePdfError, setNativePdfError] = useState<string | null>(null);
+  useEffect(() => {
+    // Reset state when the URL changes — the new <Pdf> instance starts
+    // fresh and we want the loading overlay to show again.
+    setNativePdfReady(false);
+    setNativePdfError(null);
+  }, [remoteMapUrl, useNativePdf]);
+
   // --- PDF download + base64 conversion ---
   // PDF.js inside the WebView can't cross-origin-fetch volleyball.ca
   // PDFs (no CORS header), so we download the bytes here in JS — RN's
@@ -465,6 +509,9 @@ export function VenueMapScreen({
     setPdfFetchError(null);
     setPdfFetching(false);
     if (!remoteMapUrl || !isPdfUrl(remoteMapUrl)) return;
+    // Skip the base64 download entirely when the native viewer is
+    // available — react-native-pdf handles the download itself.
+    if (useNativePdf) return;
 
     // Reset the WebView's loading state so the spinner shows during
     // both the RN-side download and the WebView's own onLoad cycle.
@@ -511,11 +558,15 @@ export function VenueMapScreen({
     return () => {
       cancelled = true;
     };
-  }, [remoteMapUrl]);
+  }, [remoteMapUrl, useNativePdf]);
 
-  const pdfReady = remoteIsPdf && !!pdfBase64;
-  const pdfDownloading = remoteIsPdf && pdfFetching && !pdfBase64;
-  const pdfFetchFailed = remoteIsPdf && !!pdfFetchError && !pdfBase64;
+  // PDF readiness flags only apply to the WebView+PDF.js fallback path —
+  // the native viewer tracks its own state in `nativePdfReady` / `nativePdfError`.
+  const pdfReady = remoteIsPdf && !useNativePdf && !!pdfBase64;
+  const pdfDownloading =
+    remoteIsPdf && !useNativePdf && pdfFetching && !pdfBase64;
+  const pdfFetchFailed =
+    remoteIsPdf && !useNativePdf && !!pdfFetchError && !pdfBase64;
 
   // --- WebView PDF render state machine -----------------------------
   // The scaffold HTML posts messages back at each pipeline step:
@@ -598,11 +649,17 @@ export function VenueMapScreen({
   }, []);
 
   const pdfWebViewError =
-    pdfWebViewState.kind === 'error' ? pdfWebViewState : null;
-  const pdfWebViewRendered = pdfWebViewState.kind === 'rendered';
+    !useNativePdf && pdfWebViewState.kind === 'error' ? pdfWebViewState : null;
+  const pdfWebViewRendered =
+    !useNativePdf && pdfWebViewState.kind === 'rendered';
   const pdfWebViewRendering =
-    remoteIsPdf && pdfReady && !pdfWebViewRendered && !pdfWebViewError;
-  const pdfFailed = pdfFetchFailed || !!pdfWebViewError;
+    remoteIsPdf &&
+    !useNativePdf &&
+    pdfReady &&
+    !pdfWebViewRendered &&
+    !pdfWebViewError;
+  const nativePdfLoading = useNativePdf && !nativePdfReady && !nativePdfError;
+  const pdfFailed = pdfFetchFailed || !!pdfWebViewError || !!nativePdfError;
 
   // ---- Diagnostic log (dev only) ----------------------------------
   // Surfaces which URL ended up driving the WebView and which rendering
@@ -615,7 +672,9 @@ export function VenueMapScreen({
       : bundledAsset
       ? 'bundled-image'
       : remoteMapUrl && isPdfUrl(remoteMapUrl)
-      ? 'webview-pdf'
+      ? useNativePdf
+        ? 'native-pdf'
+        : 'webview-pdf'
       : remoteMapUrl
       ? 'webview-image'
       : 'unknown';
@@ -634,6 +693,9 @@ export function VenueMapScreen({
       finalRemoteUrl: remoteMapUrl,
       fileType,
       branch,
+      useNativePdf,
+      nativePdfReady,
+      nativePdfError,
       pdfDownloading,
       pdfReady,
       pdfFailed,
@@ -649,6 +711,9 @@ export function VenueMapScreen({
     hasAnyMap,
     bundledAsset,
     hasBundledMap,
+    useNativePdf,
+    nativePdfReady,
+    nativePdfError,
     pdfDownloading,
     pdfReady,
     pdfFailed,
@@ -699,7 +764,8 @@ export function VenueMapScreen({
         {(loading && hasAnyMap && !pdfFailed && !remoteIsPdf) ||
         stillSearching ||
         pdfDownloading ||
-        pdfWebViewRendering ? (
+        pdfWebViewRendering ||
+        nativePdfLoading ? (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={colors.primary} />
             <Text style={styles.loadingText}>
@@ -707,6 +773,8 @@ export function VenueMapScreen({
                 ? 'Searching for venue map...'
                 : pdfDownloading
                 ? 'Downloading PDF...'
+                : nativePdfLoading
+                ? 'Loading PDF...'
                 : pdfWebViewRendering &&
                   pdfWebViewState.kind === 'library-loaded'
                 ? 'Rendering PDF...'
@@ -720,7 +788,9 @@ export function VenueMapScreen({
         {error || pdfFailed ? (
           <View style={styles.errorContainer}>
             <Text style={styles.errorText}>
-              {pdfWebViewError
+              {nativePdfError
+                ? `Couldn't load the venue map PDF (${nativePdfError}).\nURL: ${remoteMapUrl ? truncateUrlForDisplay(remoteMapUrl) : '(unknown)'}\nTap below to open it in your browser.`
+                : pdfWebViewError
                 ? `PDF viewer error (${pdfWebViewError.code}): ${pdfWebViewError.detail}\nURL: ${remoteMapUrl ? truncateUrlForDisplay(remoteMapUrl) : '(unknown)'}\nTap below to open it in your browser.`
                 : pdfFetchFailed
                 ? `Couldn't load the venue map PDF (error: ${pdfFetchError ?? 'E_UNKNOWN'}).\nURL: ${remoteMapUrl ? truncateUrlForDisplay(remoteMapUrl) : '(unknown)'}\nTap below to open it in your browser.`
@@ -775,6 +845,35 @@ export function VenueMapScreen({
               </TouchableOpacity>
             )}
           </View>
+        ) : useNativePdf && remoteMapUrl && RNPdfComponent ? (
+          /* PDF — native viewer (react-native-pdf). Hands the URL +
+             browser-spoofed headers to the native side, which downloads
+             and renders without the WebView+PDF.js detour and its long
+             list of failure modes. The legacy WebView path below is
+             kept intact as the OTA-on-old-APK fallback. */
+          <RNPdfComponent
+            key={remoteMapUrl}
+            source={{ uri: remoteMapUrl, headers: VENUE_MAP_REQUEST_HEADERS }}
+            style={styles.nativePdf}
+            trustAllCerts={false}
+            enablePaging={false}
+            spacing={8}
+            onLoadComplete={(numberOfPages: number) => {
+              if (__DEV__)
+                console.log('[venue-map] native pdf rendered', numberOfPages);
+              setNativePdfReady(true);
+            }}
+            onError={(err: unknown) => {
+              const msg =
+                err instanceof Error
+                  ? err.message
+                  : typeof err === 'string'
+                  ? err
+                  : 'E_NATIVE_PDF';
+              if (__DEV__) console.log('[venue-map] native pdf error', msg);
+              setNativePdfError(msg);
+            }}
+          />
         ) : remoteIsPdf && pdfReady && pdfBase64 ? (
           /* PDF — load a tiny scaffold HTML, then deliver the PDF bytes
              via `injectJavaScript` (postMessage flow). Embedding ~3.5 MB
@@ -976,6 +1075,11 @@ function makeStyles(colors: ThemeColors) {
   },
   webview: {
     flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  nativePdf: {
+    flex: 1,
+    width: '100%',
     backgroundColor: '#f5f5f5',
   },
   loadingOverlay: {
