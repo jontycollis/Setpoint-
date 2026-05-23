@@ -27,12 +27,17 @@ export interface HelpSection {
 // updating every screen that targets them.
 export const HELP_SECTION_IDS = {
   GETTING_STARTED: 'getting-started',
+  HOME_LAUNCHER: 'home-launcher',
+  MY_TEAMS_SECTION: 'my-teams-section',
+  SINGLE_TEAM_SECTION: 'single-team-section',
   MY_HOME: 'my-home',
   TEAM_DASHBOARD: 'team-dashboard',
   SCOREBOARD: 'scoreboard',
   SCORE_MATCH: 'score-match',
   ANALYTICS: 'analytics',
   SEASON_HISTORY: 'season-history',
+  SIDELINE_IMPORT: 'sideline-import',
+  VENUE_MAP: 'venue-map',
   STANDINGS_BRACKETS: 'standings-brackets',
   ADD_TOURNAMENTS: 'add-tournaments',
   CONNECTION: 'connection',
@@ -52,84 +57,214 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'Bior (BIR — Irish Gaelic for sharp point / spike) is a companion app for volleyball families and coaches. It pulls the schedules, standings, and brackets from AES and Timu, lets you score matches yourself, and rolls up everything you do into a single per-team Season History and analytics dashboard.',
+          'Bior (BIR — Irish Gaelic for sharp point / spike) is a companion app for volleyball families and coaches. It pulls schedules, standings, and brackets from AES and Timu, lets you score matches yourself, and rolls everything up into a single per-team Season History and analytics dashboard.',
       },
       { type: 'h3', text: 'First launch' },
       {
         type: 'li',
         text:
-          'Tap “Add team” to set yourself up. Pick AES if your team plays AES-managed events; Timu if it plays Ontario tour stops. You can add both later — the app handles mixed seasons natively.',
+          'You land on Home — a tile grid. Tap the My Team(s) tile and then "Add team" to set yourself up. Pick AES if your team plays AES-managed events; Timu if it plays Ontario tour stops. You can add both later — the app handles mixed seasons natively.',
       },
       {
         type: 'li',
         text:
-          'You can also tap “Browse tournaments” first if you just want to look around without committing a team. Add a team later from the hamburger menu.',
+          'You can also tap the Browse tile first if you just want to look around without committing a team. Add a team later from My Team(s) or the hamburger menu.',
       },
       { type: 'h3', text: 'Three things you should try in your first session' },
       {
         type: 'li',
         text:
-          'Open My Home — your dashboard. Your tracked teams, next match, and the upcoming-tournaments list all live here.',
+          'Open My Team(s) → your team → Analytics. The per-player workbook is the most-loved screen for coaches and stat-watching parents.',
       },
       {
         type: 'li',
         text:
-          'Open your Team Dashboard. It is the most-used screen in the app: live next-match countdown, recent results, division standings, pool play, and quick links into deeper views.',
+          'Open the Team Dashboard from My Team(s) → Tournaments. It is the most-used screen during a tournament weekend: live next-match countdown, recent results, division standings, pool play, and quick links into deeper views.',
       },
       {
         type: 'li',
         text:
-          'Open the Scoreboard. Even if you don’t intend to score officially, the hold-up flipboard works as a referee’s scoreboard during a friendly or warm-up.',
+          'Open the Scoreboard tile on Home. Even if you don’t intend to score officially, the hold-up flipboard works as a referee’s scoreboard during a friendly or warm-up.',
       },
       {
         type: 'tip',
         text:
-          'Every screen has a “?” button in the top-right that jumps to the relevant section of this help guide.',
+          'Every screen has a "?" button in the top-right that jumps to the relevant section of this help guide.',
+      },
+    ],
+  },
+  {
+    id: HELP_SECTION_IDS.HOME_LAUNCHER,
+    title: 'Home (tile launcher)',
+    summary: 'The tile grid you land on every launch.',
+    blocks: [
+      {
+        type: 'p',
+        text:
+          'Home is the app’s landing pad. It is a grid of tiles — one per major area of the app. Tap a tile to enter that section. Phones show two columns; tablets and landscape phones show three.',
+      },
+      { type: 'h3', text: 'The tiles' },
+      {
+        type: 'li',
+        text:
+          'Scoreboard — opens the hold-up flipboard and the rest of the in-app scoring tools.',
+      },
+      {
+        type: 'li',
+        text:
+          'My Team(s) — your followed teams. Tap to drill into one team’s Analytics, Season History, Roster, and tournaments.',
+      },
+      {
+        type: 'li',
+        text:
+          'Browse — search and discover tournaments and teams across AES and Timu without having to follow them first.',
+      },
+      {
+        type: 'li',
+        text:
+          'Venue maps — jump straight to court / floor layouts. Bundled maps for 2026 Nationals are included; live tournaments link out to whichever PDF the host has published.',
+      },
+      {
+        type: 'li',
+        text:
+          'MRS — the OVA Member Registration System, embedded as a WebView so you can check your affiliation, registration, and insurance without leaving the app.',
+      },
+      {
+        type: 'li',
+        text:
+          'CAC Locker — the Coaches Association of Canada locker for your NCCP certifications, same embed pattern as MRS.',
+      },
+      {
+        type: 'li',
+        text:
+          'OVA Rankings — live Girls and Boys rankings across every age and division.',
+      },
+      {
+        type: 'li',
+        text:
+          'Help — this guide. You can also reach it from the "?" button on any screen.',
+      },
+      {
+        type: 'tip',
+        text:
+          'The top bar stays put across every tile: search and active-team pill on the left, hamburger on the right. So you never lose your way back.',
+      },
+    ],
+  },
+  {
+    id: HELP_SECTION_IDS.MY_TEAMS_SECTION,
+    title: 'My Team(s) section',
+    summary: 'One tile per team you follow. Tap to drill in.',
+    blocks: [
+      {
+        type: 'p',
+        text:
+          'My Team(s) is the home of every team you follow. Each team gets its own tile, sorted by kind — teams you’re on ("me") first, then teams you’re watching, newest first within each bucket. Tap a tile to enter that team’s section. A trailing "+ Add team" tile is always at the end.',
+      },
+      { type: 'h3', text: 'Team tiles' },
+      {
+        type: 'li',
+        text:
+          'Each tile shows a glyph (🏐 for teams you’re on, 👀 for teams you’re watching), the team label, and a one-line subtitle with age group · club · season when available.',
+      },
+      {
+        type: 'li',
+        text:
+          'Tap the tile to drill into that team’s section — Analytics, Season History, Tournaments, Roster, Sideline HD import, and Add AES / Add Timu event.',
+      },
+      { type: 'h3', text: 'Below the tiles' },
+      {
+        type: 'p',
+        text:
+          'Underneath the tile grid you’ll find the legacy My Home content: Live Now (any of your teams currently playing), recently-viewed teams, a watching list, and your career card. So you can still see "what’s live across all my teams" without having to pick one first.',
+      },
+      {
+        type: 'tip',
+        text:
+          'Add team also lives in the hamburger menu under MY TEAMS, alongside Manage rosters.',
+      },
+    ],
+  },
+  {
+    id: HELP_SECTION_IDS.SINGLE_TEAM_SECTION,
+    title: 'One team’s section',
+    summary: 'Per-team feature tiles: Analytics, History, Roster, etc.',
+    blocks: [
+      {
+        type: 'p',
+        text:
+          'After tapping a team in My Team(s), you land on that team’s section. A header at the top names the team and shows the same age · club · season subtitle from the tile. Below sits a tile grid scoped to that one team.',
+      },
+      { type: 'h3', text: 'The tiles' },
+      {
+        type: 'li',
+        text:
+          'Analytics — per-player workbook with split + metric chips and sortable columns. Pulls from AES, Timu, in-app scoring, and Sideline HD imports.',
+      },
+      {
+        type: 'li',
+        text:
+          'Season History — the team’s full timeline of tournaments across both AES and Timu, plus standalone scored matches and Sideline HD imports.',
+      },
+      {
+        type: 'li',
+        text:
+          'Tournaments — a list of upcoming events the team is in or could enter. Tap an event to drop straight onto the team’s pool in that event.',
+      },
+      {
+        type: 'li',
+        text:
+          'Roster — manage players, jersey numbers, and libero designation. Only enabled for teams you’re on; watching-team tiles dim this one out.',
+      },
+      {
+        type: 'li',
+        text:
+          'Import Sideline HD — pull in historical match data the team logged in Sideline HD. See the Sideline HD import help section for what’s available today.',
+      },
+      {
+        type: 'li',
+        text:
+          'Add AES event / Add Timu event — paste a tournament URL or pick from the AES/Timu directories to add an event the auto-discover missed.',
+      },
+      {
+        type: 'tip',
+        text:
+          'The active-team pill in the top bar updates the moment you enter a team’s section, so the rest of the app (Quick Score, hamburger Dashboard fast-path) follows the team you just opened.',
       },
     ],
   },
   {
     id: HELP_SECTION_IDS.MY_HOME,
-    title: 'My Home',
-    summary: 'Your dashboard: tracked teams, next match, upcoming events.',
+    title: 'My Home (legacy dashboard)',
+    summary: 'Live Now, recents, watching list, career card.',
     blocks: [
       {
         type: 'p',
         text:
-          'My Home is the app’s landing pad. It’s organized around YOU — your tracked teams up top, the next match across all of them, and a roll-up of upcoming tournaments your teams are entered in or could enter.',
+          'My Home is the legacy dashboard that used to be the app’s landing pad. It still exists — embedded inside My Team(s) and reachable from the hamburger’s MY TEAMS section — but Home (the tile launcher) is where you start now.',
       },
-      { type: 'h3', text: 'Tracked teams' },
+      { type: 'h3', text: 'Live Now' },
       {
         type: 'li',
         text:
-          'A coloured chip per team. Tap to open that team’s Dashboard. Long-press for actions — Manage roster, Remove, set as “Me” vs. “Watching”.',
+          'Surfaces any of your tracked teams that are currently playing, with the live score and a tap-to-watch link to the scoreboard.',
       },
+      { type: 'h3', text: 'Recently viewed' },
       {
         type: 'li',
         text:
-          'The active team — the one whose pill is highlighted — drives the Team Analytics tile, the Quick Score tile, and the hamburger’s context.',
+          'The last few teams, tournaments, or players you opened, in reverse-chronological order. Tap to jump back.',
       },
-      { type: 'h3', text: 'Next match card' },
+      { type: 'h3', text: 'Watching list & career card' },
       {
         type: 'li',
         text:
-          'Shows the very next scheduled match across all your tracked teams, with a live countdown and court number. Tap it to open the scoreboard pre-wired for that match.',
-      },
-      {
-        type: 'li',
-        text:
-          'Times default to the venue’s local zone. When your device is in a different zone, you’ll see both — venue time first, your local time in parentheses (e.g. “3:00 PM EDT (12:00 PM PDT)”). The toggle to switch between dual / venue-only / your-time-only lives on Team Dashboard and is remembered across launches.',
-      },
-      { type: 'h3', text: 'Upcoming tournaments' },
-      {
-        type: 'li',
-        text:
-          'Cards roll up tournaments your teams are entered in, plus suggestions based on division + region. Tap a card to open the tournament; if your team is in it, you land directly on your team’s pool.',
+          'Teams you marked as "watching" sit in a horizontal strip. The career card on the bottom rolls up your "me" teams’ career totals (matches, wins, set ratio).',
       },
       {
         type: 'tip',
         text:
-          'A magnifying-glass icon in the top-left of My Home opens Global Search — type any team name, club, athlete, or tournament to jump straight to it.',
+          'A magnifying-glass icon in the top-left opens Global Search — type any team, club, athlete, or tournament name to jump straight to it. The search icon is available from every screen, including Home.',
       },
     ],
   },
@@ -141,7 +276,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'The Team Dashboard is the busiest screen in the app and the one most users open first thing in the morning. It is laid out top-to-bottom in order of urgency: live status, next match, current pool / standings, recent results, season-long stats.',
+          'The Team Dashboard is the busiest screen in the app and the one most users open first thing in the morning during a tournament. It is laid out top-to-bottom in order of urgency: live status, next match, current pool / standings, recent results, season-long stats.',
       },
       { type: 'h3', text: 'Live status banner' },
       {
@@ -158,7 +293,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'li',
         text:
-          'Court number reads as “TBA” until the tournament posts a court assignment. The card refreshes automatically every minute.',
+          'Court number reads as "TBA" until the tournament posts a court assignment. The card refreshes automatically every minute.',
+      },
+      { type: 'h3', text: 'Day filter chips' },
+      {
+        type: 'p',
+        text:
+          'A row of day chips (Today / Tomorrow / Fri / Sat / …) sits above the match list, letting you focus on one day of the tournament. The chips are now data-driven from the actual schedule, so future-only views never show a stale "Yesterday" chip the way an earlier build did. If there’s a Tomorrow match it shows up as "Tomorrow"; if not, the chip is omitted entirely.',
       },
       { type: 'h3', text: 'Pool / standings strip' },
       {
@@ -188,7 +329,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'Tournament times default to the venue’s local time. When your device is in a different time zone, the next-match card and the schedule show both — venue time first, your local time in parentheses (e.g. “3:00 PM EDT (12:00 PM PDT)”). When the two zones match, you just see one time.',
+          'Tournament times default to the venue’s local time. When your device is in a different time zone, the next-match card and the schedule show both — venue time first, your local time in parentheses (e.g. "3:00 PM EDT (12:00 PM PDT)"). When the two zones match, you just see one time.',
       },
       {
         type: 'li',
@@ -215,7 +356,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'The Scoreboard is the hold-up flipboard you’d see on a referee’s stand. It is meant for casual / unofficial scoring — keeping track of a friendly, an exhibition, or just helping a player parent follow along. For full sanctioned scoresheets, use “Score a match” instead.',
+          'The Scoreboard is the hold-up flipboard you’d see on a referee’s stand. It is meant for casual / unofficial scoring — keeping track of a friendly, an exhibition, or just helping a player parent follow along. For full sanctioned scoresheets, use "Score a match" instead.',
       },
       { type: 'h3', text: 'Basic flow' },
       {
@@ -254,7 +395,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'Score a match is the full-fat scoring engine — rotations, libero tracking, substitutions, timeouts, sanctions, point-credit, and a proper boxscore at the end. Enable it via the hamburger → “Advanced Scoring” toggle. Off by default.',
+          'Score a match is the full-fat scoring engine — rotations, libero tracking, substitutions, timeouts, sanctions, point-credit, and a proper boxscore at the end. Enable it via the hamburger → "Advanced Scoring" toggle. Off by default.',
       },
       { type: 'h3', text: 'Before the match' },
       {
@@ -293,7 +434,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'When a match is complete, you can export a printable OVA-format scoresheet as PDF. The button (🖨 Export OVA scoresheet PDF) appears in three places: on the match-end banner inside the scoring screen, on the post-match save sheet, and as a “🖨 PDF” chip on each completed match in the Match List.',
+          'When a match is complete, you can export a printable OVA-format scoresheet as PDF. The button (🖨 Export OVA scoresheet PDF) appears in three places: on the match-end banner inside the scoring screen, on the post-match save sheet, and as a "🖨 PDF" chip on each completed match in the Match List.',
       },
       {
         type: 'li',
@@ -371,7 +512,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'tip',
         text:
-          'Use the “?” chip next to any column header to see its full definition without leaving the screen.',
+          'Use the "?" chip next to any column header to see its full definition without leaving the screen.',
       },
     ],
   },
@@ -401,7 +542,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'li',
         text:
-          'Two buttons sit alongside the upcoming-tournaments list. “Scan for Tournaments” re-runs the auto-search across AES and Timu for events your team could be in. “Manually Add a Tournament” lets you paste a URL for a tournament that auto-search didn’t catch.',
+          'Two buttons sit alongside the upcoming-tournaments list. "Scan for Tournaments" re-runs the auto-search across AES and Timu for events your team could be in. "Manually Add a Tournament" lets you paste a URL for a tournament that auto-search didn’t catch.',
       },
       { type: 'h3', text: 'Filtering' },
       {
@@ -413,6 +554,79 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: 'tip',
         text:
           'Pull-to-refresh re-fetches Timu and AES feeds and merges any newly-finalized matches.',
+      },
+    ],
+  },
+  {
+    id: HELP_SECTION_IDS.SIDELINE_IMPORT,
+    title: 'Import from Sideline HD',
+    summary: 'Pull in historical match data the team logged in Sideline HD.',
+    blocks: [
+      {
+        type: 'p',
+        text:
+          'If your team has been logging matches in Sideline HD, you can import that history into Bior and have it merged with your AES / Timu schedule on the same Analytics and Season History screens. The importer lives at My Team(s) → your team → Import Sideline HD.',
+      },
+      { type: 'h3', text: 'What works today' },
+      {
+        type: 'li',
+        text:
+          'Login. Tap the tile and the in-app Sideline HD login WebView opens. Sign in with your Sideline HD credentials. We never see your password — the WebView talks directly to sidelinehd.com, the same way Safari would.',
+      },
+      {
+        type: 'li',
+        text:
+          'Session storage. After you log in, the importer captures the session cookies and remembers them, so you don’t have to log in again every visit. A "Sign out" affordance is available if you want to clear them.',
+      },
+      { type: 'h3', text: 'What’s rolling out next' },
+      {
+        type: 'li',
+        text:
+          'Team picker — once you’re signed in, Bior will show the list of teams your Sideline HD account has access to, so you can pick which one to pull from. (Shipping in a follow-up session.)',
+      },
+      {
+        type: 'li',
+        text:
+          'Scrape + import — walk the selected team’s matches, parse rally data into the same Match shape the rest of the app uses, and confirm + dedupe before saving. (Same follow-up.)',
+      },
+      {
+        type: 'note',
+        text:
+          'The importer requires native cookie support that ships in the APK / IPA build, not OTA. If you see "Available in next app version" instead of the login WebView, update the app from the store and try again.',
+      },
+    ],
+  },
+  {
+    id: HELP_SECTION_IDS.VENUE_MAP,
+    title: 'Venue map',
+    summary: 'Find your court at the venue.',
+    blocks: [
+      {
+        type: 'p',
+        text:
+          'Venue Map shows the floor plan for the tournament you’re at. For bundled events (2026 Nationals: Edmonton + city events) the map ships inside the app and opens instantly. For other tournaments, Bior fetches whatever map the host has published — usually a PDF on volleyball.ca — and renders it in-app.',
+      },
+      { type: 'h3', text: 'Pinch to zoom' },
+      {
+        type: 'li',
+        text:
+          'Pinch and pan to zoom into your court. The viewer keeps the page sharp at high zoom levels so court numbers stay legible. Double-tap to snap back to the full page.',
+      },
+      {
+        type: 'li',
+        text:
+          'When the dashboard opens the map for a specific match, the court number you’re looking for is shown on a small "Find: Court N" banner above the map so you don’t have to memorise it while pinching around.',
+      },
+      { type: 'h3', text: 'If the map won’t load' },
+      {
+        type: 'p',
+        text:
+          'Some venues publish PDFs that don’t render cleanly inside the in-app viewer (older PDF versions, oversize files, hosting-side blocks). When that happens, an "Open PDF in browser" link is always available — both as the primary action on the error screen and as a small footer link under the viewer. The browser handoff opens the same PDF directly, where your phone’s built-in viewer can take over.',
+      },
+      {
+        type: 'tip',
+        text:
+          'No map published yet? You’ll see a "No Venue Map Available" placeholder with a link to the host’s competition page — most tournaments post a venue map about a week before play starts.',
       },
     ],
   },
@@ -458,7 +672,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'The Find or add tournaments screen is how you bring new tournaments into your team’s season. Both AES and Timu can be browsed by date or region.',
+          'The Find or add tournaments screen is how you bring new tournaments into your team’s season. Both AES and Timu can be browsed by date or region. You can also reach it from My Team(s) → your team → Tournaments.',
       },
       { type: 'h3', text: 'Searching' },
       {
@@ -470,7 +684,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'li',
         text:
-          'Tap a tournament to preview, then “Track this tournament” to add it. The roll-up in My Home and Season History updates immediately.',
+          'Tap a tournament to preview, then "Track this tournament" to add it. The roll-up in My Team(s) and Season History updates immediately.',
       },
       {
         type: 'tip',
@@ -487,7 +701,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'The Connection screens are entirely optional. They embed the OVA Member Registration System (MRS) and the Coaches Association of Canada (CAC) Locker so you can check your own affiliations, registrations, and certifications without leaving the app.',
+          'MRS and CAC Locker are entirely optional. They embed the OVA Member Registration System and the Coaches Association of Canada Locker so you can check your own affiliations, registrations, and certifications without leaving the app. Both have their own tile on Home.',
       },
       { type: 'h3', text: 'What it does' },
       {
@@ -509,7 +723,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'note',
         text:
-          'If you don’t coach or play officially, you can ignore both screens. They’re tucked into Connections & Settings in the hamburger.',
+          'If you don’t coach or play officially, you can ignore both tiles.',
       },
     ],
   },
@@ -526,7 +740,7 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'li',
         text:
-          'Tap any team in the rankings list to open their team page — recent results, current tournament, and a one-tap “Add to My Teams” affordance.',
+          'Tap any team in the rankings list to open their team page — recent results, current tournament, and a one-tap "Add to My Teams" affordance.',
       },
       {
         type: 'tip',
@@ -543,13 +757,13 @@ export const HELP_SECTIONS: HelpSection[] = [
       {
         type: 'p',
         text:
-          'Short version: your data stays on your device. The app contacts AES, Timu, OVA, and CAC to fetch tournament + ranking data. It does not send your data anywhere except anonymized crash reports.',
+          'Short version: your data stays on your device. The app contacts AES, Timu, OVA, CAC, and (if you sign in) Sideline HD to fetch tournament + ranking + match data. It does not send your data anywhere except anonymized crash reports.',
       },
       { type: 'h3', text: 'On-device storage' },
       {
         type: 'li',
         text:
-          'Your tracked teams, scored matches, roster, preferences, and a small storage snapshot (for the Restore-from-backup affordance) live in the app’s sandbox. They never leave your phone unless you explicitly share a screen.',
+          'Your tracked teams, scored matches, rosters, preferences, Sideline HD session cookies, and a small storage snapshot (for the Restore-from-backup affordance) live in the app’s sandbox. They never leave your phone unless you explicitly share a screen.',
       },
       { type: 'h3', text: 'Crash reports' },
       {
@@ -569,6 +783,18 @@ export const HELP_SECTIONS: HelpSection[] = [
     title: 'FAQ',
     summary: 'Common confusions and one-line answers.',
     blocks: [
+      { type: 'h3', text: 'Wait, wasn’t this app called Setpoint?' },
+      {
+        type: 'p',
+        text:
+          'Yes — it was renamed to Bior (BIR — Irish Gaelic for "sharp point" / "spike") in early 2026. Same app, new name and icon. All your data carries over without you having to do anything.',
+      },
+      { type: 'h3', text: 'Where did the old My Home screen go?' },
+      {
+        type: 'p',
+        text:
+          'It still exists. Home is now a tile launcher; the old My Home (Live Now, recents, watching list, career card) is embedded inside the My Team(s) section, below the per-team tile grid. You can also jump straight to it from the hamburger’s MY TEAMS section.',
+      },
       { type: 'h3', text: 'Why doesn’t my libero show match counts?' },
       {
         type: 'p',
@@ -593,11 +819,17 @@ export const HELP_SECTIONS: HelpSection[] = [
         text:
           'Times default to the venue’s local zone. When your device is in a different zone, you should see both — venue time first, your local time in parentheses. The dual / venue-only / your-time toggle lives on Team Dashboard, just under the next-match block. Notifications fire at the correct real-world moment regardless of which mode you pick.',
       },
+      { type: 'h3', text: 'The venue map won’t open / shows blank.' },
+      {
+        type: 'p',
+        text:
+          'Tap "Open PDF in browser" — it’s the primary action on the error screen and the small footer link under the viewer. That hands the same PDF off to your phone’s built-in viewer, which handles edge-case PDFs (older versions, big files) the in-app viewer can’t.',
+      },
       { type: 'h3', text: 'How do I get help on a specific screen?' },
       {
         type: 'p',
         text:
-          'Every screen has a “?” button in the top-right that opens this help guide deep-linked to the relevant section. Inside the help screen there is also a search bar at the top — type a keyword (“libero”, “PDF”, “time zone”) and the matching sections expand inline.',
+          'Every screen has a "?" button in the top-right that opens this help guide deep-linked to the relevant section. Inside the help screen there is also a search bar at the top — type a keyword ("libero", "PDF", "time zone") and the matching sections expand inline.',
       },
       { type: 'h3', text: 'Where is my team’s data after I delete the app?' },
       {
