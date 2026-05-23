@@ -51,6 +51,7 @@ import { MatchListScreen } from './src/screens/MatchListScreen';
 import { MatchSetupScreen } from './src/screens/MatchSetupScreen';
 import { TeamRosterScreen } from './src/screens/TeamRosterScreen';
 import { RosterSectionScreen } from './src/screens/RosterSectionScreen';
+import { TournamentsSectionScreen } from './src/screens/TournamentsSectionScreen';
 import { MatchScoringScreen } from './src/screens/MatchScoringScreen';
 import type { Match as ScoredMatch } from './src/types/match';
 import {
@@ -177,6 +178,7 @@ type Screen =
   | 'MyTeamSection'
   | 'SingleTeamSection'
   | 'RosterSection'
+  | 'TournamentsSection'
   | 'BrowseSection'
   | 'VenueMapSelector'
   | 'MyHome'
@@ -247,6 +249,7 @@ function tabForScreen(screen: Screen): TabKey | null {
   if (screen === 'MyTeamSection') return 'home';
   if (screen === 'SingleTeamSection') return 'home';
   if (screen === 'RosterSection') return 'home';
+  if (screen === 'TournamentsSection') return 'home';
   if (screen === 'BrowseSection') return 'browse';
   // Legacy fallbacks — still in the union but not normally entered.
   if (screen === 'MyHome') return 'home';
@@ -272,6 +275,7 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'MyTeamSection',
   'SingleTeamSection',
   'RosterSection',
+  'TournamentsSection',
   'BrowseSection',
   'VenueMapSelector',
   // No-team-scope screens
@@ -331,6 +335,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'MyTeamSection':
     case 'SingleTeamSection':
     case 'RosterSection':
+    case 'TournamentsSection':
     case 'BrowseSection':
     case 'VenueMapSelector':
     case 'MyHome':
@@ -2282,7 +2287,7 @@ function AppInner() {
             }}
             onOpenTournaments={() => {
               setScreenHistory((prev) => [...prev, screen]);
-              setScreen('AddTournaments');
+              setScreen('TournamentsSection');
             }}
             onOpenRoster={() => {
               setScreenHistory((prev) => [...prev, screen]);
@@ -2291,10 +2296,6 @@ function AppInner() {
             onOpenSidelineImport={() => {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('SidelineImport');
-            }}
-            onAddEvent={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('AddTournaments');
             }}
           />
         );
@@ -2807,6 +2808,30 @@ function AppInner() {
               if (team.kind !== 'me') return;
               setRosterReadOnly(false);
               handleOpenRosterEditor(team);
+            }}
+          />
+        );
+      }
+      case 'TournamentsSection': {
+        const team = singleTeamSectionTeamId
+          ? userProfile?.teams.find((t) => t.id === singleTeamSectionTeamId) ?? null
+          : null;
+        if (!team) {
+          goBack();
+          return null;
+        }
+        return (
+          <TournamentsSectionScreen
+            team={team}
+            onBack={goBack}
+            onOpenCurrentTournament={(entry) => {
+              // Same routing as a tap on a Season-History tournament card —
+              // resolves AES → TeamDashboard / Timu → TimuTeamDashboard.
+              handleOpenUnifiedEntry(entry);
+            }}
+            onOpenAddTournaments={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTournaments');
             }}
           />
         );
@@ -3467,6 +3492,7 @@ function AppContent({
     HomeLauncher: HELP_SECTION_IDS.HOME_LAUNCHER,
     MyTeamSection: HELP_SECTION_IDS.MY_TEAMS_SECTION,
     SingleTeamSection: HELP_SECTION_IDS.SINGLE_TEAM_SECTION,
+    TournamentsSection: HELP_SECTION_IDS.TOURNAMENTS_SECTION,
     MyHome: HELP_SECTION_IDS.MY_HOME,
     TeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,
     TimuTeamDashboard: HELP_SECTION_IDS.TEAM_DASHBOARD,

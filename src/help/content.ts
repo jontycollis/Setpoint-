@@ -30,6 +30,7 @@ export const HELP_SECTION_IDS = {
   HOME_LAUNCHER: 'home-launcher',
   MY_TEAMS_SECTION: 'my-teams-section',
   SINGLE_TEAM_SECTION: 'single-team-section',
+  TOURNAMENTS_SECTION: 'tournaments-section',
   MY_HOME: 'my-home',
   TEAM_DASHBOARD: 'team-dashboard',
   SCOREBOARD: 'scoreboard',
@@ -230,6 +231,33 @@ export const HELP_SECTIONS: HelpSection[] = [
         type: 'tip',
         text:
           'The active-team pill in the top bar updates the moment you enter a team’s section, so the rest of the app (Quick Score, hamburger Dashboard fast-path) follows the team you just opened.',
+      },
+    ],
+  },
+  {
+    id: HELP_SECTION_IDS.TOURNAMENTS_SECTION,
+    title: 'Tournaments (per team)',
+    summary: 'Current Tournament + Add Tournaments — fast access to today.',
+    blocks: [
+      {
+        type: 'p',
+        text:
+          'The Tournaments section sits inside one team’s page and has two tiles: Current Tournament and Add Tournaments. It replaces the older split where the Tournaments tile dropped you straight into the AES/Timu chooser.',
+      },
+      {
+        type: 'li',
+        text:
+          'Current Tournament — points at whichever tournament is in progress now or starting within the next 7 days. Tap to open that tournament’s dashboard (AES or Timu).',
+      },
+      {
+        type: 'li',
+        text:
+          'Add Tournaments — opens the AES + Timu chooser so you can paste a URL or pick a tournament that auto-discovery missed.',
+      },
+      {
+        type: 'tip',
+        text:
+          'When no tournament is active, tapping Current Tournament falls through to Add Tournaments — same destination, single forward path.',
       },
     ],
   },

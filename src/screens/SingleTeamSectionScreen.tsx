@@ -2,16 +2,14 @@
 // Per-team landing reached from the My Team(s) section's team-tile grid.
 // Renders the section header scoped to one TeamProfile, then the feature
 // sub-tile grid (Analytics, Season History, Tournaments, Roster, Sideline
-// import, Add event). Caller pre-scopes the team via
-// `handleSwitchActiveTeam(teamId)` before routing here so the existing
-// feature screens pick up the right team context.
+// import). Caller pre-scopes the team via `handleSwitchActiveTeam(teamId)`
+// before routing here so the existing feature screens pick up the right
+// team context.
 //
-// Roster fans out into View/Manage on RosterSectionScreen; the top-level
-// tile is enabled for every team (View works on watching teams too).
-//
-// "Add event" leads to the AddTournaments chooser, which itself handles
-// the AES vs Timu split — one tile pointing at a chooser is cleaner than
-// two tiles both leading there.
+// Roster fans out into View/Manage on RosterSectionScreen; Tournaments
+// fans out into Current Tournament + Add Tournaments on
+// TournamentsSectionScreen. The top-level tiles are enabled for every
+// team (read paths work on watching teams too).
 // ────────────────────────────────────────────────────────────────────────────
 
 import React, { useMemo } from 'react';
@@ -37,7 +35,6 @@ interface Props {
   onOpenTournaments: () => void;
   onOpenRoster: () => void;
   onOpenSidelineImport: () => void;
-  onAddEvent: () => void;
   onBack: () => void;
 }
 
@@ -48,7 +45,6 @@ export function SingleTeamSectionScreen({
   onOpenTournaments,
   onOpenRoster,
   onOpenSidelineImport,
-  onAddEvent,
   onBack,
 }: Props) {
   const { colors } = useTheme();
@@ -100,12 +96,6 @@ export function SingleTeamSectionScreen({
       glyph: '📥',
       title: 'Import Sideline HD',
       onPress: onOpenSidelineImport,
-    },
-    {
-      key: 'add-event',
-      glyph: '➕',
-      title: 'Add event',
-      onPress: onAddEvent,
     },
   ];
 

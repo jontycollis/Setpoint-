@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isActiveTournament,
   getActiveTournaments,
+  currentTournamentBadgeLabel,
   type UnifiedTournamentEntry,
 } from '../unifiedSeasonHistory';
 
@@ -88,5 +89,36 @@ describe('getActiveTournaments', () => {
   it('returns empty when nothing is active', () => {
     const list = [entry(NOW + 30 * DAY), entry(NOW - 30 * DAY)];
     expect(getActiveTournaments(list, NOW)).toEqual([]);
+  });
+});
+
+describe('currentTournamentBadgeLabel', () => {
+  it('labels in-progress tournaments "Currently playing"', () => {
+    expect(currentTournamentBadgeLabel(NOW - 1 * DAY, NOW)).toBe(
+      'Currently playing'
+    );
+  });
+
+  it('labels a tournament starting today "Starts today"', () => {
+    // A few hours from now still rounds to 0 days.
+    expect(currentTournamentBadgeLabel(NOW + 2 * 60 * 60 * 1000, NOW)).toBe(
+      'Starts today'
+    );
+  });
+
+  it('labels a tournament starting in ~24h "Starts tomorrow"', () => {
+    expect(currentTournamentBadgeLabel(NOW + 1 * DAY, NOW)).toBe(
+      'Starts tomorrow'
+    );
+  });
+
+  it('labels a tournament 3 days out "Starts in 3 days"', () => {
+    expect(currentTournamentBadgeLabel(NOW + 3 * DAY, NOW)).toBe(
+      'Starts in 3 days'
+    );
+  });
+
+  it('falls back to "Active" when no dateMs is known', () => {
+    expect(currentTournamentBadgeLabel(undefined, NOW)).toBe('Active');
   });
 });
