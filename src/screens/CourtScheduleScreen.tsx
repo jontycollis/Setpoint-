@@ -23,7 +23,7 @@ import type {
   FlatCourtMatch,
   MatchResult,
 } from '../api/aesClient';
-import { formatDate, formatTime, formatDualTime } from '../utils/dates';
+import { formatDate, formatMatchTime } from '../utils/dates';
 import { loadCourtStreams, CourtStreamMap } from '../utils/storage';
 import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { buildCourtList } from '../utils/courtChips';
@@ -72,12 +72,12 @@ export function CourtScheduleScreen({
   const [selectedCourt, setSelectedCourt] = useState<string>('all');
   const [tzMode] = useTzDisplayMode();
   const displayTz = effectiveTzForDisplay(tzMode, venueTimeZone);
-  // Wrapper for dual-tz time rendering at user-facing call sites.
-  // Falls back to single-string formatTime when no venue tz is known.
-  const renderMatchTime = (ms: number) =>
-    venueTimeZone
-      ? formatDualTime(ms, venueTimeZone, { hour: 'numeric', minute: '2-digit', hour12: true }, tzMode)
-      : formatTime(ms, displayTz);
+  // AES returns `ScheduledStartDateTime` as a tz-less ISO string meaning
+  // "wall time at the venue". `formatMatchTime` runs it through
+  // `parseScheduleTime(venueTz)` first so cross-tz viewers see the
+  // correct wall time, then honours the user's dual-tz preference.
+  const renderMatchTime = (raw: string) =>
+    formatMatchTime(raw, venueTimeZone, tzMode, displayTz);
   useEffect(() => {
     loadAesSeasonIndex().then((idx) => {
       const match = Object.values(idx).find((snap) => snap.eventKey === event.Key);

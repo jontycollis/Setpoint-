@@ -384,7 +384,14 @@ export function TeamDashboardScreen({
           // Skip days that fail
         }
       }
-      allMatches.sort((a, b) => a.ScheduledStartDateTime - b.ScheduledStartDateTime);
+      // `ScheduledStartDateTime` is a tz-less ISO string from AES; parse via
+      // `parseScheduleTime(venueTimeZone)` so the sort key is a real epoch
+      // anchored at venue wall time. The legacy `a - b` worked when the
+      // type lied and claimed ms; the real payload would just NaN out.
+      allMatches.sort((a, b) =>
+        (parseScheduleTime(a.ScheduledStartDateTime, venueTimeZone) ?? 0) -
+        (parseScheduleTime(b.ScheduledStartDateTime, venueTimeZone) ?? 0)
+      );
       setTeamMatches(allMatches);
 
       // Load pool data for ALL play days.
@@ -479,7 +486,12 @@ export function TeamDashboardScreen({
         const workText = (m.WorkTeamText || '').toLowerCase().trim();
         return workText.length > 0 && workText === teamText;
       });
-      setWorkDutyMatches(workMatches.filter((m) => m.ScheduledStartDateTime > Date.now()));
+      setWorkDutyMatches(
+        workMatches.filter((m) => {
+          const ms = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
+          return ms != null && ms > Date.now();
+        })
+      );
 
       // ── Leaderboard rank + division overview ──
       try {
@@ -692,7 +704,10 @@ export function TeamDashboardScreen({
 
   // ─── Next work duty ──────────────────────────────────────────────────
   const nextWorkDuty = workDutyMatches.length > 0
-    ? workDutyMatches.sort((a, b) => a.ScheduledStartDateTime - b.ScheduledStartDateTime)[0]
+    ? workDutyMatches.sort((a, b) =>
+        (parseScheduleTime(a.ScheduledStartDateTime, venueTimeZone) ?? 0) -
+        (parseScheduleTime(b.ScheduledStartDateTime, venueTimeZone) ?? 0)
+      )[0]
     : null;
 
   return (
@@ -855,7 +870,7 @@ export function TeamDashboardScreen({
             {' '}at{' '}
             <Text style={{ fontWeight: '800' }}>
               {formatDualTime(
-                nextWorkDuty.ScheduledStartDateTime,
+                parseScheduleTime(nextWorkDuty.ScheduledStartDateTime, venueTimeZone) ?? 0,
                 venueTimeZone,
                 { hour: 'numeric', minute: '2-digit', hour12: true },
                 tzMode,

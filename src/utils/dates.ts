@@ -351,6 +351,36 @@ export function formatDualTime(
 }
 
 /**
+ * Convenience wrapper for the common pattern of "parse a tz-less AES
+ * schedule string and render it with the user's dual-tz preference."
+ *
+ * Equivalent to:
+ *   const ms = parseScheduleTime(raw, venueTz);
+ *   if (ms == null) return '';
+ *   return venueTz
+ *     ? formatDualTime(ms, venueTz, opts, tzMode)
+ *     : formatTime(ms, displayTz);
+ *
+ * Use this at user-facing match-time call sites where the input is the
+ * raw AES string (court schedule, team schedule, bracket cells). It
+ * keeps every screen on the same parse-then-format pipeline so a
+ * Calgary 8 AM string renders identically everywhere.
+ */
+export function formatMatchTime(
+  raw: string | null | undefined,
+  venueTz: string | undefined,
+  tzMode: DualTzMode,
+  displayTz?: string,
+  opts?: Intl.DateTimeFormatOptions,
+): string {
+  const ms = parseScheduleTime(raw, venueTz);
+  if (ms == null) return '';
+  const formatOpts = opts ?? { hour: 'numeric', minute: '2-digit', hour12: true };
+  if (venueTz) return formatDualTime(ms, venueTz, formatOpts, tzMode);
+  return formatTime(ms, displayTz);
+}
+
+/**
  * Date-only sibling of `formatDualTime`. Returns a single string when
  * the instant falls on the same calendar day in both tzs; otherwise emits
  * `"<venueDate> (<userDate>)"`.

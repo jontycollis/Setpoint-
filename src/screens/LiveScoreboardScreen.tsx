@@ -24,7 +24,7 @@ import type {
   CourtScheduleResponse,
 } from '../api/aesClient';
 import type { AESEvent, AESDivision } from '../types/aes';
-import { formatTime, parseScheduleTime, todayApiDate, formatDualTime } from '../utils/dates';
+import { parseScheduleTime, todayApiDate, formatMatchTime } from '../utils/dates';
 import { loadAesSeasonIndex, aesSnapshotKey } from '../utils/aesSeasonIndex';
 import { useTzDisplayMode, effectiveTzForDisplay } from '../utils/tzDisplayPreference';
 
@@ -138,14 +138,19 @@ export function LiveScoreboardScreen({
   const completedMatches: FlatCourtMatch[] = [];
 
   for (const m of matches) {
-    const startMs = m.ScheduledStartDateTime;
-    const endMs = m.ScheduledEndDateTime;
+    // AES returns these as tz-less ISO strings — run them through
+    // `parseScheduleTime(venueTimeZone)` to get a venue-anchored epoch.
+    // Without venueTimeZone we fall back to device-local, which is the
+    // legacy behaviour. Either branch yields a number for the `now`
+    // comparisons below.
+    const startMs = parseScheduleTime(m.ScheduledStartDateTime, venueTimeZone);
+    const endMs = parseScheduleTime(m.ScheduledEndDateTime, venueTimeZone);
     if (m.HasOutcome) {
       completedMatches.push(m);
-    } else if (now >= startMs && now <= endMs + 30 * 60_000) {
+    } else if (startMs != null && endMs != null && now >= startMs && now <= endMs + 30 * 60_000) {
       // Consider "live" if between start and 30min after scheduled end
       liveMatches.push(m);
-    } else if (now < startMs) {
+    } else if (startMs != null && now < startMs) {
       upcomingMatches.push(m);
     } else {
       completedMatches.push(m);
@@ -179,14 +184,7 @@ export function LiveScoreboardScreen({
         <View style={styles.matchMeta}>
           <Text style={styles.matchCourt}>{m.CourtName}</Text>
           <Text style={styles.matchTime}>
-            {venueTimeZone
-              ? formatDualTime(
-                  m.ScheduledStartDateTime,
-                  venueTimeZone,
-                  { hour: 'numeric', minute: '2-digit', hour12: true },
-                  tzMode,
-                )
-              : formatTime(m.ScheduledStartDateTime, displayTz)}
+            {formatMatchTime(m.ScheduledStartDateTime, venueTimeZone, tzMode, displayTz)}
           </Text>
           {isLive && <View style={styles.liveDot} />}
           {m.CompleteShortName ? (
