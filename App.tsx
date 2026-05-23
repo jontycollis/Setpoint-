@@ -50,6 +50,7 @@ import { ScoreboardScreen } from './src/screens/ScoreboardScreen';
 import { MatchListScreen } from './src/screens/MatchListScreen';
 import { MatchSetupScreen } from './src/screens/MatchSetupScreen';
 import { TeamRosterScreen } from './src/screens/TeamRosterScreen';
+import { RosterSectionScreen } from './src/screens/RosterSectionScreen';
 import { MatchScoringScreen } from './src/screens/MatchScoringScreen';
 import type { Match as ScoredMatch } from './src/types/match';
 import {
@@ -175,6 +176,7 @@ type Screen =
   | 'ScoreboardSection'
   | 'MyTeamSection'
   | 'SingleTeamSection'
+  | 'RosterSection'
   | 'BrowseSection'
   | 'VenueMapSelector'
   | 'MyHome'
@@ -244,6 +246,7 @@ function tabForScreen(screen: Screen): TabKey | null {
   if (screen === 'HomeLauncher') return 'home';
   if (screen === 'MyTeamSection') return 'home';
   if (screen === 'SingleTeamSection') return 'home';
+  if (screen === 'RosterSection') return 'home';
   if (screen === 'BrowseSection') return 'browse';
   // Legacy fallbacks — still in the union but not normally entered.
   if (screen === 'MyHome') return 'home';
@@ -268,6 +271,7 @@ const PILL_SUPPRESSED_SCREENS: ReadonlySet<Screen> = new Set<Screen>([
   'ScoreboardSection',
   'MyTeamSection',
   'SingleTeamSection',
+  'RosterSection',
   'BrowseSection',
   'VenueMapSelector',
   // No-team-scope screens
@@ -326,6 +330,7 @@ function menuContextForScreen(screen: Screen): 'home' | 'team' {
     case 'ScoreboardSection':
     case 'MyTeamSection':
     case 'SingleTeamSection':
+    case 'RosterSection':
     case 'BrowseSection':
     case 'VenueMapSelector':
     case 'MyHome':
@@ -492,8 +497,11 @@ function AppInner() {
   const [playerDetailName, setPlayerDetailName] = useState<string>('');
   const [tournamentDetailName, setTournamentDetailName] = useState<string>('');
   const [tournamentDetailMatchIds, setTournamentDetailMatchIds] = useState<string[]>([]);
-  // TeamRoster screen — which TeamProfile.id is being edited.
+  // TeamRoster screen — which TeamProfile.id is being viewed/edited.
   const [rosterEditTeamId, setRosterEditTeamId] = useState<string | null>(null);
+  // When true the TeamRoster screen renders in readOnly mode (entered from
+  // "Roster > View"). Cleared on navigation away.
+  const [rosterReadOnly, setRosterReadOnly] = useState(false);
   // SingleTeamSection — which TeamProfile.id the per-team launcher is scoped
   // to. Set when the user taps a tile in the My Team(s) team-picker grid.
   const [singleTeamSectionTeamId, setSingleTeamSectionTeamId] = useState<
@@ -2277,20 +2285,14 @@ function AppInner() {
               setScreen('AddTournaments');
             }}
             onOpenRoster={() => {
-              if (team.kind === 'me') {
-                handleOpenRosterEditor(team);
-              }
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('RosterSection');
             }}
             onOpenSidelineImport={() => {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('SidelineImport');
             }}
-            onAddAesEvent={() => {
-              setScreenHistory((prev) => [...prev, screen]);
-              setScreen('TournamentSelect');
-            }}
-            onAddTimuEvent={() => {
-              setAddTournamentsFocusSource('timu');
+            onAddEvent={() => {
               setScreenHistory((prev) => [...prev, screen]);
               setScreen('AddTournaments');
             }}
@@ -2783,6 +2785,32 @@ function AppInner() {
           />
         );
       }
+      case 'RosterSection': {
+        const team = singleTeamSectionTeamId
+          ? userProfile?.teams.find((t) => t.id === singleTeamSectionTeamId) ?? null
+          : null;
+        if (!team) {
+          goBack();
+          return null;
+        }
+        return (
+          <RosterSectionScreen
+            team={team}
+            onBack={goBack}
+            onOpenView={() => {
+              setRosterEditTeamId(team.id);
+              setRosterReadOnly(true);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('TeamRoster');
+            }}
+            onOpenManage={() => {
+              if (team.kind !== 'me') return;
+              setRosterReadOnly(false);
+              handleOpenRosterEditor(team);
+            }}
+          />
+        );
+      }
       case 'TeamRoster': {
         const team = rosterEditTeamId
           ? userProfile?.teams.find((t) => t.id === rosterEditTeamId) ?? null
@@ -2796,13 +2824,16 @@ function AppInner() {
         return (
           <TeamRosterScreen
             team={team}
+            readOnly={rosterReadOnly}
             onCancel={() => {
               setRosterEditTeamId(null);
+              setRosterReadOnly(false);
               goBack();
             }}
             onSave={(next) => {
               handleSaveRoster(team.id, next);
               setRosterEditTeamId(null);
+              setRosterReadOnly(false);
               goBack();
             }}
           />

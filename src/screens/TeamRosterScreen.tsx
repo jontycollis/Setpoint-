@@ -51,8 +51,13 @@ interface DraftPlayer {
 interface Props {
   team: TeamProfile;
   onCancel: () => void;
-  /** Persists the next roster on the active TeamProfile. */
+  /** Persists the next roster on the active TeamProfile. Ignored when
+   *  `readOnly` is true (no Save button rendered). */
   onSave: (next: { roster: RosterPlayer[]; rosterUpdatedAt: number }) => void;
+  /** Read-only mode: same player list but no edit affordances (no Save,
+   *  no add, no long-press soft-delete, no editable fields). The "Roster
+   *  > View" sub-tile lands here; "Roster > Manage" lands in the editor. */
+  readOnly?: boolean;
 }
 
 function makeRowId(): string {
@@ -85,7 +90,7 @@ function emptyDraftPlayer(): DraftPlayer {
   };
 }
 
-export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
+export function TeamRosterScreen({ team, onCancel, onSave, readOnly = false }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const avatarOverrides = useTeamAvatarOverrides();
@@ -127,7 +132,7 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
   }
 
   function handleCancel() {
-    if (!dirty) {
+    if (readOnly || !dirty) {
       onCancel();
       return;
     }
@@ -216,15 +221,19 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
           onPress={handleCancel}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
         >
-          <Text style={styles.backBtn}>{'< Cancel'}</Text>
+          <Text style={styles.backBtn}>{readOnly ? '< Back' : '< Cancel'}</Text>
         </TouchableOpacity>
         <Text style={styles.title} numberOfLines={1}>ROSTER</Text>
-        <TouchableOpacity
-          onPress={handleSave}
-          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-        >
-          <Text style={styles.saveBtn}>Save</Text>
-        </TouchableOpacity>
+        {readOnly ? (
+          <View style={styles.saveBtnSpacer} />
+        ) : (
+          <TouchableOpacity
+            onPress={handleSave}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          >
+            <Text style={styles.saveBtn}>Save</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.subHeader}>
@@ -268,10 +277,19 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
             <View style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>No players yet</Text>
               <Text style={styles.emptyBody}>
-                Add players here so they pre-fill when you score a match.
-                Empty names are fine — players will show as "#14" etc.
+                {readOnly
+                  ? 'This team has no players on its roster.'
+                  : 'Add players here so they pre-fill when you score a match. Empty names are fine — players will show as "#14" etc.'}
               </Text>
             </View>
+          ) : readOnly ? (
+            visiblePlayers.map((p) => (
+              <PlayerRowReadOnly
+                key={p.rowId}
+                player={p}
+                styles={styles}
+              />
+            ))
           ) : (
             visiblePlayers.map((p) => (
               <PlayerRow
@@ -288,18 +306,22 @@ export function TeamRosterScreen({ team, onCancel, onSave }: Props) {
             ))
           )}
 
-          <TouchableOpacity
-            style={styles.addBtn}
-            onPress={addPlayer}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.addBtnText}>+ Add player</Text>
-          </TouchableOpacity>
+          {readOnly ? null : (
+            <>
+              <TouchableOpacity
+                style={styles.addBtn}
+                onPress={addPlayer}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.addBtnText}>+ Add player</Text>
+              </TouchableOpacity>
 
-          <Text style={styles.footerHint}>
-            Long-press a row to soft-delete (keeps historical references).
-            Shirt #s must be unique within the active roster.
-          </Text>
+              <Text style={styles.footerHint}>
+                Long-press a row to soft-delete (keeps historical references).
+                Shirt #s must be unique within the active roster.
+              </Text>
+            </>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
@@ -416,6 +438,56 @@ function PlayerRow({
   );
 }
 
+// Read-only counterpart of PlayerRow. Same visual rhythm (shirt badge,
+// name, position, role chips) but every field is rendered as static
+// Text — no editing, no long-press soft-delete, no add button. The
+// "Roster > View" sub-tile lands here.
+function PlayerRowReadOnly({
+  player,
+  styles,
+}: {
+  player: DraftPlayer;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const inactive = !player.active;
+  const shirt = player.shirtStr.trim();
+  const name = player.name.trim();
+  const badges: string[] = [];
+  if (player.isCaptain) badges.push('Captain');
+  if (player.isLibero) badges.push('Libero');
+  if (player.position) badges.push(player.position);
+  return (
+    <View style={[styles.rowCard, inactive && styles.rowCardInactive]}>
+      {inactive ? (
+        <View style={styles.inactiveBadge}>
+          <Text style={styles.inactiveBadgeText}>INACTIVE</Text>
+        </View>
+      ) : null}
+
+      <View style={styles.viewRow}>
+        <View style={styles.viewShirtPill}>
+          <Text style={styles.viewShirtPillText}>
+            {shirt ? `#${shirt}` : '#—'}
+          </Text>
+        </View>
+        <Text style={styles.viewName} numberOfLines={1}>
+          {name || '(no name)'}
+        </Text>
+      </View>
+
+      {badges.length > 0 ? (
+        <View style={styles.viewBadges}>
+          {badges.map((b) => (
+            <View key={b} style={styles.viewBadge}>
+              <Text style={styles.viewBadgeText}>{b}</Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function ToggleChip({
   label,
   active,
@@ -465,6 +537,55 @@ function makeStyles(colors: ThemeColors) {
       letterSpacing: 1,
     },
     saveBtn: { color: colors.primary, fontSize: fontSize.md, fontWeight: '700' },
+    // Invisible right-side spacer in readOnly mode so the title stays
+    // centered between the back button and… nothing. Sized to roughly
+    // match the Save label width so the title doesn't shift between
+    // view and edit modes.
+    saveBtnSpacer: { width: 40 },
+    viewRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+    },
+    viewShirtPill: {
+      minWidth: 44,
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: borderRadius.full,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    viewShirtPillText: {
+      color: colors.textOnPrimary,
+      fontSize: fontSize.md,
+      fontWeight: '800',
+    },
+    viewName: {
+      flex: 1,
+      color: colors.text,
+      fontSize: fontSize.md,
+      fontWeight: '600',
+    },
+    viewBadges: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: spacing.xs,
+      marginTop: spacing.sm,
+    },
+    viewBadge: {
+      paddingHorizontal: spacing.sm,
+      paddingVertical: 4,
+      borderRadius: borderRadius.full,
+      borderWidth: 1,
+      borderColor: colors.border,
+      backgroundColor: colors.surface,
+    },
+    viewBadgeText: {
+      color: colors.textSecondary,
+      fontSize: fontSize.xs,
+      fontWeight: '700',
+    },
     subHeader: {
       paddingHorizontal: spacing.lg,
       paddingBottom: spacing.sm,
