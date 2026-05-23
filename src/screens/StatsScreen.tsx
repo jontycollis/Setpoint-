@@ -76,6 +76,8 @@ import {
   type AnalyticsMetricSet,
 } from '../utils/analyticsViewPreference';
 import { ColumnKey } from '../components/ColumnKey';
+import { TeamAvatar } from '../components/TeamAvatar';
+import { useTeamAvatarOverrides } from '../utils/teamAvatarStore';
 
 type KindFilter = 'all' | MatchKind;
 type PhaseFilter = 'all' | Phase;
@@ -237,6 +239,8 @@ export function StatsScreen({
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const avatarOverrides = useTeamAvatarOverrides();
+  const customImageUri = avatarOverrides[teamProfileId]?.uri;
 
   const [loading, setLoading] = useState(true);
   const [allMatches, setAllMatches] = useState<Match[]>([]);
@@ -461,7 +465,15 @@ export function StatsScreen({
   if (loading) {
     return (
       <View style={styles.container}>
-        <Header onBack={onBack} title={`${teamName} Analytics`} colors={colors} styles={styles} />
+        <Header
+          onBack={onBack}
+          title={`${teamName} Analytics`}
+          teamProfileId={teamProfileId}
+          teamName={teamName}
+          customImageUri={customImageUri}
+          colors={colors}
+          styles={styles}
+        />
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading analytics…</Text>
@@ -474,7 +486,15 @@ export function StatsScreen({
   if (allMatches.length === 0) {
     return (
       <View style={styles.container}>
-        <Header onBack={onBack} title={`${teamName} Analytics`} colors={colors} styles={styles} />
+        <Header
+          onBack={onBack}
+          title={`${teamName} Analytics`}
+          teamProfileId={teamProfileId}
+          teamName={teamName}
+          customImageUri={customImageUri}
+          colors={colors}
+          styles={styles}
+        />
         <ScrollView contentContainerStyle={styles.scroll}>
           <EmptyState
             title="No scored matches yet"
@@ -505,7 +525,15 @@ export function StatsScreen({
 
   return (
     <View style={styles.container}>
-      <Header onBack={onBack} title={`${teamName} Analytics`} colors={colors} styles={styles} />
+      <Header
+        onBack={onBack}
+        title={`${teamName} Analytics`}
+        teamProfileId={teamProfileId}
+        teamName={teamName}
+        customImageUri={customImageUri}
+        colors={colors}
+        styles={styles}
+      />
       {/* Splits stripe — rendered OUTSIDE the vertical ScrollView so taps
           on the horizontally-scrolling chips register on Android. Previously
           this block lived inside <ScrollView stickyHeaderIndices={[0]}>; the
@@ -881,11 +909,17 @@ export function StatsScreen({
 function Header({
   onBack,
   title,
+  teamProfileId,
+  teamName,
+  customImageUri,
   colors,
   styles,
 }: {
   onBack: () => void;
   title: string;
+  teamProfileId: string;
+  teamName: string;
+  customImageUri?: string;
   colors: ThemeColors;
   styles: ReturnType<typeof makeStyles>;
 }) {
@@ -894,7 +928,15 @@ function Header({
       <TouchableOpacity onPress={onBack} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
         <Text style={styles.backBtn}>‹ Back</Text>
       </TouchableOpacity>
-      <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      <View style={styles.titleCluster}>
+        <TeamAvatar
+          teamProfile={{ id: teamProfileId, label: teamName }}
+          customImageUri={customImageUri}
+          size={28}
+          style={styles.titleAvatar}
+        />
+        <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      </View>
       <View style={{ width: 50 }} />
     </View>
   );
@@ -2108,7 +2150,14 @@ function makeStyles(colors: ThemeColors) {
       borderBottomColor: colors.border,
     },
     backBtn: { color: colors.primary, fontSize: fontSize.md, fontWeight: '600' },
-    title: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800', flex: 1, textAlign: 'center' },
+    titleCluster: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    titleAvatar: { marginRight: spacing.sm },
+    title: { color: colors.text, fontSize: fontSize.lg, fontWeight: '800', textAlign: 'center', flexShrink: 1 },
     scroll: { paddingBottom: spacing.xxxl + 40 },
     loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     loadingText: { color: colors.textSecondary, marginTop: spacing.sm },
