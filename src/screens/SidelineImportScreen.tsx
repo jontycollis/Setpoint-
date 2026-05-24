@@ -2,24 +2,33 @@
 //
 // Self-serve import flow for ANY user's Sideline HD historical match data.
 // Distinct from `HistoricalImportScreen`, which only pulls the bundled
-// PVC 3D Titanium static export. This screen drives the full pipeline:
+// PVC 3D Titanium static export.
 //
-//   stage="check"        — feature flag + session sniff
-//   stage="login"        — WebView pointed at sidelinehd.com/login;
-//                          we watch URL changes for the post-login redirect
-//                          and read the cookie jar.
-//   stage="logged-in"    — confirmed session, button to fetch teams
-//   stage="teams-load"   — calling the API for team list
-//   stage="teams-list"   — pick which team to import
-//   stage="teams-error"  — endpoint probe failed; show diagnostics
-//   stage="matches-load" — calling the API for match list
-//   stage="matches-list" — pick which matches to import (default all)
-//   stage="matches-err"  — endpoint probe failed; show diagnostics
-//   stage="importing"    — walking the selected list with progress
-//   stage="done"         — summary card + back to caller
+// Approach (proven from the original Titanium import)
+// ---------------------------------------------------
+// Sideline HD's web pages cache ALL match data in localStorage on the
+// user's browser when they're logged in and visit their team page (slug
+// URL, e.g. https://sidelinehd.com/pvc3droyals). The flow is therefore:
 //
-// Native dep `@react-native-cookies/cookies` is required for cookie
-// capture. We feature-flag the entry point on
+//   1. Open a WebView on sidelinehd.com/login. The user logs in.
+//   2. Let the user navigate freely inside the WebView — to the home
+//      page, then to their team's slug URL.
+//   3. When the WebView URL matches a team-page pattern, enable an
+//      "Import this team's data" button.
+//   4. Tapping it injects JS that copies `__pvc*` / `__review_*`
+//      localStorage entries and posts them back via `onMessage`.
+//   5. The parser (`sidelineHdParser.ts`) converts that snapshot into
+//      `Match[]` and `runSidelineLocalStorageImport` persists them.
+//   6. Show an "Imported N matches" done card. The user can navigate the
+//      WebView to a different team's slug and import again — dedupe is
+//      keyed on the source match id so re-imports are non-destructive.
+//
+// The previous API-shaped approach (Bearer JWT against Firebase auth)
+// didn't work in a cookie-only WebView context; the API client was
+// removed. This screen now drives the whole pipeline from the WebView.
+//
+// Native dep `@react-native-cookies/cookies` is still required for the
+// "have we logged in?" sniff. We feature-flag the entry point on
 // `isSidelineHdCookieModuleAvailable()` so an OTA push to devices
 // running an older APK shows an "Available in next app version" notice
 // instead of crashing the screen.
@@ -51,6 +60,7 @@ import type { ThemeColors } from '../utils/theme';
 import type { UserProfile, TeamProfile } from '../types/profile';
 import {
   SIDELINE_HD_LOGIN_URL,
+  SIDELINE_HD_BASE_URL,
   isSidelineHdCookieModuleAvailable,
   getSidelineHdCookieModuleLoadError,
   readSidelineHdCookies,
@@ -64,63 +74,127 @@ import {
   clearSidelineHdSession,
   type SidelineHdSessionRecord,
 } from '../utils/sidelineHdSession';
-import {
-  fetchMyTeams,
-  fetchTeamMatches,
-  resetDiscoveredEndpoints,
-  type SidelineHdMatchSummary,
-  type SidelineHdProbeAttempt,
-  type SidelineHdTeam,
-} from '../api/sidelineHd';
 import { findTeamProfileByAlias } from '../utils/userProfile';
 import {
-  runSidelineLiveImport,
+  runSidelineLocalStorageImport,
   type SidelineLiveImportProgress,
   type SidelineLiveImportResult,
 } from '../utils/sidelineHdLiveImporter';
+import type { SidelineHdLocalStorageSnapshot } from '../utils/sidelineHdParser';
 
 interface Props {
   userProfile: UserProfile | null;
   onBack: () => void;
 }
 
+// Team-page URL pattern: https://sidelinehd.com/<slug> with optional
+// trailing slash. Reserved paths the page uses for auth / settings flows
+// are filtered out so the import button doesn't light up on those.
+const TEAM_PAGE_PATH_REGEX = /^\/([a-zA-Z0-9_-]{2,})\/?$/;
+const RESERVED_SLUGS = new Set([
+  'login',
+  'logout',
+  'signup',
+  'register',
+  'account',
+  'settings',
+  'profile',
+  'home',
+  'about',
+  'help',
+  'support',
+  'terms',
+  'privacy',
+  'pricing',
+  'features',
+  'admin',
+  'api',
+  'app',
+  'static',
+  'media',
+  'assets',
+  'game',
+  'games',
+  'match',
+  'matches',
+  'team',
+  'teams',
+  'user',
+  'users',
+  'search',
+]);
+
+function extractTeamSlug(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    if (!parsed.hostname.endsWith('sidelinehd.com')) return null;
+    const m = TEAM_PAGE_PATH_REGEX.exec(parsed.pathname);
+    if (!m) return null;
+    const slug = m[1]!;
+    if (RESERVED_SLUGS.has(slug.toLowerCase())) return null;
+    return slug;
+  } catch {
+    return null;
+  }
+}
+
+// Injected into the WebView to pull every Sideline HD-prefixed
+// localStorage entry. The response comes back via `onMessage`.
+const EXTRACT_LOCALSTORAGE_JS = `
+(function() {
+  try {
+    var out = {};
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (!k) continue;
+      if (k.indexOf('__pvc') === 0 || k.indexOf('__review_') === 0) {
+        out[k] = localStorage.getItem(k);
+      }
+    }
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      kind: 'localstorage-data',
+      data: out,
+      href: location.href,
+    }));
+  } catch (err) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      kind: 'localstorage-error',
+      error: String(err && err.message ? err.message : err),
+    }));
+  }
+  true;
+})();
+`;
+
 type Stage =
   | { kind: 'check' }
   | { kind: 'unavailable'; reason: string }
   | { kind: 'logged-out' }
   | { kind: 'login' }
-  | { kind: 'logged-in'; session: SidelineHdSessionRecord }
-  | { kind: 'teams-load' }
-  | { kind: 'teams-list'; teams: SidelineHdTeam[] }
-  | { kind: 'teams-error'; attempts: SidelineHdProbeAttempt[]; reason: string }
+  | { kind: 'browsing'; session: SidelineHdSessionRecord }
   | {
-      kind: 'matches-load';
-      team: SidelineHdTeam;
-      teamProfile: TeamProfile | null;
-    }
-  | {
-      kind: 'matches-list';
-      team: SidelineHdTeam;
-      teamProfile: TeamProfile | null;
-      matches: SidelineHdMatchSummary[];
-      selected: Record<string, boolean>;
-    }
-  | {
-      kind: 'matches-error';
-      team: SidelineHdTeam;
-      attempts: SidelineHdProbeAttempt[];
-      reason: string;
+      kind: 'extracting';
+      session: SidelineHdSessionRecord;
+      slug: string;
     }
   | {
       kind: 'importing';
-      team: SidelineHdTeam;
+      slug: string;
+      teamProfile: TeamProfile;
+      snapshot: SidelineHdLocalStorageSnapshot;
       progress: SidelineLiveImportProgress | null;
     }
   | {
       kind: 'done';
-      team: SidelineHdTeam;
-      teamProfile: TeamProfile | null;
+      slug: string;
+      teamProfile: TeamProfile;
       result: SidelineLiveImportResult;
+    }
+  | {
+      kind: 'error';
+      slug: string;
+      reason: string;
     };
 
 export function SidelineImportScreen({ userProfile, onBack }: Props) {
@@ -128,11 +202,11 @@ export function SidelineImportScreen({ userProfile, onBack }: Props) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
 
   const [stage, setStage] = useState<Stage>({ kind: 'check' });
+  // Current WebView URL — drives the "this is a team page" detection
+  // that enables the Import button. Kept in state so the button can
+  // re-render reactively as the user navigates.
+  const [currentUrl, setCurrentUrl] = useState<string>(SIDELINE_HD_BASE_URL);
   const webViewRef = useRef<WebView>(null);
-  // Holds the most-recent URL the WebView navigated to — used by the
-  // dashboard sniff to decide if login is done. Stored in a ref because
-  // we read it from async callbacks where stale closure state would lie.
-  const lastUrlRef = useRef<string>(SIDELINE_HD_LOGIN_URL);
 
   // ── Initial probe ────────────────────────────────────────────────────
   useEffect(() => {
@@ -148,7 +222,7 @@ export function SidelineImportScreen({ userProfile, onBack }: Props) {
       const stored = await loadSidelineHdSession();
       if (cancelled) return;
       if (stored) {
-        setStage({ kind: 'logged-in', session: stored });
+        setStage({ kind: 'browsing', session: stored });
       } else {
         setStage({ kind: 'logged-out' });
       }
@@ -159,23 +233,141 @@ export function SidelineImportScreen({ userProfile, onBack }: Props) {
   }, []);
 
   // ── Login WebView navigation listener ────────────────────────────────
+  //
+  // While in the login stage we watch for the post-login redirect and
+  // capture the session. Once logged in, we flip into the browsing stage
+  // where the same WebView is left mounted so the user can navigate to
+  // their team page.
   const handleNavigationStateChange = useCallback(
     async (navState: WebViewNavigation) => {
       const url = navState.url;
-      lastUrlRef.current = url;
-      const stillOnLoginPage = /\/login(\?|$|\/)/.test(url);
-      if (stillOnLoginPage) return;
-      const cookies: CookieMap | null = await readSidelineHdCookies();
-      if (!cookies) return;
-      if (!looksLikeAuthenticatedSession(cookies)) return;
-      const record: SidelineHdSessionRecord = {
-        loggedInAtMs: Date.now(),
-        cookieNames: Object.keys(cookies),
-      };
-      await saveSidelineHdSession(record);
-      setStage({ kind: 'logged-in', session: record });
+      setCurrentUrl(url);
+
+      // In the login stage, watch for the redirect off the login page
+      // and confirm the cookie jar has a session cookie before promoting
+      // to browsing.
+      setStage((prev) => {
+        if (prev.kind !== 'login') return prev;
+        const stillOnLoginPage = /\/login(\?|$|\/)/.test(url);
+        if (stillOnLoginPage) return prev;
+        // Fire-and-forget the cookie check — we don't want to block the
+        // navigation listener on the native bridge call.
+        void (async () => {
+          const cookies: CookieMap | null = await readSidelineHdCookies();
+          if (!cookies || !looksLikeAuthenticatedSession(cookies)) return;
+          const record: SidelineHdSessionRecord = {
+            loggedInAtMs: Date.now(),
+            cookieNames: Object.keys(cookies),
+          };
+          await saveSidelineHdSession(record);
+          setStage({ kind: 'browsing', session: record });
+        })();
+        return prev;
+      });
     },
     []
+  );
+
+  // ── WebView message handler ──────────────────────────────────────────
+  //
+  // Receives the JSON blob posted by the injected JS. Parses it, looks
+  // up the team profile, and kicks off the import.
+  const handleWebViewMessage = useCallback(
+    (event: WebViewMessageEvent) => {
+      const raw = event.nativeEvent.data;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        return;
+      }
+      if (!parsed || typeof parsed !== 'object') return;
+      const message = parsed as Record<string, unknown>;
+      if (message.kind === 'localstorage-error') {
+        setStage((prev) => {
+          if (prev.kind !== 'extracting') return prev;
+          return {
+            kind: 'error',
+            slug: prev.slug,
+            reason:
+              typeof message.error === 'string'
+                ? message.error
+                : 'WebView refused to read localStorage.',
+          };
+        });
+        return;
+      }
+      if (message.kind !== 'localstorage-data') return;
+      const data = message.data;
+      if (!data || typeof data !== 'object') {
+        setStage((prev) => {
+          if (prev.kind !== 'extracting') return prev;
+          return {
+            kind: 'error',
+            slug: prev.slug,
+            reason: 'No localStorage entries returned.',
+          };
+        });
+        return;
+      }
+      const entries: Record<string, string> = {};
+      for (const [k, v] of Object.entries(data as Record<string, unknown>)) {
+        if (typeof v === 'string') entries[k] = v;
+      }
+      setStage((prev) => {
+        if (prev.kind !== 'extracting') return prev;
+        const slug = prev.slug;
+        const snapshot: SidelineHdLocalStorageSnapshot = {
+          teamSlug: slug,
+          entries,
+        };
+        // Resolve the local TeamProfile by matching the slug against the
+        // user's team aliases. The slug is usually a slugified version
+        // of the team name (e.g. "pvc3droyals") so we also try the
+        // human-readable variant.
+        const teamProfile =
+          findTeamProfileByAlias(userProfile, slug) ??
+          findTeamProfileByAlias(userProfile, prettifySlug(slug));
+        if (!teamProfile) {
+          return {
+            kind: 'error',
+            slug,
+            reason: `We couldn't match "${slug}" to one of your teams. Open My Team, add the team (or add this slug as an alias), then try again.`,
+          };
+        }
+        // Kick off the import — we return the in-flight stage from this
+        // reducer and let the async path drive subsequent transitions.
+        void (async () => {
+          try {
+            const result = await runSidelineLocalStorageImport({
+              snapshot,
+              teamProfileId: teamProfile.id,
+              teamLabel: teamProfile.label,
+              onProgress: (progress) =>
+                setStage({
+                  kind: 'importing',
+                  slug,
+                  teamProfile,
+                  snapshot,
+                  progress,
+                }),
+            });
+            setStage({ kind: 'done', slug, teamProfile, result });
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            setStage({ kind: 'error', slug, reason: msg });
+          }
+        })();
+        return {
+          kind: 'importing',
+          slug,
+          teamProfile,
+          snapshot,
+          progress: null,
+        };
+      });
+    },
+    [userProfile]
   );
 
   const handleStartLogin = useCallback(() => {
@@ -185,123 +377,72 @@ export function SidelineImportScreen({ userProfile, onBack }: Props) {
   const handleLogout = useCallback(async () => {
     await clearSidelineHdCookies();
     await clearSidelineHdSession();
-    resetDiscoveredEndpoints();
     setStage({ kind: 'logged-out' });
   }, []);
 
-  const handleLoadTeams = useCallback(async () => {
-    setStage({ kind: 'teams-load' });
-    const res = await fetchMyTeams();
-    if (!res.ok) {
-      setStage({
-        kind: 'teams-error',
-        attempts: res.attempts,
-        reason: res.reason,
-      });
+  const handleImportFromCurrentPage = useCallback(() => {
+    const slug = extractTeamSlug(currentUrl);
+    if (!slug) {
+      Alert.alert(
+        'Not a team page',
+        'Navigate to your team page on Sideline HD (e.g. sidelinehd.com/pvc3droyals) before tapping Import.'
+      );
       return;
     }
-    setStage({ kind: 'teams-list', teams: res.data });
-  }, []);
-
-  const handlePickTeam = useCallback(
-    async (team: SidelineHdTeam) => {
-      const teamProfile = findTeamProfileByAlias(userProfile, team.name);
-      setStage({ kind: 'matches-load', team, teamProfile });
-      const res = await fetchTeamMatches(team.id);
-      if (!res.ok) {
-        setStage({
-          kind: 'matches-error',
-          team,
-          attempts: res.attempts,
-          reason: res.reason,
-        });
-        return;
-      }
-      const selected: Record<string, boolean> = {};
-      for (const m of res.data) selected[m.id] = true;
-      setStage({
-        kind: 'matches-list',
-        team,
-        teamProfile,
-        matches: res.data,
-        selected,
-      });
-    },
-    [userProfile]
-  );
-
-  const handleToggleMatch = useCallback((matchId: string) => {
     setStage((prev) => {
-      if (prev.kind !== 'matches-list') return prev;
-      return {
-        ...prev,
-        selected: { ...prev.selected, [matchId]: !prev.selected[matchId] },
-      };
+      if (prev.kind !== 'browsing') return prev;
+      return { kind: 'extracting', session: prev.session, slug };
     });
-  }, []);
-
-  const handleToggleAll = useCallback(() => {
-    setStage((prev) => {
-      if (prev.kind !== 'matches-list') return prev;
-      const anyUnselected = prev.matches.some((m) => !prev.selected[m.id]);
-      const next: Record<string, boolean> = {};
-      for (const m of prev.matches) next[m.id] = anyUnselected;
-      return { ...prev, selected: next };
-    });
-  }, []);
-
-  const handleRunImport = useCallback(async () => {
-    setStage((prev) => {
-      if (prev.kind !== 'matches-list') return prev;
-      const { team, teamProfile, matches, selected } = prev;
-      const chosen = matches.filter((m) => selected[m.id]);
-      if (chosen.length === 0) {
-        Alert.alert('Nothing selected', 'Pick at least one match to import.');
-        return prev;
-      }
-      if (!teamProfile) {
-        Alert.alert(
-          'Add this team first',
-          `Add "${team.name}" as one of your teams in My Team, then come back to import.`
-        );
-        return prev;
-      }
-      // Kick off the async import after returning the in-flight stage.
-      void (async () => {
-        const result = await runSidelineLiveImport({
-          team,
-          teamProfileId: teamProfile.id,
-          selectedMatches: chosen,
-          onProgress: (progress) =>
-            setStage({ kind: 'importing', team, progress }),
-        });
-        setStage({ kind: 'done', team, teamProfile, result });
-      })();
-      return { kind: 'importing', team, progress: null };
-    });
-  }, []);
-
-  const handleBackToTeams = useCallback(() => {
-    setStage({ kind: 'teams-load' });
-    // Re-fetch in the next tick so the loading spinner shows.
+    // Give the page a beat to finish populating localStorage, then
+    // inject the extractor. The team page populates synchronously on
+    // load (we observed it via the Titanium bundle), so 1.5s is
+    // comfortably enough headroom.
     setTimeout(() => {
-      void handleLoadTeams();
-    }, 0);
-  }, [handleLoadTeams]);
+      webViewRef.current?.injectJavaScript(EXTRACT_LOCALSTORAGE_JS);
+    }, 1500);
+  }, [currentUrl]);
+
+  const handleImportAnother = useCallback(() => {
+    setStage((prev) => {
+      // Whether we just finished a successful import or hit an error,
+      // dropping back to browsing lets the user navigate to another
+      // team page and run the flow again.
+      if (prev.kind === 'done' || prev.kind === 'error') {
+        // We don't have the session record handy here — re-load it.
+        return { kind: 'check' };
+      }
+      return prev;
+    });
+    void (async () => {
+      const stored = await loadSidelineHdSession();
+      if (stored) setStage({ kind: 'browsing', session: stored });
+      else setStage({ kind: 'logged-out' });
+    })();
+  }, []);
+
+  // Show the WebView for the login + browsing + extracting stages — the
+  // same WebView instance is reused so cookies and DOM state persist
+  // across navigation.
+  const showWebView =
+    stage.kind === 'login' ||
+    stage.kind === 'browsing' ||
+    stage.kind === 'extracting';
+
+  const currentSlug = useMemo(
+    () => extractTeamSlug(currentUrl),
+    [currentUrl]
+  );
 
   return (
     <View style={styles.container}>
       <Hero onBack={onBack} colors={colors} />
-      {stage.kind === 'login' ? (
+      {showWebView ? (
         <View style={styles.webviewWrap}>
           <WebView
             ref={webViewRef}
             source={{ uri: SIDELINE_HD_LOGIN_URL }}
             onNavigationStateChange={handleNavigationStateChange}
-            onMessage={(_e: WebViewMessageEvent) => {
-              // No-op — login page doesn't postMessage. Keeping the prop
-              // around makes injecting diagnostics later trivial.
-            }}
+            onMessage={handleWebViewMessage}
             startInLoadingState={true}
             renderLoading={() => (
               <View style={styles.webviewLoading}>
@@ -316,17 +457,14 @@ export function SidelineImportScreen({ userProfile, onBack }: Props) {
             javaScriptEnabled={true}
             domStorageEnabled={true}
           />
-          <View style={styles.webviewFooter}>
-            <Text style={styles.webviewFooterText}>
-              Log in above. We&apos;ll detect when you reach the dashboard.
-            </Text>
-            <TouchableOpacity
-              onPress={() => setStage({ kind: 'logged-out' })}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-              <Text style={styles.webviewFooterLink}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
+          <WebViewFooter
+            stage={stage}
+            currentUrl={currentUrl}
+            currentSlug={currentSlug}
+            onImport={handleImportFromCurrentPage}
+            onCancel={() => setStage({ kind: 'logged-out' })}
+            colors={colors}
+          />
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent}>
@@ -334,13 +472,8 @@ export function SidelineImportScreen({ userProfile, onBack }: Props) {
             stage={stage}
             onStartLogin={handleStartLogin}
             onLogout={handleLogout}
-            onLoadTeams={handleLoadTeams}
-            onPickTeam={handlePickTeam}
-            onToggleMatch={handleToggleMatch}
-            onToggleAll={handleToggleAll}
-            onRunImport={handleRunImport}
-            onBackToTeams={handleBackToTeams}
             onDone={onBack}
+            onImportAnother={handleImportAnother}
             colors={colors}
           />
         </ScrollView>
@@ -349,29 +482,98 @@ export function SidelineImportScreen({ userProfile, onBack }: Props) {
   );
 }
 
+// Turn "pvc3droyals" into "PVC 3D Royals" — best-effort, used as a
+// fallback when matching the slug to a TeamProfile alias.
+function prettifySlug(slug: string): string {
+  return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function WebViewFooter({
+  stage,
+  currentUrl,
+  currentSlug,
+  onImport,
+  onCancel,
+  colors,
+}: {
+  stage: Stage;
+  currentUrl: string;
+  currentSlug: string | null;
+  onImport: () => void;
+  onCancel: () => void;
+  colors: ThemeColors;
+}) {
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  if (stage.kind === 'login') {
+    return (
+      <View style={styles.webviewFooter}>
+        <Text style={styles.webviewFooterText}>
+          Log in above. We&apos;ll detect when you reach the dashboard.
+        </Text>
+        <TouchableOpacity
+          onPress={onCancel}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.webviewFooterLink}>Cancel</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (stage.kind === 'extracting') {
+    return (
+      <View style={styles.webviewFooter}>
+        <ActivityIndicator color={colors.primary} />
+        <Text style={styles.webviewFooterText}>
+          Reading {stage.slug}…
+        </Text>
+      </View>
+    );
+  }
+  // browsing
+  const importEnabled = currentSlug != null;
+  return (
+    <View style={styles.webviewFooter}>
+      <Text style={styles.webviewFooterText}>
+        {importEnabled
+          ? `Ready: ${currentSlug}`
+          : 'Navigate to your team page (e.g. sidelinehd.com/pvc3droyals).'}
+      </Text>
+      <View style={styles.webviewFooterRow}>
+        <TouchableOpacity
+          onPress={onCancel}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.webviewFooterLink}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onImport}
+          disabled={!importEnabled}
+          style={[styles.webviewImportBtn, !importEnabled && styles.ctaDisabled]}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.webviewImportBtnLabel}>
+            {importEnabled ? "Import this team's data" : 'Import'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.webviewFooterHint}>{currentUrl}</Text>
+    </View>
+  );
+}
+
 function StageBody({
   stage,
   onStartLogin,
   onLogout,
-  onLoadTeams,
-  onPickTeam,
-  onToggleMatch,
-  onToggleAll,
-  onRunImport,
-  onBackToTeams,
   onDone,
+  onImportAnother,
   colors,
 }: {
   stage: Stage;
   onStartLogin: () => void;
   onLogout: () => void;
-  onLoadTeams: () => void;
-  onPickTeam: (team: SidelineHdTeam) => void;
-  onToggleMatch: (matchId: string) => void;
-  onToggleAll: () => void;
-  onRunImport: () => void;
-  onBackToTeams: () => void;
   onDone: () => void;
+  onImportAnother: () => void;
   colors: ThemeColors;
 }) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -407,9 +609,9 @@ function StageBody({
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Connect Sideline HD</Text>
           <Text style={styles.cardBody}>
-            We&apos;ll open the Sideline HD login page in a secure
-            window. Once you&apos;re in, we&apos;ll list your teams and
-            you can pick which one to import.
+            We&apos;ll open Sideline HD in a secure window. Once
+            you&apos;re logged in, navigate to your team&apos;s page and
+            tap &ldquo;Import this team&apos;s data&rdquo;.
           </Text>
           <TouchableOpacity
             style={styles.cta}
@@ -422,157 +624,10 @@ function StageBody({
       </>
     );
   }
-  if (stage.kind === 'logged-in') {
-    return (
-      <>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>{'✓'} Connected to Sideline HD</Text>
-          <Text style={styles.cardMeta}>
-            Logged in{' '}
-            {new Date(stage.session.loggedInAtMs).toLocaleString()}
-          </Text>
-          <Text style={styles.cardBody}>
-            Tap below to pull your teams. We&apos;ll list them and you can
-            pick which one to import.
-          </Text>
-          <TouchableOpacity
-            style={styles.cta}
-            onPress={onLoadTeams}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.ctaLabel}>Load my teams</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.secondaryCta}
-            onPress={onLogout}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.secondaryCtaLabel}>Log out</Text>
-          </TouchableOpacity>
-        </View>
-      </>
-    );
-  }
-  if (stage.kind === 'teams-load') {
-    return (
-      <View style={styles.centeredBlock}>
-        <ActivityIndicator color={colors.primary} />
-        <Text style={styles.loadingLabel}>Fetching your teams…</Text>
-      </View>
-    );
-  }
-  if (stage.kind === 'teams-error') {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Couldn&apos;t reach Sideline HD</Text>
-        <Text style={styles.cardBody}>
-          We tried a few endpoints but none returned a usable response.
-          Your session may have expired — try logging out and back in. If
-          this keeps happening, share the diagnostic below with support.
-        </Text>
-        <Text style={styles.diagnosticHeader}>What we tried:</Text>
-        {stage.attempts.map((a, i) => (
-          <Text key={`${a.url}-${i}`} style={styles.diagnosticLine}>
-            • {a.url} — {String(a.status)}
-            {a.contentTypeHint ? ` (${a.contentTypeHint})` : ''}
-          </Text>
-        ))}
-        <TouchableOpacity
-          style={styles.cta}
-          onPress={onLogout}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.ctaLabel}>Log out and try again</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-  if (stage.kind === 'teams-list') {
-    if (stage.teams.length === 0) {
-      return (
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>No teams found</Text>
-          <Text style={styles.cardBody}>
-            We connected to Sideline HD but didn&apos;t see any teams on
-            your account. If you expect to see teams here, make sure
-            you&apos;re logged in as the right user on Sideline HD.
-          </Text>
-        </View>
-      );
-    }
-    return (
-      <>
-        <Text style={styles.intro}>
-          Pick a team to import. We&apos;ll show you the match list next
-          and let you choose which ones to pull.
-        </Text>
-        {stage.teams.map((team) => (
-          <TouchableOpacity
-            key={team.id}
-            style={styles.listRow}
-            onPress={() => onPickTeam(team)}
-            activeOpacity={0.7}
-          >
-            <View style={{ flex: 1 }}>
-              <Text style={styles.listRowTitle}>{team.name}</Text>
-              {team.league ? (
-                <Text style={styles.listRowMeta}>{team.league}</Text>
-              ) : null}
-            </View>
-            <Text style={styles.chev}>{'>'}</Text>
-          </TouchableOpacity>
-        ))}
-      </>
-    );
-  }
-  if (stage.kind === 'matches-load') {
-    return (
-      <View style={styles.centeredBlock}>
-        <ActivityIndicator color={colors.primary} />
-        <Text style={styles.loadingLabel}>
-          Fetching matches for {stage.team.name}…
-        </Text>
-      </View>
-    );
-  }
-  if (stage.kind === 'matches-error') {
-    return (
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>
-          Couldn&apos;t fetch matches for {stage.team.name}
-        </Text>
-        <Text style={styles.cardBody}>{stage.reason}</Text>
-        <Text style={styles.diagnosticHeader}>What we tried:</Text>
-        {stage.attempts.map((a, i) => (
-          <Text key={`${a.url}-${i}`} style={styles.diagnosticLine}>
-            • {a.url} — {String(a.status)}
-          </Text>
-        ))}
-        <TouchableOpacity
-          style={styles.cta}
-          onPress={onBackToTeams}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.ctaLabel}>Back to teams</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-  if (stage.kind === 'matches-list') {
-    return (
-      <MatchesList
-        stage={stage}
-        onToggleMatch={onToggleMatch}
-        onToggleAll={onToggleAll}
-        onRunImport={onRunImport}
-        colors={colors}
-      />
-    );
-  }
   if (stage.kind === 'importing') {
     return (
       <View style={styles.card}>
-        <Text style={styles.cardTitle}>Importing…</Text>
+        <Text style={styles.cardTitle}>Importing {stage.slug}…</Text>
         {stage.progress ? (
           <>
             <Text style={styles.cardMeta}>
@@ -595,7 +650,7 @@ function StageBody({
       <View style={styles.card}>
         <Text style={styles.cardTitle}>
           {'✓'} Imported {r.imported} match
-          {r.imported === 1 ? '' : 'es'} for {stage.team.name}
+          {r.imported === 1 ? '' : 'es'} for {stage.teamProfile.label}
         </Text>
         <Text style={styles.cardBody}>
           {r.skipped > 0
@@ -605,7 +660,7 @@ function StageBody({
             ? `Failed to import ${r.failed} — see warnings below.\n`
             : ''}
           {r.imported > 0
-            ? `Open ${stage.team.name} in My Team to see your new analytics.`
+            ? `Open ${stage.teamProfile.label} in My Team to see your new analytics.`
             : ''}
         </Text>
         {r.warnings.length > 0 ? (
@@ -618,7 +673,7 @@ function StageBody({
             ))}
             {r.warnings.length > 6 ? (
               <Text style={styles.diagnosticLine}>
-                …plus {r.warnings.length - 6} more (see logs)
+                …plus {r.warnings.length - 6} more
               </Text>
             ) : null}
           </>
@@ -630,120 +685,46 @@ function StageBody({
         >
           <Text style={styles.ctaLabel}>Done</Text>
         </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.secondaryCta}
+          onPress={onImportAnother}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.secondaryCtaLabel}>Import another team</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.secondaryCta}
+          onPress={onLogout}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.secondaryCtaLabel}>Log out</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  if (stage.kind === 'error') {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Couldn&apos;t import {stage.slug}</Text>
+        <Text style={styles.cardBody}>{stage.reason}</Text>
+        <TouchableOpacity
+          style={styles.cta}
+          onPress={onImportAnother}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.ctaLabel}>Try again</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.secondaryCta}
+          onPress={onLogout}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.secondaryCtaLabel}>Log out</Text>
+        </TouchableOpacity>
       </View>
     );
   }
   return null;
-}
-
-function MatchesList({
-  stage,
-  onToggleMatch,
-  onToggleAll,
-  onRunImport,
-  colors,
-}: {
-  stage: Extract<Stage, { kind: 'matches-list' }>;
-  onToggleMatch: (matchId: string) => void;
-  onToggleAll: () => void;
-  onRunImport: () => void;
-  colors: ThemeColors;
-}) {
-  const styles = useMemo(() => makeStyles(colors), [colors]);
-  const selectedCount = useMemo(
-    () => stage.matches.filter((m) => stage.selected[m.id]).length,
-    [stage.matches, stage.selected]
-  );
-  const profile = stage.teamProfile;
-  return (
-    <>
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>{stage.team.name}</Text>
-        <Text style={styles.cardMeta}>
-          {stage.matches.length} match
-          {stage.matches.length === 1 ? '' : 'es'} found · {selectedCount}{' '}
-          selected
-        </Text>
-        {!profile ? (
-          <View style={styles.warningBlock}>
-            <Text style={styles.warningTitle}>Add this team first</Text>
-            <Text style={styles.warningBody}>
-              Add &ldquo;{stage.team.name}&rdquo; as one of your teams in
-              My Team, then come back to import. The importer needs a
-              matching local team to attach these matches to.
-            </Text>
-          </View>
-        ) : (
-          <Text style={styles.cardBody}>
-            Imports will attach to <Text style={{ fontWeight: '700' }}>
-              {profile.label}
-            </Text>
-            .
-          </Text>
-        )}
-      </View>
-      <TouchableOpacity
-        style={styles.selectAllRow}
-        onPress={onToggleAll}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.selectAllLabel}>
-          {selectedCount === stage.matches.length
-            ? 'Deselect all'
-            : 'Select all'}
-        </Text>
-      </TouchableOpacity>
-      {stage.matches.map((m) => {
-        const isSelected = Boolean(stage.selected[m.id]);
-        const scoreLabel =
-          m.homeScore != null && m.awayScore != null
-            ? `${m.homeScore}–${m.awayScore}`
-            : 'pending';
-        const dateLabel = m.dateMs
-          ? new Date(m.dateMs).toLocaleDateString()
-          : 'TBD';
-        return (
-          <TouchableOpacity
-            key={m.id}
-            style={styles.listRow}
-            onPress={() => onToggleMatch(m.id)}
-            activeOpacity={0.7}
-          >
-            <View
-              style={[
-                styles.checkbox,
-                isSelected && styles.checkboxOn,
-              ]}
-            >
-              {isSelected ? (
-                <Text style={styles.checkboxMark}>{'✓'}</Text>
-              ) : null}
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.listRowTitle}>vs {m.opponent}</Text>
-              <Text style={styles.listRowMeta}>
-                {dateLabel} · {scoreLabel}
-                {m.eventName ? ` · ${m.eventName}` : ''}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        );
-      })}
-      <TouchableOpacity
-        style={[
-          styles.cta,
-          (selectedCount === 0 || !profile) && styles.ctaDisabled,
-        ]}
-        onPress={onRunImport}
-        disabled={selectedCount === 0 || !profile}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.ctaLabel}>
-          Import {selectedCount} match{selectedCount === 1 ? '' : 'es'}
-        </Text>
-      </TouchableOpacity>
-    </>
-  );
 }
 
 function Hero({
@@ -799,11 +780,6 @@ function makeStyles(colors: ThemeColors) {
     centeredBlock: {
       paddingVertical: spacing.xxl,
       alignItems: 'center',
-    },
-    loadingLabel: {
-      marginTop: spacing.md,
-      color: colors.textSecondary,
-      fontSize: fontSize.sm,
     },
     intro: {
       fontSize: fontSize.sm,
@@ -882,78 +858,6 @@ function makeStyles(colors: ThemeColors) {
       fontSize: fontSize.sm,
       fontWeight: '600',
     },
-    listRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      padding: spacing.md,
-      backgroundColor: colors.surface,
-      borderRadius: borderRadius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      marginBottom: spacing.xs,
-    },
-    listRowTitle: {
-      fontSize: fontSize.md,
-      fontWeight: '600',
-      color: colors.text,
-    },
-    listRowMeta: {
-      fontSize: fontSize.xs,
-      color: colors.textSecondary,
-      marginTop: 2,
-    },
-    chev: {
-      color: colors.textLight,
-      fontSize: fontSize.lg,
-      paddingHorizontal: spacing.xs,
-    },
-    selectAllRow: {
-      padding: spacing.sm,
-      alignItems: 'flex-end',
-      marginBottom: spacing.xs,
-    },
-    selectAllLabel: {
-      color: colors.primary,
-      fontSize: fontSize.sm,
-      fontWeight: '600',
-    },
-    checkbox: {
-      width: 24,
-      height: 24,
-      borderRadius: borderRadius.sm,
-      borderWidth: 2,
-      borderColor: colors.border,
-      marginRight: spacing.md,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    checkboxOn: {
-      backgroundColor: colors.primary,
-      borderColor: colors.primary,
-    },
-    checkboxMark: {
-      color: colors.textOnPrimary,
-      fontSize: fontSize.sm,
-      fontWeight: '800',
-    },
-    warningBlock: {
-      marginTop: spacing.sm,
-      padding: spacing.md,
-      backgroundColor: colors.primaryLight,
-      borderRadius: borderRadius.sm,
-      marginBottom: spacing.sm,
-    },
-    warningTitle: {
-      fontSize: fontSize.sm,
-      fontWeight: '700',
-      color: colors.primary,
-      marginBottom: spacing.xs,
-    },
-    warningBody: {
-      fontSize: fontSize.sm,
-      color: colors.text,
-      lineHeight: 20,
-    },
     webviewWrap: {
       flex: 1,
       backgroundColor: colors.background,
@@ -969,17 +873,40 @@ function makeStyles(colors: ThemeColors) {
       backgroundColor: colors.surface,
       borderTopWidth: 1,
       borderTopColor: colors.divider,
+      alignItems: 'stretch',
+      gap: spacing.xs,
+    },
+    webviewFooterRow: {
+      flexDirection: 'row',
       alignItems: 'center',
+      justifyContent: 'space-between',
+      marginTop: spacing.xs,
     },
     webviewFooterText: {
       fontSize: fontSize.xs,
       color: colors.textSecondary,
-      marginBottom: spacing.xs,
     },
     webviewFooterLink: {
       fontSize: fontSize.sm,
       color: colors.primary,
       fontWeight: '600',
+    },
+    webviewFooterHint: {
+      fontSize: 10,
+      color: colors.textLight,
+      fontFamily: 'monospace',
+      marginTop: spacing.xs,
+    },
+    webviewImportBtn: {
+      backgroundColor: colors.primary,
+      borderRadius: borderRadius.md,
+      paddingVertical: spacing.sm,
+      paddingHorizontal: spacing.md,
+    },
+    webviewImportBtnLabel: {
+      color: colors.textOnPrimary,
+      fontSize: fontSize.sm,
+      fontWeight: '700',
     },
   });
 }
