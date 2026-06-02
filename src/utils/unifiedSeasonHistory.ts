@@ -61,6 +61,22 @@ export interface UnifiedTournamentEntry {
    *  linked to a snapshot. */
   matchKind?: 'aes' | 'timu' | 'standalone' | 'imported';
 
+  /**
+   * Indoor vs beach. AES + Timu snapshots are always 'indoor' (those
+   * platforms don't host beach). Scored entries read from `match.meta.sport`.
+   * MyTeam.Click entries (when that adapter ships) are always 'beach'.
+   * The SeasonHistory + Analytics filters key off this.
+   */
+  sport: 'indoor' | 'beach';
+
+  /**
+   * For beach entries only: who the athlete partnered with at this event.
+   * Beach partnerships change per tournament, so this is per-entry, not
+   * per-TeamProfile. Undefined for indoor entries and for beach entries
+   * where the source data didn't surface a partner.
+   */
+  beachPartner?: { name: string; shirt?: number };
+
   tournamentName: string;
   /** Division / subtitle — "18U Girls G" (AES) or "Trillium White C" (Timu). */
   subtitle?: string;
@@ -298,6 +314,33 @@ export const ACTIVE_WINDOW_FORWARD_MS = 7 * DAY_MS;
 export const ACTIVE_WINDOW_BACKWARD_MS = 2 * DAY_MS;
 
 /**
+ * Returns a short label describing the proximity of a tournament's start
+ * date relative to now. Used on the "current tournament" badge in the
+ * MyHome team tiles and the Tournaments sub-page.
+ *
+ *   • "Currently playing"  when the start date has passed
+ *   • "Starts today"       when delta < 1 day
+ *   • "Starts tomorrow"    when delta is exactly 1 day
+ *   • "Starts in N days"   when delta > 1 day
+ *   • "Active"             when no dateMs is known
+ *
+ * The countdown rounds to the nearest day so a tournament 36 hours out
+ * reads "Starts in 2 days" rather than "Starts in 1.5 days".
+ */
+export function currentTournamentBadgeLabel(
+  dateMs: number | undefined,
+  nowMs: number = Date.now()
+): string {
+  if (dateMs == null) return 'Active';
+  const delta = dateMs - nowMs;
+  if (delta <= 0) return 'Currently playing';
+  const days = Math.round(delta / DAY_MS);
+  if (days === 0) return 'Starts today';
+  if (days === 1) return 'Starts tomorrow';
+  return `Starts in ${days} days`;
+}
+
+/**
  * Returns true when this tournament is either upcoming within
  * `ACTIVE_WINDOW_FORWARD_MS` or recent enough that it's plausibly still
  * being played (`ACTIVE_WINDOW_BACKWARD_MS`). Tournaments without a
@@ -327,32 +370,6 @@ export function getActiveTournaments(
   return history
     .filter((e) => isActiveTournament(e, nowMs))
     .sort((a, b) => (a.dateMs ?? 0) - (b.dateMs ?? 0));
-}
-
-/**
- * Friendly badge text for the Current Tournament tile and equivalent
- * active-tournament chips. Returns:
- *   • "Currently playing"   when start is in the past (still inside the
- *                            in-progress grace window)
- *   • "Starts today"        when start is later today
- *   • "Starts tomorrow"     when start is the next calendar day
- *   • "Starts in N days"    otherwise
- *   • "Active"              when no dateMs is known
- *
- * The countdown rounds to the nearest day so a tournament 36 hours out
- * reads "Starts in 2 days" rather than "Starts in 1.5 days".
- */
-export function currentTournamentBadgeLabel(
-  dateMs: number | undefined,
-  nowMs: number = Date.now()
-): string {
-  if (dateMs == null) return 'Active';
-  const delta = dateMs - nowMs;
-  if (delta <= 0) return 'Currently playing';
-  const days = Math.round(delta / DAY_MS);
-  if (days === 0) return 'Starts today';
-  if (days === 1) return 'Starts tomorrow';
-  return `Starts in ${days} days`;
 }
 
 // ── Source-specific adapters ──────────────────────────────────────────────
@@ -385,6 +402,7 @@ function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEnt
 
   return {
     source: 'aes',
+    sport: 'indoor',
     sourceKey: `aes:${snap.eventKey}:${snap.divisionId}`,
     eventKey: snap.eventKey,
     divisionId: snap.divisionId,
@@ -490,6 +508,7 @@ function timuSnapshotToUnified(
 
   return {
     source: 'timu',
+    sport: 'indoor',
     sourceKey: `timu:${snap.tid}`,
     tid: snap.tid,
     tournamentName: snap.name,
@@ -575,6 +594,7 @@ function scoredMatchToUnified(
 
   const entry: UnifiedTournamentEntry = {
     source: 'scored',
+    sport: meta.sport,
     sourceKey,
     matchId: match.id,
     includeInStats: meta.includeInStats,

@@ -52,6 +52,14 @@ export interface TeamProfile {
   label: string;
   /** Which integration produced this profile (or that it merges multiple). */
   source: TeamProfileSource;
+  /**
+   * Indoor 6-person team or beach 2-person pair. Beach teams have a
+   * different cadence — partners change per tournament, season aggregates
+   * are pair-aware — so this field gates the right SeasonHistory + Analytics
+   * surfaces. Pre-beach profiles back-fill to 'indoor' via the migration
+   * pass in userProfileMigration.ts.
+   */
+  sport: 'indoor' | 'beach';
   /** Whether this team rolls up into the Career view. Defaults to 'me'. */
   kind: TeamProfileKind;
   /**

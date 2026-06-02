@@ -10,11 +10,6 @@
     "runtimeVersion": {
       "policy": "appVersion"
     },
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.aesscoretracker.app",
@@ -63,7 +58,8 @@
       "package": "com.aesscoretracker.app",
       "permissions": [
         "INTERNET"
-      ]
+      ],
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -84,6 +80,15 @@
           "url": "https://sentry.io/",
           "project": "setpoint",
           "organization": "none-6v6"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/jontyware/splash-full-steel.png",
+          "imageWidth": 320,
+          "resizeMode": "contain",
+          "backgroundColor": "#121b27"
         }
       ]
     ]

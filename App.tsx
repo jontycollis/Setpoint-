@@ -1,5 +1,13 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { StatusBar } from 'expo-status-bar';
+import * as SplashScreen from 'expo-splash-screen';
+import JontywareSplash from './src/components/JontywareSplash';
+
+// Hold the native splash until our JS-side <JontywareSplash> overlay mounts
+// and calls SplashScreen.hideAsync() from its own effect. preventAutoHideAsync
+// returns a promise that rejects if the splash has already auto-hidden — the
+// catch keeps Fast Refresh / re-runs from crashing the bundle.
+SplashScreen.preventAutoHideAsync().catch(() => {});
 import {
   View,
   Text,
@@ -870,6 +878,7 @@ function AppInner() {
                 id,
                 label: params.teamName,
                 source: 'aes',
+                sport: 'indoor',
                 kind: 'me',
                 aliases,
                 seasonLabel: params.divisionLabel || undefined,
@@ -1001,29 +1010,88 @@ function AppInner() {
     []
   );
 
+  // Flip a TeamProfile between `'me'` (rolls up into Career, tied to an
+  // athlete) and `'watching'` (favorite-style follow only). When promoting
+  // to `'me'` we attach the active athlete so Career stats wire up; when
+  // demoting we drop `athleteId` to match the existing watching shape.
+  // Activates the team if it's becoming the user's own — otherwise a
+  // freshly-promoted team would sit invisible behind the active selection.
+  const handleToggleTeamKind = useCallback((team: TeamProfile) => {
+    setUserProfile((prev) => {
+      if (!prev) return prev;
+      const nextKind: 'me' | 'watching' = team.kind === 'me' ? 'watching' : 'me';
+      const now = Date.now();
+      const nextTeams = prev.teams.map((t) => {
+        if (t.id !== team.id) return t;
+        if (nextKind === 'me') {
+          return {
+            ...t,
+            kind: 'me' as const,
+            athleteId: prev.activeAthleteId ?? t.athleteId,
+            updatedAt: now,
+          };
+        }
+        // Demoting to watching — drop the athlete tag so it stops counting
+        // in Career rollups. `athleteId` is optional on TeamProfile, so
+        // omitting the key is the clean way to remove it.
+        const { athleteId: _drop, ...rest } = t;
+        return {
+          ...rest,
+          kind: 'watching' as const,
+          updatedAt: now,
+        };
+      });
+      const next: UserProfile = {
+        ...prev,
+        teams: nextTeams,
+        // If we just promoted to 'me' and nothing was active, make this
+        // team active so it surfaces in MyHome and the hamburger.
+        activeTeamId:
+          nextKind === 'me' && !prev.activeTeamId ? team.id : prev.activeTeamId,
+        updatedAt: now,
+      };
+      saveUserProfile(next).catch(() => {});
+      return next;
+    });
+  }, []);
+
   // Long-press on a TeamProfile card → surface an action sheet with the
   // available per-team actions. Replaces the prior "long-press = remove"
   // shortcut now that there's more than one thing to do per team.
   const handleLongPressTeam = useCallback(
     (team: TeamProfile) => {
-      Alert.alert(
-        team.label,
-        undefined,
-        [
-          {
-            text: 'Manage roster',
-            onPress: () => handleOpenRosterEditor(team),
-          },
-          {
-            text: 'Remove team',
-            style: 'destructive',
-            onPress: () => handleRemoveTeam(team),
-          },
-          { text: 'Cancel', style: 'cancel' },
-        ]
-      );
+      const promoteLabel =
+        team.kind === 'me' ? 'Stop tracking as my team' : 'Make this my team';
+      // Android's Alert.alert shows at most 3 buttons — the 4th silently
+      // drops off the bottom (we hit that with promote+manage+remove+cancel).
+      // Android also auto-dismisses on tap-outside, so users can still back
+      // out without an explicit Cancel. iOS modals don't tap-out-dismiss,
+      // so iOS users need the explicit Cancel button.
+      const buttons: Array<{
+        text: string;
+        style?: 'default' | 'cancel' | 'destructive';
+        onPress?: () => void;
+      }> = [
+        {
+          text: promoteLabel,
+          onPress: () => handleToggleTeamKind(team),
+        },
+        {
+          text: 'Manage roster',
+          onPress: () => handleOpenRosterEditor(team),
+        },
+        {
+          text: 'Remove team',
+          style: 'destructive',
+          onPress: () => handleRemoveTeam(team),
+        },
+      ];
+      if (Platform.OS === 'ios') {
+        buttons.push({ text: 'Cancel', style: 'cancel' });
+      }
+      Alert.alert(team.label, undefined, buttons);
     },
-    [handleOpenRosterEditor, handleRemoveTeam]
+    [handleOpenRosterEditor, handleRemoveTeam, handleToggleTeamKind]
   );
 
   /**
@@ -3100,6 +3168,34 @@ function AppInner() {
           <SidelineImportScreen
             userProfile={userProfile}
             onBack={goBack}
+            onAddTeamAlias={(teamId, alias) => {
+              // Append the slug to the named team's alias list (deduped),
+              // bump updatedAt, persist. Fire-and-forget on the save so
+              // the import flow doesn't block on disk. Persisting an
+              // alias for a profile we don't have (`prev == null`) is a
+              // no-op — shouldn't happen in practice since the screen
+              // only renders meTeams when userProfile is non-null, but
+              // guard anyway.
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const next: UserProfile = {
+                  ...prev,
+                  teams: prev.teams.map((t) =>
+                    t.id === teamId
+                      ? {
+                          ...t,
+                          aliases: dedupeAliases([...t.aliases, alias]),
+                          updatedAt: now,
+                        }
+                      : t
+                  ),
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
           />
         );
       case 'About':
@@ -3306,18 +3402,28 @@ function AppInner() {
 // white-screening JS. When Sentry lands in Phase 4 the `onError`
 // callback below will hand the error through to Sentry.captureException.
 export default Sentry.wrap(function App() {
+  // Overlay state for the jontyware brand-house splash. The component fades
+  // itself out after ~2s and calls onFinish, at which point we unmount it so
+  // the app underneath becomes interactive.
+  const [splashDone, setSplashDone] = useState(false);
+
   return (
-    <ErrorBoundary
-      onError={(err, componentStack) => {
-        if (__DEV__) {
-          // eslint-disable-next-line no-console
-          console.warn('[App] caught render error:', err, componentStack);
-        }
-        reportError(err, componentStack);
-      }}
-    >
-      <AppInner />
-    </ErrorBoundary>
+    <>
+      <ErrorBoundary
+        onError={(err, componentStack) => {
+          if (__DEV__) {
+            // eslint-disable-next-line no-console
+            console.warn('[App] caught render error:', err, componentStack);
+          }
+          reportError(err, componentStack);
+        }}
+      >
+        <AppInner />
+      </ErrorBoundary>
+      {!splashDone && (
+        <JontywareSplash onFinish={() => setSplashDone(true)} />
+      )}
+    </>
   );
 });
 

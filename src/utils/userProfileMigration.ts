@@ -30,6 +30,20 @@ export function makeAthleteProfileId(now: number = Date.now()): string {
   return `ath_${t}_${r}`;
 }
 
+// ── TeamProfile shape backfill ────────────────────────────────────────────
+
+/**
+ * Ensure a TeamProfile has every field that's been added since the original
+ * v2 ship. Currently fills in `sport: 'indoor'` for profiles created before
+ * beach support landed — every existing profile is an indoor team, so the
+ * default is safe. Pure / idempotent — returns the same reference when no
+ * patch is needed so a no-op load doesn't churn updatedAt downstream.
+ */
+export function ensureTeamProfileShape(team: TeamProfile): TeamProfile {
+  if (team.sport === 'indoor' || team.sport === 'beach') return team;
+  return { ...team, sport: 'indoor' };
+}
+
 // ── v1 → v2 migration ─────────────────────────────────────────────────────
 
 /**
@@ -74,8 +88,14 @@ export function buildV2FromV1(
   legacy: UserProfileV1 | UserProfile,
   now: number = Date.now()
 ): UserProfile {
-  // Idempotent short-circuit — already v2.
-  if (legacy.version === 2) return legacy;
+  // Already v2 — still run the team-shape backfill so additive fields like
+  // `sport` land on profiles that v2'd before beach support shipped. Skip
+  // the rebuild when no team needs patching to avoid churning updatedAt.
+  if (legacy.version === 2) {
+    const patched = legacy.teams.map(ensureTeamProfileShape);
+    const changed = patched.some((t, i) => t !== legacy.teams[i]);
+    return changed ? { ...legacy, teams: patched, updatedAt: now } : legacy;
+  }
 
   const v1 = legacy as UserProfileV1;
   const hasMeTeams = v1.teams.some((t) => t.kind === 'me');
@@ -87,7 +107,7 @@ export function buildV2FromV1(
       role: v1.role,
       athletes: [],
       activeAthleteId: null,
-      teams: v1.teams,
+      teams: v1.teams.map(ensureTeamProfileShape),
       activeTeamId: v1.activeTeamId,
       mrsLinked: v1.mrsLinked,
       mrsMemberId: v1.mrsMemberId,
@@ -111,7 +131,7 @@ export function buildV2FromV1(
   };
 
   const teams: TeamProfile[] = v1.teams.map((t) =>
-    t.kind === 'me' ? { ...t, athleteId: selfId } : t
+    ensureTeamProfileShape(t.kind === 'me' ? { ...t, athleteId: selfId } : t)
   );
 
   return {

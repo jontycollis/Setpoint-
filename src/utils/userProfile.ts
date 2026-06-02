@@ -151,6 +151,7 @@ export function buildProfileFromLegacy(
       id,
       label: legacyMyTeam.teamName || 'My team',
       source: legacyFavoriteToSource(legacyMyTeam),
+      sport: 'indoor',
       kind: 'me',
       aliases,
       primaryRef: legacyMyTeam,
@@ -167,6 +168,7 @@ export function buildProfileFromLegacy(
       id,
       label: aliases[0] || 'My team',
       source: 'aes', // best guess; user can flip in Phase 2 if needed
+      sport: 'indoor',
       kind: 'me',
       aliases,
       // primaryRef intentionally omitted
@@ -207,6 +209,7 @@ export function buildProfileFromLegacy(
       id,
       label: fav.teamText || fav.teamName,
       source: legacyFavoriteToSource(fav),
+      sport: 'indoor',
       kind: 'watching',
       aliases: dedupeAliases([fav.teamName, fav.teamText]),
       primaryRef: fav,
