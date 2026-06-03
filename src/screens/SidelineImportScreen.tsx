@@ -955,6 +955,20 @@ export function SidelineImportScreen({
             thirdPartyCookiesEnabled={true}
             javaScriptEnabled={true}
             domStorageEnabled={true}
+            onLoadEnd={() => {
+              // Run JWT extraction on every page-load completion while we
+              // could plausibly capture it. Covers three entry points the
+              // single-shot URL-transition injection missed:
+              //   • auto-resume from a stored session (skip login entirely)
+              //   • Sideline HD redirects an already-logged-in user past /login
+              //   • the user navigates inside the WebView after we promoted
+              // Cheap to run — IDB read is fast, and the firebase-jwt
+              // handler debounces by only firing the api-loading transition
+              // when we're still in `browsing`.
+              if (stage.kind === 'browsing' || stage.kind === 'login') {
+                webViewRef.current?.injectJavaScript(EXTRACT_JWT_JS);
+              }
+            }}
           />
           <WebViewFooter
             stage={stage}
