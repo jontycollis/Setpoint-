@@ -79,10 +79,18 @@ import {
 import { findTeamProfileByAlias } from '../utils/userProfile';
 import {
   runSidelineLocalStorageImport,
+  runSidelineApiImport,
   type SidelineLiveImportProgress,
   type SidelineLiveImportResult,
 } from '../utils/sidelineHdLiveImporter';
 import type { SidelineHdLocalStorageSnapshot } from '../utils/sidelineHdParser';
+import {
+  fetchMyTeams,
+  fetchTeamGames,
+  SidelineHdApiError,
+  type SidelineHdApiTeam,
+  type SidelineHdSession,
+} from '../utils/sidelineHdApi';
 
 interface Props {
   userProfile: UserProfile | null;
@@ -176,6 +184,203 @@ function extractSlugFromUserInput(input: string): string | null {
   return s;
 }
 
+// Diagnostic: enumerate IndexedDB databases on the page and (when the
+// modern `indexedDB.databases()` API is available) the object stores
+// inside each. Sideline HD moved away from localStorage for match data,
+// so this is where we look next.
+const DIAGNOSE_INDEXEDDB_JS = `
+(function() {
+  try {
+    if (!window.indexedDB) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        kind: 'idb-diagnostic',
+        href: location.href,
+        databases: [],
+        note: 'indexedDB unavailable on this page',
+      }));
+      return;
+    }
+    var listPromise = (typeof indexedDB.databases === 'function')
+      ? indexedDB.databases()
+      : Promise.resolve([]);
+    listPromise.then(function(dbs) {
+      var summaries = [];
+      var remaining = dbs.length;
+      if (remaining === 0) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          kind: 'idb-diagnostic',
+          href: location.href,
+          databases: [],
+          note: 'no indexedDB databases registered',
+        }));
+        return;
+      }
+      dbs.forEach(function(info) {
+        var req = indexedDB.open(info.name, info.version);
+        req.onsuccess = function() {
+          var db = req.result;
+          var stores = Array.prototype.slice.call(db.objectStoreNames);
+          summaries.push({
+            name: info.name,
+            version: info.version,
+            stores: stores,
+          });
+          db.close();
+          remaining--;
+          if (remaining === 0) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              kind: 'idb-diagnostic',
+              href: location.href,
+              databases: summaries,
+            }));
+          }
+        };
+        req.onerror = function() {
+          summaries.push({
+            name: info.name,
+            version: info.version,
+            error: 'open failed',
+          });
+          remaining--;
+          if (remaining === 0) {
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              kind: 'idb-diagnostic',
+              href: location.href,
+              databases: summaries,
+            }));
+          }
+        };
+      });
+    }).catch(function(err) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        kind: 'idb-diagnostic',
+        href: location.href,
+        databases: [],
+        note: 'indexedDB.databases() rejected: ' + String(err && err.message ? err.message : err),
+      }));
+    });
+  } catch (err) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      kind: 'localstorage-error',
+      error: String(err && err.message ? err.message : err),
+    }));
+  }
+  true;
+})();
+`;
+
+// Diagnostic: dump every localStorage key + value size. Lets us see when
+// Sideline HD has renamed their cache prefixes (the import filter only
+// captures __pvc* and __review_*). The response comes back as a
+// `localstorage-diagnostic` message; the parent shows it in an Alert.
+const DIAGNOSE_LOCALSTORAGE_JS = `
+(function() {
+  try {
+    var keys = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var k = localStorage.key(i);
+      if (!k) continue;
+      var v = localStorage.getItem(k);
+      var size = v ? v.length : 0;
+      // Capture a tiny prefix of the value so JSON-shaped payloads are
+      // identifiable without ballooning the payload size.
+      var preview = v ? v.substring(0, 60).replace(/\\s+/g, ' ') : '';
+      keys.push({ key: k, size: size, preview: preview });
+    }
+    keys.sort(function(a, b) { return b.size - a.size; });
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      kind: 'localstorage-diagnostic',
+      href: location.href,
+      total: keys.length,
+      keys: keys,
+    }));
+  } catch (err) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      kind: 'localstorage-error',
+      error: String(err && err.message ? err.message : err),
+    }));
+  }
+  true;
+})();
+`;
+
+// Injected into the WebView after Sideline HD login to extract the
+// Firebase JWT from IndexedDB. Posts a `firebase-jwt` message back so
+// the parent can flip from "WebView scraping" mode to direct REST API
+// calls. See `src/utils/sidelineHdApi.ts` for the API surface this
+// unlocks.
+//
+// The token lives in:
+//   firebaseLocalStorageDb → firebaseLocalStorage store
+//     → key starts with "firebase:authUser:<API_KEY>:[DEFAULT]"
+//     → value.value.stsTokenManager.accessToken
+//
+// If no entry is present we post `firebase-jwt` with `jwt: null` so the
+// caller can fall back to the older localStorage-snapshot flow without
+// blocking.
+const EXTRACT_JWT_JS = `
+(function() {
+  try {
+    var req = indexedDB.open('firebaseLocalStorageDb');
+    req.onsuccess = function() {
+      try {
+        var db = req.result;
+        var tx = db.transaction(['firebaseLocalStorage'], 'readonly');
+        var store = tx.objectStore('firebaseLocalStorage');
+        var cursorReq = store.openCursor();
+        var posted = false;
+        cursorReq.onsuccess = function(ev) {
+          if (posted) return;
+          var cur = ev.target.result;
+          if (!cur) {
+            posted = true;
+            db.close();
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+              kind: 'firebase-jwt', jwt: null, reason: 'no-entry'
+            }));
+            return;
+          }
+          var v = cur.value && cur.value.value;
+          var tokenObj = v && v.stsTokenManager;
+          var token = tokenObj && tokenObj.accessToken;
+          posted = true;
+          db.close();
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            kind: 'firebase-jwt',
+            jwt: token || null,
+            expirationTime: tokenObj && tokenObj.expirationTime,
+            email: v && v.email,
+            uid: v && v.uid,
+          }));
+        };
+        cursorReq.onerror = function() {
+          if (posted) return;
+          posted = true;
+          db.close();
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            kind: 'firebase-jwt', jwt: null, reason: 'cursor-error'
+          }));
+        };
+      } catch (err) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({
+          kind: 'firebase-jwt', jwt: null, reason: String(err && err.message ? err.message : err)
+        }));
+      }
+    };
+    req.onerror = function() {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        kind: 'firebase-jwt', jwt: null, reason: 'idb-open-error'
+      }));
+    };
+  } catch (err) {
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      kind: 'firebase-jwt', jwt: null, reason: String(err && err.message ? err.message : err)
+    }));
+  }
+  true;
+})();
+`;
+
 // Injected into the WebView to pull every Sideline HD-prefixed
 // localStorage entry. The response comes back via `onMessage`.
 const EXTRACT_LOCALSTORAGE_JS = `
@@ -211,23 +416,43 @@ type Stage =
   | { kind: 'login' }
   | { kind: 'browsing'; session: SidelineHdSessionRecord }
   | {
+      // New API path: JWT extracted, fetching `/v2/my/teams`. UI shows a
+      // spinner while we wait. Falls back to `browsing` if the fetch
+      // fails so the user still has the legacy slug-input escape hatch.
+      kind: 'api-loading';
+      session: SidelineHdSessionRecord;
+    }
+  | {
+      // API teams list loaded. UI shows one row per Sideline HD team
+      // with a "Import" CTA. Tapping a row transitions to `pick-team`
+      // with `apiTeam` set so the import runner takes the REST API path
+      // instead of the legacy WebView-localStorage path.
+      kind: 'api-team-pick';
+      session: SidelineHdSessionRecord;
+      apiTeams: SidelineHdApiTeam[];
+    }
+  | {
       kind: 'extracting';
       session: SidelineHdSessionRecord;
       slug: string;
     }
   | {
-      // Auto-match by alias didn't find a TeamProfile for this slug.
-      // We render a picker so the user can choose the right team manually
-      // instead of bouncing them out of the flow.
+      // Auto-match by alias didn't find a TeamProfile. Picker lets the
+      // user choose the right team manually. `snapshot` is set on the
+      // legacy localStorage path; `apiTeam` is set on the new REST API
+      // path. Exactly one is populated.
       kind: 'pick-team';
       slug: string;
-      snapshot: SidelineHdLocalStorageSnapshot;
+      snapshot: SidelineHdLocalStorageSnapshot | null;
+      apiTeam: SidelineHdApiTeam | null;
     }
   | {
       kind: 'importing';
       slug: string;
       teamProfile: TeamProfile;
-      snapshot: SidelineHdLocalStorageSnapshot;
+      // Source-of-truth for the in-progress import. Set per stage entry.
+      snapshot: SidelineHdLocalStorageSnapshot | null;
+      apiTeam: SidelineHdApiTeam | null;
       progress: SidelineLiveImportProgress | null;
     }
   | {
@@ -256,6 +481,12 @@ export function SidelineImportScreen({
   // re-render reactively as the user navigates.
   const [currentUrl, setCurrentUrl] = useState<string>(SIDELINE_HD_BASE_URL);
   const webViewRef = useRef<WebView>(null);
+  // Firebase JWT captured from the WebView's IndexedDB after a successful
+  // login. Persists in a ref (not state) because we read it from async
+  // callbacks where stale-closure state would lie, and re-renders aren't
+  // needed when it changes — the stage transitions to api-loading /
+  // api-team-pick drive the UI updates instead.
+  const jwtRef = useRef<string | null>(null);
 
   // ── Initial probe ────────────────────────────────────────────────────
   //
@@ -287,6 +518,49 @@ export function SidelineImportScreen({
   // While in the login stage we watch for the post-login redirect and
   // capture the session. Once logged in, we flip into the browsing stage
   // where the same WebView is left mounted so the user can navigate to
+  // ── REST API path: load my teams once JWT is in hand ───────────────
+  //
+  // Runs when the stage transitions to `api-loading` (set by the
+  // firebase-jwt message handler). Calls /v2/my/teams and promotes into
+  // `api-team-pick` with the list. On failure we degrade back to
+  // `browsing` so the legacy WebView slug flow remains available.
+  useEffect(() => {
+    if (stage.kind !== 'api-loading') return;
+    const jwt = jwtRef.current;
+    if (!jwt) {
+      // Shouldn't happen — the message handler only sets api-loading
+      // when a non-null JWT lands — but guard anyway so a future race
+      // doesn't lock the UI.
+      setStage({ kind: 'browsing', session: stage.session });
+      return;
+    }
+    let cancelled = false;
+    const session: SidelineHdSession = { jwt };
+    (async () => {
+      try {
+        const apiTeams = await fetchMyTeams(session);
+        if (cancelled) return;
+        setStage((prev) =>
+          prev.kind === 'api-loading'
+            ? { kind: 'api-team-pick', session: prev.session, apiTeams }
+            : prev
+        );
+      } catch (err) {
+        if (cancelled) return;
+        // eslint-disable-next-line no-console
+        console.warn('[SidelineImport] fetchMyTeams failed', err);
+        setStage((prev) =>
+          prev.kind === 'api-loading'
+            ? { kind: 'browsing', session: prev.session }
+            : prev
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [stage]);
+
   // their team page.
   const handleNavigationStateChange = useCallback(
     async (navState: WebViewNavigation) => {
@@ -309,6 +583,16 @@ export function SidelineImportScreen({
         if (prev.kind !== 'login') return prev;
         const stillOnLoginPage = /\/login(\?|$|\/)/.test(url);
         if (stillOnLoginPage) return prev;
+
+        // Kick off the JWT-extraction injection once we've left /login.
+        // Fires regardless of cookie-module availability — the JWT is the
+        // single signal that unlocks the new REST API import path. The
+        // 350ms delay gives Sideline HD's bundle time to populate the
+        // Firebase auth IDB entry; without it the read often races and
+        // returns null on the first navigation off /login.
+        setTimeout(() => {
+          webViewRef.current?.injectJavaScript(EXTRACT_JWT_JS);
+        }, 350);
 
         const cookieModulePresent = isSidelineHdCookieModuleAvailable();
         if (!cookieModulePresent) {
@@ -348,34 +632,80 @@ export function SidelineImportScreen({
   const startImportForTeam = useCallback(
     (
       slug: string,
-      snapshot: SidelineHdLocalStorageSnapshot,
+      source: {
+        snapshot: SidelineHdLocalStorageSnapshot | null;
+        apiTeam: SidelineHdApiTeam | null;
+      },
       teamProfile: TeamProfile
     ) => {
+      const { snapshot, apiTeam } = source;
       setStage({
         kind: 'importing',
         slug,
         teamProfile,
         snapshot,
+        apiTeam,
         progress: null,
       });
       void (async () => {
         try {
-          const result = await runSidelineLocalStorageImport({
-            snapshot,
-            teamProfileId: teamProfile.id,
-            teamLabel: teamProfile.label,
-            onProgress: (progress) =>
-              setStage({
-                kind: 'importing',
-                slug,
-                teamProfile,
-                snapshot,
-                progress,
-              }),
-          });
+          let result: SidelineLiveImportResult;
+          if (apiTeam) {
+            // REST API path: fetch games over HTTPS, parse, persist.
+            const jwt = jwtRef.current;
+            if (!jwt) {
+              throw new Error(
+                'Lost the Sideline HD session — log in again to retry.'
+              );
+            }
+            const session: SidelineHdSession = { jwt };
+            const games = await fetchTeamGames(session, apiTeam.id);
+            result = await runSidelineApiImport({
+              games,
+              teamProfileId: teamProfile.id,
+              teamLabel: teamProfile.label,
+              onProgress: (progress) =>
+                setStage({
+                  kind: 'importing',
+                  slug,
+                  teamProfile,
+                  snapshot,
+                  apiTeam,
+                  progress,
+                }),
+            });
+          } else if (snapshot) {
+            // Legacy localStorage-snapshot path (kept for builds without
+            // a working JWT extraction; Sideline HD's frontend has moved
+            // away from the localStorage cache so this typically returns
+            // 0 matches now).
+            result = await runSidelineLocalStorageImport({
+              snapshot,
+              teamProfileId: teamProfile.id,
+              teamLabel: teamProfile.label,
+              onProgress: (progress) =>
+                setStage({
+                  kind: 'importing',
+                  slug,
+                  teamProfile,
+                  snapshot,
+                  apiTeam,
+                  progress,
+                }),
+            });
+          } else {
+            throw new Error(
+              'No import source available — log in and try again.'
+            );
+          }
           setStage({ kind: 'done', slug, teamProfile, result });
         } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
+          const msg =
+            err instanceof SidelineHdApiError
+              ? `${err.message} (HTTP ${err.status}${err.code ? ` ${err.code}` : ''})`
+              : err instanceof Error
+              ? err.message
+              : String(err);
           setStage({ kind: 'error', slug, reason: msg });
         }
       })();
@@ -398,6 +728,66 @@ export function SidelineImportScreen({
       }
       if (!parsed || typeof parsed !== 'object') return;
       const message = parsed as Record<string, unknown>;
+      if (message.kind === 'firebase-jwt') {
+        // JWT extraction returned. If we got a token, promote into the
+        // api-loading stage and a `useEffect` below picks it up to fetch
+        // /v2/my/teams. If we got null, the user is either not logged in
+        // (mid-login flow) or Sideline HD has changed where the JWT is
+        // stored — either way we leave the screen in `browsing` so the
+        // legacy slug-input path still works.
+        const jwt =
+          typeof message.jwt === 'string' && message.jwt.length > 20
+            ? message.jwt
+            : null;
+        if (!jwt) return;
+        jwtRef.current = jwt;
+        setStage((prev) => {
+          if (prev.kind !== 'browsing') return prev;
+          return { kind: 'api-loading', session: prev.session };
+        });
+        return;
+      }
+      if (message.kind === 'idb-diagnostic') {
+        // IndexedDB diagnostic: show which databases + object stores exist
+        // on the page. Match-data candidates: any store named like games,
+        // matches, reviews, plays, pvc*, etc.
+        const dbs = Array.isArray(message.databases) ? message.databases : [];
+        const href = typeof message.href === 'string' ? message.href : '(no url)';
+        const note = typeof message.note === 'string' ? message.note : null;
+        const body = dbs.length
+          ? dbs.map((d: unknown) => {
+              const dd = d as {
+                name?: string;
+                version?: number;
+                stores?: string[];
+                error?: string;
+              };
+              const stores = (dd.stores ?? []).join(', ') || '(no stores)';
+              const head = `${dd.name ?? '?'} v${dd.version ?? '?'}`;
+              return dd.error ? `${head} — ${dd.error}` : `${head}\n  ${stores}`;
+            }).join('\n\n')
+          : note ?? 'no databases';
+        Alert.alert(`IndexedDB on ${href}`, body);
+        return;
+      }
+      if (message.kind === 'localstorage-diagnostic') {
+        // Diagnostic dump for troubleshooting "0 matches imported". Lists
+        // every localStorage key with size + a short value preview so we
+        // can see whether Sideline HD renamed their cache prefixes.
+        const keys = Array.isArray(message.keys) ? message.keys : [];
+        const href = typeof message.href === 'string' ? message.href : '(no url)';
+        const lines = keys.slice(0, 30).map((k: unknown) => {
+          const kk = k as { key?: string; size?: number; preview?: string };
+          return `${kk.size ?? 0}B  ${kk.key ?? '?'}\n  ${kk.preview ?? ''}`;
+        });
+        const extra =
+          keys.length > 30 ? `\n…and ${keys.length - 30} more` : '';
+        Alert.alert(
+          `localStorage on ${href}`,
+          `${keys.length} key(s)\n\n${lines.join('\n\n')}${extra}`
+        );
+        return;
+      }
       if (message.kind === 'localstorage-error') {
         setStage((prev) => {
           if (prev.kind !== 'extracting') return prev;
@@ -450,14 +840,16 @@ export function SidelineImportScreen({
             kind: 'pick-team',
             slug,
             snapshot,
+            apiTeam: null,
           };
         }
-        startImportForTeam(slug, snapshot, teamProfile);
+        startImportForTeam(slug, { snapshot, apiTeam: null }, teamProfile);
         return {
           kind: 'importing',
           slug,
           teamProfile,
           snapshot,
+          apiTeam: null,
           progress: null,
         };
       });
@@ -517,7 +909,10 @@ export function SidelineImportScreen({
 
   // Show the WebView for the login + browsing + extracting stages — the
   // same WebView instance is reused so cookies and DOM state persist
-  // across navigation.
+  // across navigation. The new REST API stages (api-loading,
+  // api-team-pick) deliberately hide the WebView: once we have the JWT
+  // we have no further use for it, and rendering native picker UI on
+  // top of an idle WebView is just visual noise.
   const showWebView =
     stage.kind === 'login' ||
     stage.kind === 'browsing' ||
@@ -576,6 +971,14 @@ export function SidelineImportScreen({
               const js = `window.location.href = ${JSON.stringify(targetUrl)}; true;`;
               webViewRef.current?.injectJavaScript(js);
             }}
+            onDiagnoseLocalStorage={() => {
+              // Fires the diagnostic JS; results come back via
+              // `handleWebViewMessage` and surface in an Alert.
+              webViewRef.current?.injectJavaScript(DIAGNOSE_LOCALSTORAGE_JS);
+            }}
+            onDiagnoseIndexedDB={() => {
+              webViewRef.current?.injectJavaScript(DIAGNOSE_INDEXEDDB_JS);
+            }}
             colors={colors}
           />
         </KeyboardAvoidingView>
@@ -588,6 +991,33 @@ export function SidelineImportScreen({
             onLogout={handleLogout}
             onDone={onBack}
             onImportAnother={handleImportAnother}
+            onPickApiTeam={(apiTeam) => {
+              // Auto-match the Sideline HD team to one of the user's
+              // TeamProfiles by alias. Strong match → import immediately;
+              // no match → drop into the pick-team picker with apiTeam
+              // set so the same picker UI handles both legacy and API
+              // paths.
+              const slug = (apiTeam.name ?? apiTeam.id).toString();
+              const teamProfile =
+                findTeamProfileByAlias(userProfile, slug) ??
+                (apiTeam.name
+                  ? findTeamProfileByAlias(userProfile, apiTeam.name)
+                  : null);
+              if (teamProfile) {
+                startImportForTeam(
+                  slug,
+                  { snapshot: null, apiTeam },
+                  teamProfile
+                );
+              } else {
+                setStage({
+                  kind: 'pick-team',
+                  slug,
+                  snapshot: null,
+                  apiTeam,
+                });
+              }
+            }}
             onSelectTeam={(team) =>
               setStage((prev) => {
                 // Guard: only act when we're actually in pick-team. Anything
@@ -598,12 +1028,17 @@ export function SidelineImportScreen({
                 // forget — the import itself doesn't depend on the alias
                 // landing, and the parent handles its own error logging.
                 onAddTeamAlias?.(team.id, prev.slug);
-                startImportForTeam(prev.slug, prev.snapshot, team);
+                startImportForTeam(
+                  prev.slug,
+                  { snapshot: prev.snapshot, apiTeam: prev.apiTeam },
+                  team
+                );
                 return {
                   kind: 'importing',
                   slug: prev.slug,
                   teamProfile: team,
                   snapshot: prev.snapshot,
+                  apiTeam: prev.apiTeam,
                   progress: null,
                 };
               })
@@ -629,6 +1064,8 @@ function WebViewFooter({
   onImport,
   onCancel,
   onNavigateToSlug,
+  onDiagnoseLocalStorage,
+  onDiagnoseIndexedDB,
   colors,
 }: {
   stage: Stage;
@@ -637,6 +1074,8 @@ function WebViewFooter({
   onImport: () => void;
   onCancel: () => void;
   onNavigateToSlug: (slug: string) => void;
+  onDiagnoseLocalStorage: () => void;
+  onDiagnoseIndexedDB: () => void;
   colors: ThemeColors;
 }) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -659,8 +1098,38 @@ function WebViewFooter({
     return (
       <View style={styles.webviewFooter}>
         <Text style={styles.webviewFooterText}>
-          Log in above. We&apos;ll detect when you reach the dashboard.
+          Log in above. We&apos;ll detect when you reach the dashboard. If
+          you&apos;re already logged in, type your team URL below and tap Go.
         </Text>
+        {/*
+         * Same slug-entry escape hatch we show in browsing. Sideline HD
+         * sometimes keeps the URL at /login even after a successful sign-in
+         * (they swap page content in place), which leaves our nav listener
+         * unable to promote the stage. Letting the user navigate by slug
+         * here unblocks that path.
+         */}
+        <View style={styles.slugInputRow}>
+          <TextInput
+            style={styles.slugInput}
+            value={slugInput}
+            onChangeText={setSlugInput}
+            placeholder="pvc3droyals or sidelinehd.com/pvc3droyals"
+            placeholderTextColor={colors.textLight}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="off"
+            keyboardType="url"
+            returnKeyType="go"
+            onSubmitEditing={handleGo}
+          />
+          <TouchableOpacity
+            style={styles.slugGoBtn}
+            onPress={handleGo}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.slugGoBtnLabel}>Go</Text>
+          </TouchableOpacity>
+        </View>
         <TouchableOpacity
           onPress={onCancel}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -686,39 +1155,49 @@ function WebViewFooter({
     <View style={styles.webviewFooter}>
       <Text style={styles.webviewFooterText}>
         {importEnabled
-          ? `Ready: ${currentSlug}`
+          ? `Ready: ${currentSlug} — or switch teams below`
           : 'Navigate to your team page, or enter your Sideline HD team URL below.'}
       </Text>
-      {!importEnabled ? (
-        <View style={styles.slugInputRow}>
-          <TextInput
-            style={styles.slugInput}
-            value={slugInput}
-            onChangeText={setSlugInput}
-            placeholder="pvc3droyals or sidelinehd.com/pvc3droyals"
-            placeholderTextColor={colors.textLight}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="off"
-            keyboardType="url"
-            returnKeyType="go"
-            onSubmitEditing={handleGo}
-          />
-          <TouchableOpacity
-            style={styles.slugGoBtn}
-            onPress={handleGo}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.slugGoBtnLabel}>Go</Text>
-          </TouchableOpacity>
-        </View>
-      ) : null}
+      <View style={styles.slugInputRow}>
+        <TextInput
+          style={styles.slugInput}
+          value={slugInput}
+          onChangeText={setSlugInput}
+          placeholder="pvc3droyals or sidelinehd.com/pvc3droyals"
+          placeholderTextColor={colors.textLight}
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="off"
+          keyboardType="url"
+          returnKeyType="go"
+          onSubmitEditing={handleGo}
+        />
+        <TouchableOpacity
+          style={styles.slugGoBtn}
+          onPress={handleGo}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.slugGoBtnLabel}>Go</Text>
+        </TouchableOpacity>
+      </View>
       <View style={styles.webviewFooterRow}>
         <TouchableOpacity
           onPress={onCancel}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
         >
           <Text style={styles.webviewFooterLink}>Cancel</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onDiagnoseLocalStorage}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.webviewFooterLink}>localStorage</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={onDiagnoseIndexedDB}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Text style={styles.webviewFooterLink}>IndexedDB</Text>
         </TouchableOpacity>
         <TouchableOpacity
           onPress={onImport}
@@ -744,6 +1223,7 @@ function StageBody({
   onDone,
   onImportAnother,
   onSelectTeam,
+  onPickApiTeam,
   colors,
 }: {
   stage: Stage;
@@ -753,6 +1233,7 @@ function StageBody({
   onDone: () => void;
   onImportAnother: () => void;
   onSelectTeam: (team: TeamProfile) => void;
+  onPickApiTeam: (apiTeam: SidelineHdApiTeam) => void;
   colors: ThemeColors;
 }) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -760,6 +1241,60 @@ function StageBody({
     return (
       <View style={styles.centeredBlock}>
         <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
+  if (stage.kind === 'api-loading') {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Loading your Sideline HD teams…</Text>
+        <Text style={styles.cardBody}>
+          Pulling the list of teams on your account so you can pick which
+          one to import.
+        </Text>
+        <View style={styles.centeredBlock}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      </View>
+    );
+  }
+  if (stage.kind === 'api-team-pick') {
+    const teams = stage.apiTeams;
+    return (
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Pick a team to import</Text>
+        <Text style={styles.cardBody}>
+          {teams.length === 0
+            ? "We didn't find any teams on your Sideline HD account."
+            : `${teams.length} team${teams.length === 1 ? '' : 's'} on your Sideline HD account. Tap one to import its games.`}
+        </Text>
+        <View style={styles.pickTeamList}>
+          {teams.map((t) => (
+            <TouchableOpacity
+              key={t.id}
+              style={styles.pickTeamRow}
+              onPress={() => onPickApiTeam(t)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.pickTeamRowText}>
+                <Text style={styles.pickTeamRowLabel}>
+                  {t.name ?? t.id}
+                </Text>
+                {t.sportType ? (
+                  <Text style={styles.pickTeamRowMeta}>{t.sportType}</Text>
+                ) : null}
+              </View>
+              <Text style={styles.pickTeamRowCta}>Import</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity
+          onPress={onDone}
+          style={styles.cardSecondary}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.cardSecondaryLabel}>Cancel</Text>
+        </TouchableOpacity>
       </View>
     );
   }

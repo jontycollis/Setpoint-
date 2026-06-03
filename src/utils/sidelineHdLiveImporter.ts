@@ -19,6 +19,8 @@ import {
   parseSidelineHdLocalStorageSnapshot,
   type SidelineHdLocalStorageSnapshot,
 } from './sidelineHdParser';
+import { parseSidelineHdApiGames } from './sidelineHdGameParser';
+import type { SidelineHdApiGame } from './sidelineHdApi';
 
 export interface SidelineLiveImportProgress {
   /** 0-based index in the parsed-matches array currently being persisted. */
@@ -53,6 +55,38 @@ export async function runSidelineLocalStorageImport(
     teamLabel,
   });
 
+  return await persistParsedMatches(parseResult, onProgress);
+}
+
+interface ApiImportOptions {
+  games: SidelineHdApiGame[];
+  teamProfileId: string;
+  teamLabel: string;
+  onProgress?: (p: SidelineLiveImportProgress) => void;
+}
+
+/**
+ * Sister to `runSidelineLocalStorageImport` for the new REST API path.
+ * Takes the games array returned by `fetchTeamGames` (sidelineHdApi.ts),
+ * converts them to Match[] via the API parser, and persists via the same
+ * dedupe / saveMatch pipeline so both import sources are interchangeable
+ * at the storage layer.
+ */
+export async function runSidelineApiImport(
+  options: ApiImportOptions
+): Promise<SidelineLiveImportResult> {
+  const { games, teamProfileId, teamLabel, onProgress } = options;
+  const parseResult = parseSidelineHdApiGames(games, {
+    teamProfileId,
+    teamLabel,
+  });
+  return await persistParsedMatches(parseResult, onProgress);
+}
+
+async function persistParsedMatches(
+  parseResult: { matches: Match[]; warnings: string[] },
+  onProgress?: (p: SidelineLiveImportProgress) => void
+): Promise<SidelineLiveImportResult> {
   const existing = await loadMatches();
   const existingIds = new Set(existing.map((m) => m.id));
 
