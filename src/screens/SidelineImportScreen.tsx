@@ -1005,18 +1005,48 @@ export function SidelineImportScreen({
             onLogout={handleLogout}
             onDone={onBack}
             onImportAnother={handleImportAnother}
+            onSwitchToManual={() =>
+              setStage((prev) => {
+                // Drop back to the legacy browsing flow so the user can
+                // type a team URL into the slug input. Reuses whatever
+                // session record is on the current stage.
+                if (
+                  prev.kind !== 'api-team-pick' &&
+                  prev.kind !== 'api-loading'
+                ) {
+                  return prev;
+                }
+                return { kind: 'browsing', session: prev.session };
+              })
+            }
             onPickApiTeam={(apiTeam) => {
               // Auto-match the Sideline HD team to one of the user's
               // TeamProfiles by alias. Strong match → import immediately;
               // no match → drop into the pick-team picker with apiTeam
               // set so the same picker UI handles both legacy and API
               // paths.
-              const slug = (apiTeam.name ?? apiTeam.id).toString();
-              const teamProfile =
-                findTeamProfileByAlias(userProfile, slug) ??
-                (apiTeam.name
-                  ? findTeamProfileByAlias(userProfile, apiTeam.name)
-                  : null);
+              //
+              // We try multiple aliases for matching since Sideline HD
+              // surfaces three distinct name forms:
+              //   • `nameLong` — human-readable ("REACH Harmony")
+              //   • `nameHandle` — handle / slug ("REACHHarmony")
+              //   • `nameHandleLower` — lowercased handle
+              // First non-null match wins.
+              const aliasCandidates = [
+                apiTeam.nameLong,
+                apiTeam.nameHandle,
+                apiTeam.nameHandleLower,
+              ].filter((s): s is string => !!s);
+              const slug =
+                aliasCandidates[0] ?? apiTeam.id;
+              let teamProfile: TeamProfile | null = null;
+              for (const candidate of aliasCandidates) {
+                const found = findTeamProfileByAlias(userProfile, candidate);
+                if (found) {
+                  teamProfile = found;
+                  break;
+                }
+              }
               if (teamProfile) {
                 startImportForTeam(
                   slug,
@@ -1238,6 +1268,7 @@ function StageBody({
   onImportAnother,
   onSelectTeam,
   onPickApiTeam,
+  onSwitchToManual,
   colors,
 }: {
   stage: Stage;
@@ -1248,6 +1279,7 @@ function StageBody({
   onImportAnother: () => void;
   onSelectTeam: (team: TeamProfile) => void;
   onPickApiTeam: (apiTeam: SidelineHdApiTeam) => void;
+  onSwitchToManual: () => void;
   colors: ThemeColors;
 }) {
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -1279,29 +1311,52 @@ function StageBody({
         <Text style={styles.cardTitle}>Pick a team to import</Text>
         <Text style={styles.cardBody}>
           {teams.length === 0
-            ? "We didn't find any teams on your Sideline HD account."
+            ? "We didn't find any teams on your Sideline HD account. If you want to import a public team you don't own, switch to manual mode below and enter the team URL."
             : `${teams.length} team${teams.length === 1 ? '' : 's'} on your Sideline HD account. Tap one to import its games.`}
         </Text>
         <View style={styles.pickTeamList}>
-          {teams.map((t) => (
-            <TouchableOpacity
-              key={t.id}
-              style={styles.pickTeamRow}
-              onPress={() => onPickApiTeam(t)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.pickTeamRowText}>
-                <Text style={styles.pickTeamRowLabel}>
-                  {t.name ?? t.id}
-                </Text>
-                {t.sportType ? (
-                  <Text style={styles.pickTeamRowMeta}>{t.sportType}</Text>
-                ) : null}
-              </View>
-              <Text style={styles.pickTeamRowCta}>Import</Text>
-            </TouchableOpacity>
-          ))}
+          {teams.map((t) => {
+            const label = t.nameLong ?? t.nameHandle ?? t.id;
+            // Meta line: "18U · Volleyball · Admin · Scarborough" — drop
+            // empty pieces so a team missing one field doesn't get a
+            // hanging separator.
+            const metaParts: string[] = [];
+            if (t.ageLevel) metaParts.push(t.ageLevel);
+            if (t.sport) metaParts.push(t.sport);
+            const role = t.roles?.[0];
+            if (role) metaParts.push(role);
+            if (t.nameLocation) metaParts.push(t.nameLocation);
+            return (
+              <TouchableOpacity
+                key={t.id}
+                style={styles.pickTeamRow}
+                onPress={() => onPickApiTeam(t)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.pickTeamRowText}>
+                  <Text style={styles.pickTeamRowLabel}>{label}</Text>
+                  {metaParts.length > 0 ? (
+                    <Text style={styles.pickTeamRowMeta}>
+                      {metaParts.join(' · ')}
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={styles.pickTeamRowCta}>Import</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
+        <TouchableOpacity
+          onPress={onSwitchToManual}
+          style={styles.cardSecondary}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.cardSecondaryLabel}>
+            {teams.length === 0
+              ? 'Switch to manual mode'
+              : "Don't see your team? Enter URL manually"}
+          </Text>
+        </TouchableOpacity>
         <TouchableOpacity
           onPress={onDone}
           style={styles.cardSecondary}

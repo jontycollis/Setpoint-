@@ -56,12 +56,34 @@ export interface SidelineHdSession {
 
 /**
  * A team as listed in `/v2/my/teams`. Same id format as the team-detail
- * endpoint expects (e.g. `IanC-TmSh01-pvc-xYbny9puI0EX`).
+ * endpoint expects (e.g. `IanC-TmSh01-pvc-xYbny9puI0EX`). Field naming
+ * here mirrors Sideline HD's API verbatim — `nameLong` is the
+ * human-readable team name, `nameHandle` / `nameHandleLower` is the
+ * slug-style handle.
  */
 export interface SidelineHdApiTeam {
   id: string;
-  name?: string;
-  sportType?: string;
+  /** Human-readable name, e.g. "REACH Harmony". The picker uses this. */
+  nameLong?: string;
+  /** Handle / slug, e.g. "REACHHarmony". Useful for alias matching. */
+  nameHandle?: string;
+  /** Lowercased handle, e.g. "reachharmony". Useful for alias matching. */
+  nameHandleLower?: string;
+  /** City / region the team is associated with. */
+  nameLocation?: string;
+  /** Age level, e.g. "18U". */
+  ageLevel?: string;
+  /** Sport name, e.g. "Volleyball". Capitalised, not the
+   *  `'volleyball'`-lowercased form returned by per-game endpoints. */
+  sport?: string;
+  /** User's role on this team — "Admin", "Coach", etc. */
+  roles?: string[];
+  /** Optional team logo info. */
+  imageLogo?: {
+    large?: string;
+    small?: string;
+    category?: string;
+  } | null;
   paths?: {
     team?: string;
     games?: string;
@@ -243,14 +265,25 @@ export async function apiFetch<T = unknown>(
  * `/v2/my/teams` — list every team the authenticated user is on. Lets us
  * skip the WebView-navigate-to-slug song and dance entirely; the user
  * just logs in and picks from this list.
+ *
+ * Response shape (Jun 2026): `{"teams": [...]}` envelope. Older drafts
+ * of this client expected a bare array — be defensive: support both
+ * shapes so we don't regress if Sideline HD flips back.
  */
 export async function fetchMyTeams(
   session: SidelineHdSession
 ): Promise<SidelineHdApiTeam[]> {
   const data = await apiFetch<unknown>(session, '/v2/my/teams');
-  if (!Array.isArray(data)) return [];
-  return (data as SidelineHdApiTeam[]).filter(
-    (t) => t && typeof t === 'object' && typeof t.id === 'string'
+  let list: unknown[] = [];
+  if (Array.isArray(data)) {
+    list = data;
+  } else if (data && typeof data === 'object') {
+    const teamsField = (data as { teams?: unknown }).teams;
+    if (Array.isArray(teamsField)) list = teamsField;
+  }
+  return list.filter(
+    (t): t is SidelineHdApiTeam =>
+      !!t && typeof t === 'object' && typeof (t as SidelineHdApiTeam).id === 'string'
   );
 }
 
