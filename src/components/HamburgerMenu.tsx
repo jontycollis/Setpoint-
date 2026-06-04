@@ -42,6 +42,7 @@ export type MenuDestination =
   | 'StorageSnapshot'
   | 'HistoricalImport'
   | 'SidelineImport'
+  | 'Athletes'
   | 'Help'
   | 'About';
 
@@ -710,6 +711,14 @@ export function HamburgerMenu({
                   onPress={() => handleSelect('StorageSnapshot')}
                 />
                 <MenuRow
+                  icon={'\u{1F3D1}'}
+                  label="Manage athletes"
+                  subtitle={athleteSummaryLabel(userProfile)}
+                  available={!!userProfile}
+                  isCurrent={isCurrentScreen('Athletes')}
+                  onPress={() => handleSelect('Athletes')}
+                />
+                <MenuRow
                   icon={'\u{2753}'}
                   label="Help & user guide"
                   subtitle="How each screen works · FAQ"
@@ -827,6 +836,26 @@ export function HamburgerMenu({
 // Sub-component for the new "MY TEAMS" team-switcher rows. Active team
 // is highlighted; tap the main area to switch, tap the trailing ⋯
 // overflow to open per-team actions (Manage roster / Remove).
+/**
+ * Subtitle for the "Manage athletes" menu row. Surfaces the active
+ * athlete + total count so the user can confirm at-a-glance who their
+ * teams are currently scoped to without entering the screen.
+ */
+function athleteSummaryLabel(profile: UserProfile | null | undefined): string {
+  if (!profile) return 'Set up after profile loads';
+  const count = profile.athletes.length;
+  if (count === 0) return 'No athletes yet — tap to add one';
+  const active = profile.athletes.find((a) => a.id === profile.activeAthleteId);
+  if (count === 1) {
+    return active
+      ? `Active: ${active.displayName} · 1 athlete`
+      : '1 athlete · tap to set active';
+  }
+  return active
+    ? `Active: ${active.displayName} · ${count} athletes`
+    : `${count} athletes · tap to set active`;
+}
+
 function TeamSwitcherRow({
   team,
   isActive,

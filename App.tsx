@@ -76,6 +76,7 @@ import { StatsScreen } from './src/screens/StatsScreen';
 import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
 import { SidelineImportScreen } from './src/screens/SidelineImportScreen';
+import { AthletesScreen } from './src/screens/AthletesScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { HelpScreen } from './src/screens/HelpScreen';
 import type { HelpSectionId } from './src/help/content';
@@ -126,6 +127,7 @@ import {
   makeTeamProfileId,
   dedupeAliases,
 } from './src/utils/userProfile';
+import { makeAthleteProfileId } from './src/utils/userProfileMigration';
 import {
   takePreMigrationSnapshot,
   pruneSnapshots,
@@ -146,7 +148,11 @@ import {
   setActiveTeamId,
   removeTeamProfile,
 } from './src/utils/activeTeamProfile';
-import type { UserProfile, TeamProfile } from './src/types/profile';
+import type {
+  UserProfile,
+  TeamProfile,
+  AthleteProfile,
+} from './src/types/profile';
 import {
   ThemeContext,
   lightColors,
@@ -227,6 +233,7 @@ type Screen =
   | 'StorageSnapshot'
   | 'HistoricalImport'
   | 'SidelineImport'
+  | 'Athletes'
   | 'Help'
   | 'About';
 
@@ -1028,13 +1035,42 @@ function AppInner() {
       if (!prev) return prev;
       const nextKind: 'me' | 'watching' = team.kind === 'me' ? 'watching' : 'me';
       const now = Date.now();
+
+      // Promotion edge case: a fresh install can have zero athletes
+      // (activeAthleteId === null). The v1→v2 migration auto-creates a
+      // 'self' athlete only when there's a pre-existing me-team to
+      // anchor; on a brand-new install nothing fires that, so the user
+      // could promote a watching team and end up with a 'me' team
+      // that's not tied to any athlete. Auto-create the self athlete
+      // inline so Career rollups have a proper anchor.
+      let nextAthletes = prev.athletes;
+      let nextActiveAthleteId = prev.activeAthleteId;
+      if (nextKind === 'me' && !nextActiveAthleteId) {
+        const selfId = makeAthleteProfileId(now);
+        const selfAthlete: AthleteProfile = {
+          id: selfId,
+          displayName: prev.displayName ?? 'Me',
+          relation: 'self',
+          role:
+            prev.role === 'athlete' || prev.role === 'coach'
+              ? prev.role
+              : undefined,
+          createdAt: now,
+          updatedAt: now,
+        };
+        nextAthletes = [...prev.athletes, selfAthlete];
+        nextActiveAthleteId = selfId;
+      }
+
+      const targetAthleteId = nextActiveAthleteId;
+
       const nextTeams = prev.teams.map((t) => {
         if (t.id !== team.id) return t;
         if (nextKind === 'me') {
           return {
             ...t,
             kind: 'me' as const,
-            athleteId: prev.activeAthleteId ?? t.athleteId,
+            athleteId: targetAthleteId ?? t.athleteId,
             updatedAt: now,
           };
         }
@@ -1050,6 +1086,8 @@ function AppInner() {
       });
       const next: UserProfile = {
         ...prev,
+        athletes: nextAthletes,
+        activeAthleteId: nextActiveAthleteId,
         teams: nextTeams,
         // If we just promoted to 'me' and nothing was active, make this
         // team active so it surfaces in MyHome and the hamburger.
@@ -1989,6 +2027,10 @@ function AppInner() {
         case 'SidelineImport':
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('SidelineImport');
+          break;
+        case 'Athletes':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('Athletes');
           break;
         case 'Help':
           setScreenHistory((prev) => [...prev, screen]);
@@ -3221,6 +3263,98 @@ function AppInner() {
       case 'Help':
         return (
           <HelpScreen onBack={goBack} initialSectionId={helpSectionId} />
+        );
+      case 'Athletes':
+        if (!userProfile) return null;
+        return (
+          <AthletesScreen
+            userProfile={userProfile}
+            onBack={goBack}
+            onSetActiveAthlete={(athleteId) => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const next: UserProfile = {
+                  ...prev,
+                  activeAthleteId: athleteId,
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
+            onAddAthlete={({ displayName, relation }) => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const newAthlete: AthleteProfile = {
+                  id: makeAthleteProfileId(now),
+                  displayName,
+                  relation,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+                const next: UserProfile = {
+                  ...prev,
+                  athletes: [...prev.athletes, newAthlete],
+                  // First athlete becomes active automatically so the
+                  // user doesn't have to tap-to-activate after adding.
+                  activeAthleteId: prev.activeAthleteId ?? newAthlete.id,
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
+            onRenameAthlete={(athleteId, displayName) => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const next: UserProfile = {
+                  ...prev,
+                  athletes: prev.athletes.map((a) =>
+                    a.id === athleteId
+                      ? { ...a, displayName, updatedAt: now }
+                      : a
+                  ),
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
+            onRemoveAthlete={(athleteId) => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const remaining = prev.athletes.filter(
+                  (a) => a.id !== athleteId
+                );
+                if (remaining.length === 0) return prev; // Screen guards this
+                // Pick a re-parent target: active athlete if it's still
+                // around, else first remaining.
+                const reparentTarget =
+                  remaining.find((a) => a.id === prev.activeAthleteId) ??
+                  remaining[0]!;
+                const next: UserProfile = {
+                  ...prev,
+                  athletes: remaining,
+                  activeAthleteId:
+                    prev.activeAthleteId === athleteId
+                      ? reparentTarget.id
+                      : prev.activeAthleteId,
+                  teams: prev.teams.map((t) =>
+                    t.kind === 'me' && t.athleteId === athleteId
+                      ? { ...t, athleteId: reparentTarget.id, updatedAt: now }
+                      : t
+                  ),
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
+          />
         );
       case 'SeasonHistory':
         if (!currentHistoryTeamName) return null;
