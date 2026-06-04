@@ -128,7 +128,14 @@ export function MatchSetupScreen({
   const [courtName, setCourtName] = useState('');
   const [bestOf, setBestOf] = useState<3 | 5>(3);
   const [sport, setSport] = useState<'indoor' | 'beach'>('indoor');
+  // Regular-set target. Indoor volleyball plays to 25, beach to 21.
+  // Track whether the user has manually edited the field so we can keep
+  // auto-syncing the default on sport toggles ONLY when they haven't
+  // expressed a custom intent — otherwise switching sports would silently
+  // discard a value the user actually wanted (e.g. tournament-specific
+  // formats like 30-point sets).
   const [regularTarget, setRegularTarget] = useState('25');
+  const [regularTargetEdited, setRegularTargetEdited] = useState(false);
   const [deciderTarget, setDeciderTarget] = useState('15');
   const [subRule, setSubRule] = useState<'vc' | 'fivb'>('vc');
 
@@ -508,7 +515,20 @@ export function MatchSetupScreen({
           <Field label="Sport">
             <View style={styles.pillRow}>
               {(['indoor', 'beach'] as const).map((s) => (
-                <Pill key={s} label={s === 'indoor' ? '🏐 Indoor' : '🏖 Beach'} active={sport === s} onPress={() => setSport(s)} />
+                <Pill
+                  key={s}
+                  label={s === 'indoor' ? '🏐 Indoor' : '🏖 Beach'}
+                  active={sport === s}
+                  onPress={() => {
+                    setSport(s);
+                    // Snap the regular-set target to the format default
+                    // ONLY if the user hasn't manually edited the field.
+                    // Indoor = 25, Beach = 21. Decider stays 15 in both.
+                    if (!regularTargetEdited) {
+                      setRegularTarget(s === 'beach' ? '21' : '25');
+                    }
+                  }}
+                />
               ))}
             </View>
           </Field>
@@ -523,7 +543,16 @@ export function MatchSetupScreen({
 
           <View style={styles.row2}>
             <Field label="Regular target" flex>
-              <TextInput style={styles.input} value={regularTarget} onChangeText={setRegularTarget} keyboardType="number-pad" maxLength={3} />
+              <TextInput
+                style={styles.input}
+                value={regularTarget}
+                onChangeText={(v) => {
+                  setRegularTarget(v);
+                  setRegularTargetEdited(true);
+                }}
+                keyboardType="number-pad"
+                maxLength={3}
+              />
             </Field>
             <Field label="Decider target" flex>
               <TextInput style={styles.input} value={deciderTarget} onChangeText={setDeciderTarget} keyboardType="number-pad" maxLength={3} />

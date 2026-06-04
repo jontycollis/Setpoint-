@@ -1122,3 +1122,130 @@ describe('signoff events', () => {
     expect(s.signoff.homeCaptainAtMs).toBe(first.ts);
   });
 });
+
+// ─── Beach format scenarios ────────────────────────────────────────────────
+//
+// Beach volleyball uses the SAME scoring engine as indoor — same point /
+// set / match state machine, same rally-scoring rules — but with format
+// differences: sets to 21 (decider to 15), 2 players per side, no libero,
+// no rotation positions (the engine still tracks positions but the UI
+// hides them). These tests lock the format-defaults path: a beach match
+// configured with setTargets={21,15,2} must reach matchOver at the right
+// totals without the engine fighting the lower targets.
+
+describe('beach format', () => {
+  const beachMeta: Partial<MatchMeta> = {
+    sport: 'beach',
+    setTargets: { regular: 21, decider: 15, winBy: 2 },
+    bestOf: 3,
+  };
+
+  // Beach lineup is a synthesised [a,b,a,b,a,b] — two real players, but
+  // the engine still wants 6-position arrays for compatibility.
+  function beachHomeLineup(setIndex = 0): LineupEvent {
+    return ev<LineupEvent>({
+      type: 'lineup',
+      setIndex,
+      team: 'home',
+      positions: [11, 12, 11, 12, 11, 12],
+      liberos: [],
+    });
+  }
+  function beachAwayLineup(setIndex = 0): LineupEvent {
+    return ev<LineupEvent>({
+      type: 'lineup',
+      setIndex,
+      team: 'away',
+      positions: [21, 22, 21, 22, 21, 22],
+      liberos: [],
+    });
+  }
+
+  function pointsTo(team: Side, count: number, setIndex = 0): PointEvent[] {
+    return Array.from({ length: count }, () => point(team, setIndex));
+  }
+
+  function setEnd(setIndex: number, homeFinal: number, awayFinal: number): SetEndEvent {
+    return ev<SetEndEvent>({
+      type: 'set-end',
+      setIndex,
+      homeFinal,
+      awayFinal,
+      durationMs: 1500_000,
+    });
+  }
+
+  it('two-set sweep ends the match (best-of-3, sets to 21)', () => {
+    const m = applyAll(newMatch(beachMeta), [
+      beachHomeLineup(0),
+      beachAwayLineup(0),
+      ...pointsTo('home', 21, 0),
+      setEnd(0, 21, 0),
+      beachHomeLineup(1),
+      beachAwayLineup(1),
+      ...pointsTo('home', 21, 1),
+      setEnd(1, 21, 0),
+    ]);
+    const s = deriveMatchState(m);
+    expect(s.matchComplete).toBe(true);
+    expect(s.winner).toBe('home');
+    expect(s.setsWon).toEqual({ home: 2, away: 0 });
+    expect(s.setHistory).toHaveLength(2);
+    expect(s.setHistory[0]!.homeFinal).toBe(21);
+    expect(s.setHistory[1]!.homeFinal).toBe(21);
+  });
+
+  it('three-set match: decider plays to 15, not 25 or 21', () => {
+    const m = applyAll(newMatch(beachMeta), [
+      beachHomeLineup(0),
+      beachAwayLineup(0),
+      ...pointsTo('home', 21, 0),
+      setEnd(0, 21, 19),
+      beachHomeLineup(1),
+      beachAwayLineup(1),
+      ...pointsTo('away', 21, 1),
+      setEnd(1, 18, 21),
+      beachHomeLineup(2),
+      beachAwayLineup(2),
+      ...pointsTo('home', 15, 2),
+      setEnd(2, 15, 10),
+    ]);
+    const s = deriveMatchState(m);
+    expect(s.matchComplete).toBe(true);
+    expect(s.winner).toBe('home');
+    expect(s.setHistory).toHaveLength(3);
+    expect(s.setHistory[2]!.homeFinal).toBe(15);
+    expect(s.setHistory[2]!.awayFinal).toBe(10);
+  });
+
+  it('canApplySetEnd flags no warnings for 21-0 (valid set end on beach)', () => {
+    const m = applyAll(newMatch(beachMeta), [
+      beachHomeLineup(),
+      beachAwayLineup(),
+      ...pointsTo('home', 21),
+    ]);
+    const state = deriveMatchState(m);
+    const result = canApplySetEnd(state, setEnd(0, 21, 0));
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('canApplySetEnd warns when set ended at 20-20 (target not reached AND winBy not satisfied)', () => {
+    const m = applyAll(newMatch(beachMeta), [
+      beachHomeLineup(),
+      beachAwayLineup(),
+      ...pointsTo('home', 20),
+      ...pointsTo('away', 20),
+    ]);
+    const state = deriveMatchState(m);
+    const result = canApplySetEnd(state, setEnd(0, 20, 20));
+    // Engine never hard-rejects (lets the user override) but emits
+    // warnings for both target-not-reached and winBy-not-satisfied.
+    // The "target was 21" wording in the warning confirms the engine
+    // used the beach target, not the default 25.
+    expect(result.ok).toBe(true);
+    expect(result.warnings).toHaveLength(2);
+    expect(result.warnings.join(' ')).toMatch(/target was 21/);
+    expect(result.warnings.join(' ')).toMatch(/at least 2/);
+  });
+});
