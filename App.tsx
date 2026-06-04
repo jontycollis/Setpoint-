@@ -1751,12 +1751,49 @@ function AppInner() {
         });
         return;
       }
+      // Scored / imported match (no AES or Timu link). Route to the
+      // TournamentDetail screen with that one match so the user can see
+      // its sets and per-set scores — same UX as opening a tournament
+      // from Stats. SidelineHD-imported matches all land here.
+      if (entry.source === 'scored' && entry.matchId) {
+        const teamProfileId =
+          currentHistoryTeamProfileId ??
+          userProfile?.activeTeamId ??
+          userProfile?.teams.find((t) => t.kind === 'me')?.id ??
+          null;
+        const teamLabel =
+          (teamProfileId
+            ? userProfile?.teams.find((t) => t.id === teamProfileId)?.label
+            : null) ??
+          currentHistoryTeamName ??
+          '';
+        if (!teamProfileId) {
+          Alert.alert(
+            "Can't open this match",
+            "We couldn't figure out which of your teams this match belongs to. Open My Teams once to make a selection."
+          );
+          return;
+        }
+        setStatsTeamProfileId(teamProfileId);
+        setStatsTeamName(teamLabel);
+        setTournamentDetailName(entry.tournamentName);
+        setTournamentDetailMatchIds([entry.matchId]);
+        setScreenHistory((prev) => [...prev, screen]);
+        setScreen('TournamentDetail');
+        return;
+      }
       Alert.alert(
         "Can't open this tournament",
         "This entry came from a locally-scored match and doesn't link back to a tournament dashboard."
       );
     },
-    [handleNavigateToFavorite, screen]
+    [
+      handleNavigateToFavorite,
+      screen,
+      currentHistoryTeamProfileId,
+      currentHistoryTeamName,
+      userProfile,
+    ]
   );
 
   const handleMenuNavigate = useCallback(
