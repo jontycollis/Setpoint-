@@ -555,6 +555,13 @@ function AppInner() {
     team: TeamProfile;
     resolve: (v: boolean) => void;
   } | null>(null);
+  // Long-press team-actions modal target. When set, the action-sheet
+  // modal renders for that team; closing it (Cancel, backdrop tap, or
+  // any button) clears the target. We use a custom modal rather than
+  // Alert.alert because Android's Alert caps at 3 buttons + drops the
+  // 4th silently (we'd lose Cancel) and tap-outside dismissal isn't
+  // reliable across every Android OEM.
+  const [teamActionTarget, setTeamActionTarget] = useState<TeamProfile | null>(null);
   const [navigatingToFav, setNavigatingToFav] = useState(false);
   // Boot-time tournament registry enriched with AES discovery data.
   // Passed to TournamentSelectScreen so it doesn't repeat the fetch.
@@ -1060,38 +1067,12 @@ function AppInner() {
   // shortcut now that there's more than one thing to do per team.
   const handleLongPressTeam = useCallback(
     (team: TeamProfile) => {
-      const promoteLabel =
-        team.kind === 'me' ? 'Stop tracking as my team' : 'Make this my team';
-      // Android's Alert.alert shows at most 3 buttons — the 4th silently
-      // drops off the bottom (we hit that with promote+manage+remove+cancel).
-      // Android also auto-dismisses on tap-outside, so users can still back
-      // out without an explicit Cancel. iOS modals don't tap-out-dismiss,
-      // so iOS users need the explicit Cancel button.
-      const buttons: Array<{
-        text: string;
-        style?: 'default' | 'cancel' | 'destructive';
-        onPress?: () => void;
-      }> = [
-        {
-          text: promoteLabel,
-          onPress: () => handleToggleTeamKind(team),
-        },
-        {
-          text: 'Manage roster',
-          onPress: () => handleOpenRosterEditor(team),
-        },
-        {
-          text: 'Remove team',
-          style: 'destructive',
-          onPress: () => handleRemoveTeam(team),
-        },
-      ];
-      if (Platform.OS === 'ios') {
-        buttons.push({ text: 'Cancel', style: 'cancel' });
-      }
-      Alert.alert(team.label, undefined, buttons);
+      // Open the controlled actions modal. The modal renders all options
+      // + a clear Cancel + a dismissable backdrop, sidestepping
+      // Alert.alert's Android 3-button cap.
+      setTeamActionTarget(team);
     },
-    [handleOpenRosterEditor, handleRemoveTeam, handleToggleTeamKind]
+    []
   );
 
   /**
@@ -3388,6 +3369,22 @@ function AppInner() {
       />
       )}
       <DiscoveryConfirmModal pending={confirmDiscovery} />
+      <TeamActionsModal
+        team={teamActionTarget}
+        onClose={() => setTeamActionTarget(null)}
+        onToggleKind={(t) => {
+          setTeamActionTarget(null);
+          handleToggleTeamKind(t);
+        }}
+        onManageRoster={(t) => {
+          setTeamActionTarget(null);
+          handleOpenRosterEditor(t);
+        }}
+        onRemove={(t) => {
+          setTeamActionTarget(null);
+          handleRemoveTeam(t);
+        }}
+      />
       {/* Global offline indicator — slim pill anchored to the bottom.
           Renders null when the device is online so it has zero visual
           cost most of the time. */}
@@ -3434,6 +3431,108 @@ export default Sentry.wrap(function App() {
 // labelled buttons. The dim backdrop is non-dismissible — the user must
 // pick a button — so we never end up in a "what happened to the dialog"
 // state.
+/**
+ * Long-press team-actions sheet. Custom Modal rather than Alert.alert
+ * because Android's Alert caps at 3 buttons (silently drops the 4th)
+ * and tap-outside dismissal isn't reliable across every OEM. This
+ * variant has unlimited rows, explicit Cancel, and a tappable backdrop.
+ */
+function TeamActionsModal({
+  team,
+  onClose,
+  onToggleKind,
+  onManageRoster,
+  onRemove,
+}: {
+  team: TeamProfile | null;
+  onClose: () => void;
+  onToggleKind: (team: TeamProfile) => void;
+  onManageRoster: (team: TeamProfile) => void;
+  onRemove: (team: TeamProfile) => void;
+}) {
+  if (!team) return null;
+  const promoteLabel =
+    team.kind === 'me' ? 'Stop tracking as my team' : 'Make this my team';
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      {/* Backdrop is a TouchableOpacity so a tap anywhere outside the
+       *  card dismisses the modal — matches the Alert-on-iOS gesture. */}
+      <TouchableOpacity
+        style={modalStyles.backdrop}
+        activeOpacity={1}
+        onPress={onClose}
+      >
+        <TouchableOpacity
+          activeOpacity={1}
+          style={modalStyles.card}
+          onPress={(e) => e.stopPropagation()}
+        >
+          <Text style={modalStyles.title}>{team.label}</Text>
+          <TouchableOpacity
+            style={teamActionsModalStyles.row}
+            onPress={() => onToggleKind(team)}
+            activeOpacity={0.7}
+          >
+            <Text style={teamActionsModalStyles.rowText}>{promoteLabel}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={teamActionsModalStyles.row}
+            onPress={() => onManageRoster(team)}
+            activeOpacity={0.7}
+          >
+            <Text style={teamActionsModalStyles.rowText}>Manage roster</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={teamActionsModalStyles.row}
+            onPress={() => onRemove(team)}
+            activeOpacity={0.7}
+          >
+            <Text style={teamActionsModalStyles.rowTextDestructive}>
+              Remove team
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={teamActionsModalStyles.cancelRow}
+            onPress={onClose}
+            activeOpacity={0.7}
+          >
+            <Text style={teamActionsModalStyles.cancelText}>Cancel</Text>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </TouchableOpacity>
+    </Modal>
+  );
+}
+
+const teamActionsModalStyles = StyleSheet.create({
+  row: {
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: '#eaeaea',
+    alignItems: 'center',
+  },
+  rowText: {
+    fontSize: 16,
+    color: '#1a73e8',
+    fontWeight: '600',
+  },
+  rowTextDestructive: {
+    fontSize: 16,
+    color: '#c0392b',
+    fontWeight: '600',
+  },
+  cancelRow: {
+    paddingTop: 16,
+    paddingBottom: 4,
+    alignItems: 'center',
+  },
+  cancelText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+});
+
 function DiscoveryConfirmModal({
   pending,
 }: {
