@@ -324,6 +324,13 @@ export interface TimuTournamentLink {
 }
 
 export interface MatchMeta {
+  /**
+   * Tenant the match belongs to. Mirrors the team's tenantId at scoring
+   * time so analytics + sync queries can scope on the match without a
+   * join. Defaults to `DEFAULT_TENANT_ID` for matches created before
+   * the multi-tenant migration (see backfillMatchTenantId).
+   */
+  tenantId: string;
   eventName: string;
   division: string;
   matchLabel: string;

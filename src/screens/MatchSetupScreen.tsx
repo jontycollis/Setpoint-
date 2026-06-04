@@ -46,6 +46,7 @@ import {
   appendEvent,
   makeEventId,
 } from '../utils/matchEngine';
+import { getCurrentTenantId } from '../utils/tenant';
 
 interface DraftRosterPlayer {
   shirt: string;
@@ -393,6 +394,7 @@ export function MatchSetupScreen({
     }
 
     const meta: MatchMeta = {
+      tenantId: getCurrentTenantId(),
       eventName: eventName.trim(),
       division: division.trim(),
       matchLabel: matchLabel.trim(),

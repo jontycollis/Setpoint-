@@ -84,6 +84,7 @@ function legacyMeta(overrides: Partial<MatchMeta> = {}): MatchMeta {
   // Note: deliberately omits `matchKind`, `source`, `includeInStats` —
   // these are the new fields that older matches lack.
   return {
+    tenantId: 'ova',
     eventName: 'Test Event',
     division: 'U18 Girls',
     matchLabel: 'Pool A · Match 1',

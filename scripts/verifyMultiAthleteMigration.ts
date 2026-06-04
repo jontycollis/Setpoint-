@@ -68,6 +68,7 @@ const FIXED_NOW = 1_700_000_000_000;
 function makeMeTeam(id: string, label: string): TeamProfile {
   return {
     id,
+    tenantId: 'ova',
     label,
     source: 'aes',
     sport: 'indoor',
@@ -81,6 +82,7 @@ function makeMeTeam(id: string, label: string): TeamProfile {
 function makeWatchingTeam(id: string, label: string): TeamProfile {
   return {
     id,
+    tenantId: 'ova',
     label,
     source: 'aes',
     sport: 'indoor',

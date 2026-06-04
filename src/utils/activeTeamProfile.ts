@@ -26,6 +26,7 @@ import type {
 } from '../types/profile';
 import { matchesAnyAlias, normalizeName } from './seasonTeamIdentity';
 import { dedupeAliases, makeTeamProfileId } from './userProfile';
+import { DEFAULT_TENANT_ID } from './tenant';
 
 // ── Look-ups ──────────────────────────────────────────────────────────────
 
@@ -146,6 +147,7 @@ export function upsertTeamProfileForFavorite(
   const aliases = dedupeAliases([fav.teamName, fav.teamText]);
   const created: TeamProfile = {
     id,
+    tenantId: DEFAULT_TENANT_ID,
     label: fav.teamName || aliases[0] || 'My team',
     source: favoriteSourceToTeamProfileSource(fav),
     sport: 'indoor',
@@ -239,6 +241,7 @@ export function addWatchingTeamProfile(
   const aliases = dedupeAliases([fav.teamName, fav.teamText]);
   const created: TeamProfile = {
     id,
+    tenantId: DEFAULT_TENANT_ID,
     label: fav.teamName || aliases[0] || 'Tracked team',
     source: favoriteSourceToTeamProfileSource(fav),
     sport: 'indoor',

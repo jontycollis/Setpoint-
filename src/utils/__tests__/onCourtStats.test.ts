@@ -43,6 +43,7 @@ function buildMatch(id: string, events: MatchEvent[]): Match {
   return {
     id,
     meta: {
+      tenantId: 'ova',
       eventName: 'Test League',
       division: '',
       matchLabel: 'PVC vs Opp',

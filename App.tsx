@@ -128,6 +128,7 @@ import {
   dedupeAliases,
 } from './src/utils/userProfile';
 import { makeAthleteProfileId } from './src/utils/userProfileMigration';
+import { DEFAULT_TENANT_ID } from './src/utils/tenant';
 import {
   takePreMigrationSnapshot,
   pruneSnapshots,
@@ -890,6 +891,7 @@ function AppInner() {
               const aliases = dedupeAliases([params.teamName]);
               const created: TeamProfile = {
                 id,
+                tenantId: DEFAULT_TENANT_ID,
                 label: params.teamName,
                 source: 'aes',
                 sport: 'indoor',
@@ -1049,6 +1051,7 @@ function AppInner() {
         const selfId = makeAthleteProfileId(now);
         const selfAthlete: AthleteProfile = {
           id: selfId,
+          tenantId: prev.tenantId,
           displayName: prev.displayName ?? 'Me',
           relation: 'self',
           role:
@@ -3289,6 +3292,7 @@ function AppInner() {
                 const now = Date.now();
                 const newAthlete: AthleteProfile = {
                   id: makeAthleteProfileId(now),
+                  tenantId: prev.tenantId,
                   displayName,
                   relation,
                   createdAt: now,

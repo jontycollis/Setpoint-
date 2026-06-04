@@ -16,6 +16,7 @@ import type {
   UserProfile,
   UserProfileV1,
 } from '../types/profile';
+import { DEFAULT_TENANT_ID } from './tenant';
 
 // ── Id generation ─────────────────────────────────────────────────────────
 
@@ -34,14 +35,36 @@ export function makeAthleteProfileId(now: number = Date.now()): string {
 
 /**
  * Ensure a TeamProfile has every field that's been added since the original
- * v2 ship. Currently fills in `sport: 'indoor'` for profiles created before
- * beach support landed — every existing profile is an indoor team, so the
- * default is safe. Pure / idempotent — returns the same reference when no
- * patch is needed so a no-op load doesn't churn updatedAt downstream.
+ * v2 ship. Currently fills in:
+ *   • `sport: 'indoor'` for profiles created before beach support landed
+ *   • `tenantId: DEFAULT_TENANT_ID` for profiles created before multi-tenant
+ *
+ * Pure / idempotent — returns the same reference when no patch is needed
+ * so a no-op load doesn't churn updatedAt downstream.
  */
 export function ensureTeamProfileShape(team: TeamProfile): TeamProfile {
-  if (team.sport === 'indoor' || team.sport === 'beach') return team;
-  return { ...team, sport: 'indoor' };
+  let patched = team;
+  if (patched.sport !== 'indoor' && patched.sport !== 'beach') {
+    patched = { ...patched, sport: 'indoor' };
+  }
+  if (typeof patched.tenantId !== 'string' || patched.tenantId.length === 0) {
+    patched = { ...patched, tenantId: DEFAULT_TENANT_ID };
+  }
+  return patched;
+}
+
+/**
+ * Companion to ensureTeamProfileShape for AthleteProfile. Currently only
+ * backfills tenantId — the v1→v2 migration produced AthleteProfiles
+ * before multi-tenant landed.
+ */
+export function ensureAthleteProfileShape(
+  athlete: AthleteProfile
+): AthleteProfile {
+  if (typeof athlete.tenantId === 'string' && athlete.tenantId.length > 0) {
+    return athlete;
+  }
+  return { ...athlete, tenantId: DEFAULT_TENANT_ID };
 }
 
 // ── v1 → v2 migration ─────────────────────────────────────────────────────
@@ -89,12 +112,29 @@ export function buildV2FromV1(
   now: number = Date.now()
 ): UserProfile {
   // Already v2 — still run the team-shape backfill so additive fields like
-  // `sport` land on profiles that v2'd before beach support shipped. Skip
-  // the rebuild when no team needs patching to avoid churning updatedAt.
+  // `sport` and `tenantId` land on profiles that v2'd before those landed.
+  // Athletes get their own backfill, and the top-level UserProfile.tenantId
+  // gets defaulted. Skip the rebuild when nothing needs patching to avoid
+  // churning updatedAt.
   if (legacy.version === 2) {
-    const patched = legacy.teams.map(ensureTeamProfileShape);
-    const changed = patched.some((t, i) => t !== legacy.teams[i]);
-    return changed ? { ...legacy, teams: patched, updatedAt: now } : legacy;
+    const patchedTeams = legacy.teams.map(ensureTeamProfileShape);
+    const patchedAthletes = legacy.athletes.map(ensureAthleteProfileShape);
+    const teamsChanged = patchedTeams.some((t, i) => t !== legacy.teams[i]);
+    const athletesChanged = patchedAthletes.some(
+      (a, i) => a !== legacy.athletes[i]
+    );
+    const needsTenantId =
+      typeof legacy.tenantId !== 'string' || legacy.tenantId.length === 0;
+    if (!teamsChanged && !athletesChanged && !needsTenantId) {
+      return legacy;
+    }
+    return {
+      ...legacy,
+      teams: patchedTeams,
+      athletes: patchedAthletes,
+      tenantId: needsTenantId ? DEFAULT_TENANT_ID : legacy.tenantId,
+      updatedAt: now,
+    };
   }
 
   const v1 = legacy as UserProfileV1;
@@ -103,6 +143,7 @@ export function buildV2FromV1(
   if (!hasMeTeams) {
     return {
       version: 2,
+      tenantId: DEFAULT_TENANT_ID,
       displayName: v1.displayName,
       role: v1.role,
       athletes: [],
@@ -123,6 +164,7 @@ export function buildV2FromV1(
   const selfId = makeAthleteProfileId(now);
   const selfAthlete: AthleteProfile = {
     id: selfId,
+    tenantId: DEFAULT_TENANT_ID,
     displayName: v1.displayName ?? 'Me',
     relation: 'self',
     role: mapV1RoleToAthleteRole(v1.role),
@@ -136,6 +178,7 @@ export function buildV2FromV1(
 
   return {
     version: 2,
+    tenantId: DEFAULT_TENANT_ID,
     displayName: v1.displayName,
     role: v1.role,
     athletes: [selfAthlete],

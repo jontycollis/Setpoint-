@@ -27,6 +27,7 @@ import {
 } from './sidelineHdParser';
 import { inferMatchCategoryFromEventName } from './matchMetaPure';
 import type { SidelineHdApiGame } from './sidelineHdApi';
+import { getCurrentTenantId } from './tenant';
 
 export interface ApiGameParseOptions {
   /** TeamProfile id from the local user profile. Stamped on
@@ -98,6 +99,7 @@ export function gameToMatch(
   );
 
   const meta: MatchMeta = {
+    tenantId: getCurrentTenantId(),
     eventName,
     division: '',
     matchLabel: `${ourLabel} vs ${opponentLabel}`,

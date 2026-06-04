@@ -44,6 +44,7 @@ import type {
   Lineup,
 } from '../types/match';
 import { inferMatchCategoryFromEventName } from './matchMetaPure';
+import { getCurrentTenantId } from './tenant';
 
 /** Snapshot pulled out of the WebView's localStorage. Values are the raw
  *  strings the page stored — JSON-encoded for `__pvcFinalMatches` /
@@ -694,6 +695,7 @@ export function parseSidelineHdLocalStorageSnapshot(
     const inferredCategory = inferMatchCategoryFromEventName(eventName) ?? undefined;
 
     const meta: MatchMeta = {
+      tenantId: getCurrentTenantId(),
       eventName,
       division: '',
       matchLabel: `${ourLabel} vs ${opponentLabel}`,

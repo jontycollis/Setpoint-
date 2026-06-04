@@ -21,6 +21,7 @@ import type {
 } from '../types/profile';
 import { normalizeName, matchesAnyAlias } from './seasonTeamIdentity';
 import { buildV2FromV1 } from './userProfileMigration';
+import { DEFAULT_TENANT_ID } from './tenant';
 
 // Re-export the pure helpers so callers that already import from
 // './userProfile' don't need to change. The functions themselves live in
@@ -149,6 +150,7 @@ export function buildProfileFromLegacy(
     const aliases = dedupeAliases([legacyMyTeam.teamName, ...legacyAliases]);
     teams.push({
       id,
+      tenantId: DEFAULT_TENANT_ID,
       label: legacyMyTeam.teamName || 'My team',
       source: legacyFavoriteToSource(legacyMyTeam),
       sport: 'indoor',
@@ -166,6 +168,7 @@ export function buildProfileFromLegacy(
     const aliases = dedupeAliases(legacyAliases);
     teams.push({
       id,
+      tenantId: DEFAULT_TENANT_ID,
       label: aliases[0] || 'My team',
       source: 'aes', // best guess; user can flip in Phase 2 if needed
       sport: 'indoor',
@@ -207,6 +210,7 @@ export function buildProfileFromLegacy(
     const id = makeTeamProfileId(now);
     teams.push({
       id,
+      tenantId: DEFAULT_TENANT_ID,
       label: fav.teamText || fav.teamName,
       source: legacyFavoriteToSource(fav),
       sport: 'indoor',

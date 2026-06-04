@@ -48,6 +48,14 @@ export type ProfileRole = 'athlete' | 'parent' | 'coach' | 'other';
 export interface TeamProfile {
   /** Stable id, e.g. `tp_<random>` or `mrs:<memberId>:<rosterId>` for MRS. */
   id: string;
+  /**
+   * Tenant the record belongs to. Today every Bior install carries
+   * `'ova'`; the field exists so that when the platform is licensed to
+   * other PSOs (Volleyball Quebec, NCAA conferences, etc.) records can
+   * be scoped without a schema change. Backfilled to
+   * `DEFAULT_TENANT_ID` by ensureTeamProfileShape() in the migration.
+   */
+  tenantId: string;
   /** User-editable display label, e.g. "Defensa U18 Rob 2025-26". */
   label: string;
   /** Which integration produced this profile (or that it merges multiple). */
@@ -195,6 +203,9 @@ export interface AthleteProfile {
   /** Stable id, e.g. `ath_<base36-time>_<random>`. */
   id: string;
 
+  /** Tenant the athlete belongs to. See TeamProfile.tenantId. */
+  tenantId: string;
+
   /** Display label — "Sarah", "Emily", "Me". Required. */
   displayName: string;
 
@@ -249,6 +260,14 @@ export interface UserProfile {
    * must run buildV2FromV1().
    */
   version: 2;
+
+  /**
+   * Tenant the account holder belongs to. Today this is the boot
+   * default (`'ova'`); white-label deployments set their own. When a
+   * user later attaches to a different tenant via a Connect Organisation
+   * flow, this is the tenant their newly-created records carry.
+   */
+  tenantId: string;
 
   // ── Optional identity ──────────────────────────────────────────────────
   // Both optional. UI falls back to a generic "My career" header when

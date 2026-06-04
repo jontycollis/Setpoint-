@@ -41,6 +41,7 @@ import {
 // ─── Test fixtures ─────────────────────────────────────────────────────────
 
 const baseMeta: MatchMeta = {
+  tenantId: 'ova',
   eventName: 'Test Event',
   division: 'U18 Girls',
   matchLabel: 'Pool A · Match 1',
