@@ -156,8 +156,34 @@ export function MyHomeScreen({
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
-  const meTeams = profile.teams.filter((t) => t.kind === 'me');
+  // ── Athlete-scoped team views ─────────────────────────────────────────
+  //
+  // When the user has multiple athletes (a parent tracking >1 child),
+  // MyHome scopes the me-team grid to the active athlete by default so
+  // they can focus on one kid at a time. A toggle above the grid flips
+  // into "All athletes" mode for the overview-on-one-screen case.
+  // Single-athlete accounts skip the scope entirely (filtering and the
+  // toggle both no-op).
+  const allMeTeams = profile.teams.filter((t) => t.kind === 'me');
+  const hasMultipleAthletes = profile.athletes.length > 1;
+  const [showAllAthletes, setShowAllAthletes] = useState(false);
+  const meTeams = useMemo(() => {
+    if (!hasMultipleAthletes) return allMeTeams;
+    if (showAllAthletes) return allMeTeams;
+    if (!profile.activeAthleteId) return allMeTeams;
+    // Defensive: if scoping to the active athlete leaves zero teams
+    // (e.g. the active athlete is brand-new and has none assigned),
+    // fall back to showing every team so the user isn't staring at an
+    // empty grid wondering where their teams went.
+    const scoped = allMeTeams.filter(
+      (t) => t.athleteId === profile.activeAthleteId
+    );
+    return scoped.length === 0 ? allMeTeams : scoped;
+  }, [allMeTeams, hasMultipleAthletes, profile.activeAthleteId, showAllAthletes]);
   const watchingTeams = profile.teams.filter((t) => t.kind === 'watching');
+  const activeAthlete = profile.athletes.find(
+    (a) => a.id === profile.activeAthleteId
+  );
 
   // ── Indices + scored matches ───────────────────────────────────────────
   // Both feed the Right Now inference. We re-load scored matches on a
@@ -267,6 +293,14 @@ export function MyHomeScreen({
           <RecentlyViewedStrip recents={recents} onOpen={onOpenRecent} />
         ) : null}
 
+        {hasMultipleAthletes ? (
+          <AthleteScopeToggle
+            activeAthleteName={activeAthlete?.displayName}
+            allCount={allMeTeams.length}
+            showingAll={showAllAthletes || !profile.activeAthleteId}
+            onToggle={() => setShowAllAthletes((v) => !v)}
+          />
+        ) : null}
         {meTeams.length > 0 ? (
           <MyTeamsSection
             teams={meTeams}
@@ -817,6 +851,64 @@ function RecentChip({
 }
 
 // ── My Teams ──────────────────────────────────────────────────────────────
+
+/**
+ * Compact toggle row above the me-teams grid. Only renders when the
+ * profile has more than one athlete — single-athlete accounts have no
+ * scope to switch between. Shows the current scope and a tappable
+ * label to flip between "Active athlete only" and "All athletes".
+ */
+function AthleteScopeToggle({
+  activeAthleteName,
+  allCount,
+  showingAll,
+  onToggle,
+}: {
+  activeAthleteName: string | undefined;
+  allCount: number;
+  showingAll: boolean;
+  onToggle: () => void;
+}) {
+  const { colors } = useTheme();
+  return (
+    <View style={athleteScopeToggleStyles.row}>
+      <Text style={[athleteScopeToggleStyles.label, { color: colors.textSecondary }]}>
+        {showingAll
+          ? `Showing all athletes (${allCount} teams)`
+          : `Showing ${activeAthleteName ?? 'active athlete'}'s teams`}
+      </Text>
+      <TouchableOpacity
+        onPress={onToggle}
+        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+      >
+        <Text style={[athleteScopeToggleStyles.action, { color: colors.primary }]}>
+          {showingAll ? 'Show active only' : 'Show all'}
+        </Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const athleteScopeToggleStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+    gap: spacing.sm,
+  },
+  label: {
+    fontSize: fontSize.xs,
+    fontWeight: '600',
+    flex: 1,
+  },
+  action: {
+    fontSize: fontSize.sm,
+    fontWeight: '700',
+  },
+});
 
 function MyTeamsSection({
   teams,
