@@ -1,0 +1,40 @@
+★ eas-cli@18.13.0 is now available.
+To upgrade, run:
+npm install -g eas-cli
+Proceeding with outdated version.
+
+
+EAS Build is experiencing a partial outage.
+Reason: High queue times for Android and iOS builds.
+All information on service status and incidents available at https://status.expo.dev/
+
+
+⚠️ Detected that your app uses Expo Go for development, this is not recommended when building production apps.
+Learn more: https://expo.fyi/why-not-build-expo-go-for-production
+To suppress this warning, set EAS_BUILD_NO_EXPO_GO_WARNING=true.
+
+Resolved "production" environment for the build. Learn more: https://docs.expo.dev/eas/environment-variables/#setting-the-environment-for-your-builds
+No environment variables with visibility "Plain text" and "Sensitive" found for the "production" environment on EAS.
+
+- Incrementing versionCode from 15 to 16.
+✔ Incremented versionCode from 15 to 16.
+
+You've used 93% of your included build credits for this month. ████████████████████████████░░
+Additional usage beyond your limit will be charged at pay-as-you-go rates. See usage in billing.: https://expo.dev/accounts/joncollis/settings/billing
+
+√ Created update channel "production" and branch "production" on @joncollis/aes-score-tracker project. Learn more: https://docs.expo.dev/eas-update/eas-cli/
+android.versionCode field in app config is ignored when version source is set to remote, but this value will still be in the manifest available via expo-constants. It's recommended to remove this value from app config.
+✔ Using remote Android credentials (Expo server)
+✔ Using Keystore from configuration: Build Credentials UHdZCIZ8p0 (default)
+
+Compressing project files and uploading to EAS Build. Learn more: https://expo.fyi/eas-build-archive
+- Compressing project files
+- Uploading to EAS Build (0 / 6.0 MB)
+✔ Uploaded to EAS 2s
+- Computing project fingerprint
+⌛️ Computing the project fingerprint is taking longer than expected...
+⏩ To skip this step, set the environment variable: EAS_SKIP_AUTO_FINGERPRINT=1
+✔ Computed project fingerprint
+
+See logs: https://expo.dev/accounts/joncollis/projects/aes-score-tracker/builds/459a2f77-9ea2-4611-80a6-1264e82eab98
+

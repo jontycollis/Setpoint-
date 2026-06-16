@@ -90,6 +90,14 @@ export interface TeamProfile {
    */
   primaryRef?: FavoriteTeam;
 
+  /**
+   * Club the team belongs to. Optional — beach pairs and stand-alone
+   * teams may have no club assignment. Auto-detected on first
+   * migration; user can change via the Manage Clubs screen or the
+   * team's long-press menu.
+   */
+  clubId?: string;
+
   // ── Display / sorting metadata (all optional) ──────────────────────────
   ageGroup?: string;             // "U18", "12U"
   gender?: 'girls' | 'boys';
@@ -185,6 +193,38 @@ export interface LockerModule {
   status: 'pending' | 'completed' | 'expired';
   completedAt?: number;
   expiresAt?: number;
+}
+
+// ── Club ──────────────────────────────────────────────────────────────────
+//
+// A Club is the organisation that fields one or more teams. "PVC" is a
+// club; "PVC 3D Royals U18" and "PVC Mustangs U16" are teams that belong
+// to it. Modelling the club separately lets the UI surface athletes' clubs
+// as a higher-level grouping than teams, supports clubs with both indoor
+// teams and beach pairs, and maps cleanly onto OVA's club registration
+// model when the unified backend lands.
+//
+// Auto-detected on migration by extracting the leading word from each
+// team's label and bucketing matches together. Users can rename, merge,
+// split, or delete clubs via the Manage Clubs screen — auto-detect is a
+// starting point, not a lock-in.
+export interface Club {
+  /** Stable id, e.g. `club_<base36-time>_<random>`. */
+  id: string;
+  /** Tenant the club belongs to. */
+  tenantId: string;
+  /** User-editable display name, e.g. "PVC", "REACH". */
+  name: string;
+  /** Optional brand colour for the club — used to tint team cards and
+   *  the club detail header. Free-form hex string. */
+  primaryColor?: string;
+  createdAt: number;
+  updatedAt: number;
+  /** Whether this club came from the auto-detect heuristic on first
+   *  migration (vs. user-created). Diagnostic only — useful for
+   *  surfacing a "you can rename these" hint in the UI when auto-detect
+   *  has just run. */
+  detectedFromTeamPrefix?: boolean;
 }
 
 // ── AthleteProfile ────────────────────────────────────────────────────────
@@ -294,6 +334,20 @@ export interface UserProfile {
   teams: TeamProfile[];
   /** Which team is the current navigation context. Null if no teams yet. */
   activeTeamId: string | null;
+
+  /**
+   * Clubs the user's teams are grouped under. Populated by the
+   * auto-detect pass on first migration and editable from the Manage
+   * Clubs screen. May be empty if every team is a beach pair / stand-
+   * alone (no club assignment).
+   */
+  clubs: Club[];
+  /**
+   * Epoch ms when the auto-detect club backfill ran. Diagnostic — used
+   * to gate "we detected these clubs for you, rename them if you want"
+   * hints. Undefined if backfill hasn't run yet (legacy v2 profiles).
+   */
+  clubsBackfilledAt?: number;
 
   // ── Reserved for OVA MRS (future) ──────────────────────────────────────
   /**

@@ -12,11 +12,13 @@
 
 import type {
   AthleteProfile,
+  Club,
   TeamProfile,
   UserProfile,
   UserProfileV1,
 } from '../types/profile';
 import { DEFAULT_TENANT_ID } from './tenant';
+import { detectClubsFromTeams } from './clubDetection';
 
 // ── Id generation ─────────────────────────────────────────────────────────
 
@@ -125,14 +127,48 @@ export function buildV2FromV1(
     );
     const needsTenantId =
       typeof legacy.tenantId !== 'string' || legacy.tenantId.length === 0;
-    if (!teamsChanged && !athletesChanged && !needsTenantId) {
+    const tenantId = needsTenantId ? DEFAULT_TENANT_ID : legacy.tenantId;
+    const needsClubsField = !Array.isArray(legacy.clubs);
+
+    // Auto-detect clubs the first time we see a v2 profile that's never
+    // had the backfill run. Gated on `clubsBackfilledAt` so it's strictly
+    // one-shot — subsequent loads keep whatever the user has curated.
+    const clubsBackfill =
+      legacy.clubsBackfilledAt == null
+        ? runClubsBackfill(patchedTeams, tenantId, now)
+        : null;
+    const existingClubs = needsClubsField ? [] : legacy.clubs;
+    const nextClubs = clubsBackfill
+      ? [...existingClubs, ...clubsBackfill.clubs]
+      : existingClubs;
+    const nextTeams = clubsBackfill
+      ? patchedTeams.map((t) =>
+          clubsBackfill.assignments[t.id]
+            ? { ...t, clubId: clubsBackfill.assignments[t.id]! }
+            : t
+        )
+      : patchedTeams;
+    const teamsAfterClubs = clubsBackfill ? nextTeams : patchedTeams;
+    const finalTeamsChanged = teamsChanged || clubsBackfill !== null;
+
+    if (
+      !finalTeamsChanged &&
+      !athletesChanged &&
+      !needsTenantId &&
+      !needsClubsField &&
+      !clubsBackfill
+    ) {
       return legacy;
     }
     return {
       ...legacy,
-      teams: patchedTeams,
+      teams: teamsAfterClubs,
       athletes: patchedAthletes,
-      tenantId: needsTenantId ? DEFAULT_TENANT_ID : legacy.tenantId,
+      tenantId,
+      clubs: nextClubs,
+      clubsBackfilledAt: clubsBackfill
+        ? now
+        : (legacy.clubsBackfilledAt ?? undefined),
       updatedAt: now,
     };
   }
@@ -141,6 +177,12 @@ export function buildV2FromV1(
   const hasMeTeams = v1.teams.some((t) => t.kind === 'me');
 
   if (!hasMeTeams) {
+    const teams = v1.teams.map(ensureTeamProfileShape);
+    const { teams: teamsWithClubs, clubs } = applyClubsBackfill(
+      teams,
+      DEFAULT_TENANT_ID,
+      now
+    );
     return {
       version: 2,
       tenantId: DEFAULT_TENANT_ID,
@@ -148,8 +190,10 @@ export function buildV2FromV1(
       role: v1.role,
       athletes: [],
       activeAthleteId: null,
-      teams: v1.teams.map(ensureTeamProfileShape),
+      teams: teamsWithClubs,
       activeTeamId: v1.activeTeamId,
+      clubs,
+      clubsBackfilledAt: now,
       mrsLinked: v1.mrsLinked,
       mrsMemberId: v1.mrsMemberId,
       cacLinked: v1.cacLinked,
@@ -168,12 +212,26 @@ export function buildV2FromV1(
     displayName: v1.displayName ?? 'Me',
     relation: 'self',
     role: mapV1RoleToAthleteRole(v1.role),
+    // v1 stored MRS link state on UserProfile (one account per
+    // install). The multi-athlete model attaches MRS per-athlete, so
+    // the legacy single-account state lands on the auto-created self
+    // athlete. UserProfile.mrsLinked stays in sync as the
+    // "any-athlete-linked" aggregate flag (used by the hamburger
+    // subtitle). When a second athlete is added, their MRS can be
+    // linked independently from AthletesScreen.
+    mrsLinked: v1.mrsLinked ? true : undefined,
+    mrsMemberId: v1.mrsMemberId,
     createdAt: now,
     updatedAt: now,
   };
 
   const teams: TeamProfile[] = v1.teams.map((t) =>
     ensureTeamProfileShape(t.kind === 'me' ? { ...t, athleteId: selfId } : t)
+  );
+  const { teams: teamsWithClubs, clubs } = applyClubsBackfill(
+    teams,
+    DEFAULT_TENANT_ID,
+    now
   );
 
   return {
@@ -183,8 +241,10 @@ export function buildV2FromV1(
     role: v1.role,
     athletes: [selfAthlete],
     activeAthleteId: selfId,
-    teams,
+    teams: teamsWithClubs,
     activeTeamId: v1.activeTeamId,
+    clubs,
+    clubsBackfilledAt: now,
     mrsLinked: v1.mrsLinked,
     mrsMemberId: v1.mrsMemberId,
     cacLinked: v1.cacLinked,
@@ -194,6 +254,45 @@ export function buildV2FromV1(
     migratedFromLegacyAt: v1.migratedFromLegacyAt,
     migratedFromV1At: now,
   };
+}
+
+// ── Clubs backfill helper (shared by v1→v2 and v2 short-circuit) ──────────
+
+/**
+ * Run the auto-detect club heuristic and return the resulting Club list
+ * along with team-id → club-id assignments. Pure passthrough around
+ * detectClubsFromTeams — kept here so the migration paths above don't
+ * have to know about ClubDetectionResult's shape.
+ *
+ * Returns null when no clubs were detected (so callers can skip the
+ * teams.map allocation).
+ */
+function runClubsBackfill(
+  teams: TeamProfile[],
+  tenantId: string,
+  now: number
+): { clubs: Club[]; assignments: Record<string, string> } | null {
+  const result = detectClubsFromTeams(teams, tenantId, now);
+  if (result.clubs.length === 0) return null;
+  return result;
+}
+
+/**
+ * v1→v2 convenience: run the backfill and apply assignments to the
+ * teams in a single pass so the caller can drop both into the new v2
+ * UserProfile literal.
+ */
+function applyClubsBackfill(
+  teams: TeamProfile[],
+  tenantId: string,
+  now: number
+): { teams: TeamProfile[]; clubs: Club[] } {
+  const result = runClubsBackfill(teams, tenantId, now);
+  if (!result) return { teams, clubs: [] };
+  const next = teams.map((t) =>
+    result.assignments[t.id] ? { ...t, clubId: result.assignments[t.id]! } : t
+  );
+  return { teams: next, clubs: result.clubs };
 }
 
 // ── Athlete look-ups (downstream consumers — Phase 2 UI will call these) ──

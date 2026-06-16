@@ -248,6 +248,13 @@ export function StatsScreen({
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>('all');
   const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  // Indoor / beach / all sport filter — chip row above the splits stripe.
+  // Filters BEFORE the other axis filters so the counts in glance, table,
+  // tournament rollup all reflect the chosen sport. Single-sport teams
+  // get the row hidden (caller checks `sportsPresent` on the unfiltered
+  // match list).
+  const [sportFilter, setSportFilter] =
+    useState<'all' | 'indoor' | 'beach'>('all');
   const [splitsAxis, setSplitsAxis] = useState<AnalyticsSplitsAxis>(
     DEFAULT_ANALYTICS_VIEW_PREFERENCE.splitsAxis
   );
@@ -363,6 +370,9 @@ export function StatsScreen({
   const filteredMatches = useMemo(() => {
     return allMatches.filter((m) => {
       if (m.meta.includeInStats === false) return false;
+      if (sportFilter !== 'all' && m.meta.sport !== sportFilter) {
+        return false;
+      }
       if (kindFilter !== 'all' && (m.meta.matchKind ?? 'standalone') !== kindFilter) {
         return false;
       }
@@ -382,7 +392,33 @@ export function StatsScreen({
       }
       return true;
     });
-  }, [allMatches, kindFilter, phaseFilter, categoryFilter, sourceFilter]);
+  }, [allMatches, sportFilter, kindFilter, phaseFilter, categoryFilter, sourceFilter]);
+
+  // Sports present in this team's match data — drives whether to render
+  // the sport filter chip row. Mixed-sport athletes get the choice;
+  // single-sport teams get no UI clutter.
+  const sportsPresent = useMemo(() => {
+    const set = new Set<'indoor' | 'beach'>();
+    for (const m of allMatches) {
+      if (m.meta.includeInStats === false) continue;
+      set.add(m.meta.sport);
+    }
+    return set;
+  }, [allMatches]);
+  const indoorMatchCount = useMemo(
+    () =>
+      allMatches.filter(
+        (m) => m.meta.includeInStats !== false && m.meta.sport === 'indoor'
+      ).length,
+    [allMatches]
+  );
+  const beachMatchCount = useMemo(
+    () =>
+      allMatches.filter(
+        (m) => m.meta.includeInStats !== false && m.meta.sport === 'beach'
+      ).length,
+    [allMatches]
+  );
 
   const presentKinds = useMemo(
     () => presentSplitKeys(allMatches, teamProfileId, 'matchKind', { respectIncludeInStats: true }),
@@ -540,6 +576,37 @@ export function StatsScreen({
           parent vertical scroller swallowed chip taps. We trade sticky-on-
           scroll behavior for reliably tappable chips. */}
       <View style={styles.stripeWrap}>
+        {/* Sport filter row — only when the team has matches in BOTH
+            sports. Sits above the axis picker so the user reads it as
+            "pick a sport, then pick a view." */}
+        {sportsPresent.size > 1 ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.stripeRow}
+            keyboardShouldPersistTaps="handled"
+          >
+            <Chip
+              label={`All (${indoorMatchCount + beachMatchCount})`}
+              active={sportFilter === 'all'}
+              onPress={() => setSportFilter('all')}
+              colors={colors}
+            />
+            <Chip
+              label={`Indoor (${indoorMatchCount})`}
+              active={sportFilter === 'indoor'}
+              onPress={() => setSportFilter('indoor')}
+              colors={colors}
+            />
+            <Chip
+              label={`Beach (${beachMatchCount})`}
+              active={sportFilter === 'beach'}
+              onPress={() => setSportFilter('beach')}
+              colors={colors}
+            />
+          </ScrollView>
+        ) : null}
+
         {/* "Pick view" chips — axis + metric set */}
         <ViewPicker
           splitsAxis={splitsAxis}

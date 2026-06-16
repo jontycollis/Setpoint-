@@ -9,10 +9,11 @@
 //     without touching the data model.
 //   • When the OVA backend lands, records sync to the right org slice.
 //
-// This module is intentionally tiny. The active tenant ID is a single
-// constant resolved at boot. A future task (#13: white-label config
-// layer) will replace this with a real runtime config object that's
-// loaded from a per-build config file or remote bootstrap.
+// This module is intentionally tiny: it owns the active tenant *id*.
+// User-visible labels (rankings, MRS, branding) live in the resolver at
+// `../config/tenants` — call `getTenantConfig()` or `useTenantConfig()`
+// to read them. The split keeps the boot-time id constant safe to
+// import from anywhere (no UI/string deps) while the labels can grow.
 // ──────────────────────────────────────────────────────────────────────────
 
 /**

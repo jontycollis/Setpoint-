@@ -1,0 +1,80 @@
+npm warn exec The following package was not found and will be installed: eas-cli@19.0.5
+- Exporting...
+[expo-cli] --non-interactive is not supported, use $CI=1 instead
+[expo-cli] env: load .env.local
+[expo-cli] env: export SENTRY_AUTH_TOKEN
+[expo-cli] Starting Metro Bundler
+[expo-cli] iOS .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+[expo-cli] Android .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+[expo-cli] iOS .\index.ts ▓▓▓░░░░░░░░░░░░░ 23.1% (124/261)
+[expo-cli] Android .\index.ts ▓▓▓▓░░░░░░░░░░░░ 25.8% (132/260)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 90.1% (448/472)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓░░░░ 78.7% (400/451)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.7% (571/572)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 96.9% (561/570)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (572/572)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 96.9% (561/570)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (729/997)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 96.9% (561/570)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1063/1107)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (573/633)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1109/1141)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% ( 743/1002)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1209/1221)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1160/1204)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1209/1221)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1202/1218)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1209/1221)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] iOS Bundled 110222ms index.ts (1221 modules)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1209/1221)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] Android Bundled 126004ms index.ts (1222 modules)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] Creating asset map
+[expo-cli] 
+[expo-cli] › Assets (5):
+[expo-cli] assets\nationals-2026-venue-map.png (270 kB)
+[expo-cli] assets\oc-2026-logo.png (18 kB)
+[expo-cli] assets\ontario-volleyball-logo.png (9.79 kB)
+[expo-cli] assets\pioneers-logo.png (19.8 kB)
+[expo-cli] assets\setpoint-logo.png (23.1 kB)
+[expo-cli] 
+[expo-cli] › ios bundles (2):
+[expo-cli] _expo/static/js/ios/index-30b5cb3f8f19fd146e154922a77dc92f.hbc (3.56 MB)
+[expo-cli] _expo/static/js/ios/index-30b5cb3f8f19fd146e154922a77dc92f.hbc.map (11.2 MB)
+[expo-cli] 
+[expo-cli] › android bundles (2):
+[expo-cli] _expo/static/js/android/index-a6d0d95462427479c958490347faf641.hbc (3.57 MB)
+[expo-cli] _expo/static/js/android/index-a6d0d95462427479c958490347faf641.hbc.map (11.2 MB)
+[expo-cli] 
+[expo-cli] › Files (2):
+[expo-cli] assetmap.json (1.86 kB)
+[expo-cli] metadata.json (882 B)
+[expo-cli] 
+[expo-cli] Exported: dist
+✔ Exported bundle(s)
+- Uploading...
+- Uploading assetmap.json (0 / 1.8 KB)
+✔ Uploaded assetmap.json 
+√ Uploaded 2 app bundles
+√ Uploading assets skipped - no new assets found
+i 6 iOS assets, 6 Android assets (maximum: 2000 total per update). Learn more about asset limits: https://expo.fyi/eas-update-asset-limits
+- Computing project fingerprints
+⌛️ Computing the project fingerprints is taking longer than expected...
+⏩ To skip this step, set the environment variable: EAS_SKIP_AUTO_FINGERPRINT=1
+✔ Computed project fingerprints
+- Publishing...
+✔ Published!
+
+Branch             preview
+Runtime version    1.0.0
+Platform           android, ios
+Update group ID    ca134e4f-b944-4c01-a4b7-bae70617b92d
+Android update ID  019e47d5-cfe6-734b-bafb-338c1b25e18a
+iOS update ID      019e47d5-cfe6-7a06-97a9-670d31351458
+Message            venue map registry-wide lookup + help content refresh
+Commit             cc92e6feb851e3a7258f3f48b8e6159971d42092*
+EAS Dashboard      https://expo.dev/accounts/joncollis/projects/aes-score-tracker/updates/ca134e4f-b944-4c01-a4b7-bae70617b92d
+

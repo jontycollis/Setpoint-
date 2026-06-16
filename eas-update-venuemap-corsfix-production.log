@@ -1,0 +1,69 @@
+- Exporting...
+[expo-cli] --non-interactive is not supported, use $CI=1 instead
+[expo-cli] env: load .env.local
+[expo-cli] env: export SENTRY_AUTH_TOKEN
+[expo-cli] Starting Metro Bundler
+[expo-cli] iOS .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+[expo-cli] Android .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+[expo-cli] iOS .\index.ts ▓▓▓▓░░░░░░░░░░░░ 27.5% (245/553)
+[expo-cli] Android .\index.ts ░░░░░░░░░░░░░░░░  4.2% ( 58/283)
+[expo-cli] iOS .\index.ts ▓▓▓▓░░░░░░░░░░░░ 27.5% (277/667)
+[expo-cli] Android .\index.ts ▓▓▓░░░░░░░░░░░░░ 20.9% (190/416)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓░░░░░░░ 57.1% (672/889)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓░░░░░░░░░░ 40.2% (557/878)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 91.8% (1085/1144)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓░░ 90.7% ( 998/1048)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 98.7% (1212/1220)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] iOS Bundled 31212ms index.ts (1220 modules)
+[expo-cli] iOS .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 98.7% (1212/1220)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] Android Bundled 43300ms index.ts (1222 modules)
+[expo-cli] Android .\index.ts ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓░ 99.9% (1222/1222)
+[expo-cli] Creating asset map
+[expo-cli] 
+[expo-cli] › Assets (5):
+[expo-cli] assets\bior-logo.png (66 kB)
+[expo-cli] assets\nationals-2026-venue-map.png (270 kB)
+[expo-cli] assets\oc-2026-logo.png (18 kB)
+[expo-cli] assets\ontario-volleyball-logo.png (9.79 kB)
+[expo-cli] assets\pioneers-logo.png (19.8 kB)
+[expo-cli] 
+[expo-cli] › ios bundles (2):
+[expo-cli] _expo/static/js/ios/index-c89e74bd0fd9b67f22b424c71979489a.hbc (3.57 MB)
+[expo-cli] _expo/static/js/ios/index-c89e74bd0fd9b67f22b424c71979489a.hbc.map (11.2 MB)
+[expo-cli] 
+[expo-cli] › android bundles (2):
+[expo-cli] _expo/static/js/android/index-21b5ae991627be949438cd365ce9f904.hbc (3.57 MB)
+[expo-cli] _expo/static/js/android/index-21b5ae991627be949438cd365ce9f904.hbc.map (11.2 MB)
+[expo-cli] 
+[expo-cli] › Files (2):
+[expo-cli] assetmap.json (1.85 kB)
+[expo-cli] metadata.json (882 B)
+[expo-cli] 
+[expo-cli] Exported: dist
+✔ Exported bundle(s)
+- Uploading...
+- Uploading assetmap.json (0 / 1.8 KB)
+✔ Uploaded assetmap.json 
+√ Uploaded 2 app bundles
+√ Uploading assets skipped - no new assets found
+i 6 iOS assets, 6 Android assets (maximum: 2000 total per update). Learn more about asset limits: https://expo.fyi/eas-update-asset-limits
+- Computing project fingerprints
+⌛️ Computing the project fingerprints is taking longer than expected...
+⏩ To skip this step, set the environment variable: EAS_SKIP_AUTO_FINGERPRINT=1
+✔ Computed project fingerprints
+- Publishing...
+✔ Published!
+
+Branch             production
+Runtime version    1.0.0
+Platform           android, ios
+Update group ID    d755d2e3-8da2-4e53-a11d-96397c985ebf
+Android update ID  019e4b92-b34e-7d1b-89ca-7c135d87ab30
+iOS update ID      019e4b92-b34e-79c9-9bf3-bd2a7327bf15
+Message            venue map: bypass CORS by fetching PDF in RN + rendering via base64 PDF.js
+Commit             f004c625ddd2ff1fcdd306c5f610ad3cb3077c20*
+EAS Dashboard      https://expo.dev/accounts/joncollis/projects/aes-score-tracker/updates/d755d2e3-8da2-4e53-a11d-96397c985ebf
+

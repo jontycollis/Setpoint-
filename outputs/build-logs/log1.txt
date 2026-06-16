@@ -1,0 +1,2 @@
+{"name":"turtle-api","hostname":"turtle-api-b7df795df-xnc2m","pid":1,"service":"turtle-api","phase":"QUEUE","level":30,"marker":"START_PHASE","msg":"Start phase: QUEUE","time":"2026-05-15T17:44:00.575Z","v":0}
+{"name":"turtle-api","hostname":"turtle-api-b7df795df-xnc2m","pid":1,"service":"turtle-api","phase":"QUEUE","level":30,"msg":"Build is waiting in the priority queue","time":"2026-05-15T17:44:00.576Z","v":0}

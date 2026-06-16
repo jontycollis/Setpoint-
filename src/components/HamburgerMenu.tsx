@@ -13,6 +13,12 @@ import type { ThemeColors } from '../utils/theme';
 import type { FavoriteTeam } from '../types/aes';
 import type { UserProfile, TeamProfile } from '../types/profile';
 import { sortedTeamsForDisplay } from '../utils/activeTeamProfile';
+import { useTenantConfig } from '../config/tenants';
+import {
+  anyAthleteMrsLinked,
+  countMrsLinkedAthletes,
+  resolveMrsTargetAthlete,
+} from '../utils/athleteMrs';
 
 export type MenuDestination =
   | 'Home'
@@ -43,6 +49,9 @@ export type MenuDestination =
   | 'HistoricalImport'
   | 'SidelineImport'
   | 'Athletes'
+  | 'Clubs'
+  | 'MyTeamClickConnect'
+  | 'BeachDiscovery'
   | 'Help'
   | 'About';
 
@@ -154,6 +163,10 @@ export function HamburgerMenu({
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  // Tenant labels (rankings, MRS, etc.). Reading via hook so a future
+  // dynamic-tenant switch flows reactively without prop drilling. Today
+  // it's effectively a constant lookup.
+  const tenant = useTenantConfig();
   const [visible, setVisible] = useState(false);
   // Picker mode swaps the menu body for a "Pick a team to manage"
   // list. Reset whenever the modal closes so re-open lands on the
@@ -593,7 +606,7 @@ export function HamburgerMenu({
                 ) : null}
                 <MenuRow
                   icon={'\u{1F4C8}'}
-                  label="OVA Rankings"
+                  label={tenant.rankingsLabel}
                   subtitle="Girls + Boys, all divisions"
                   available={true}
                   isCurrent={isCurrentScreen('OvaRankings')}
@@ -607,6 +620,14 @@ export function HamburgerMenu({
                   isCurrent={isCurrentScreen('Home')}
                   onPress={() => handleSelect('Home')}
                 />
+                <MenuRow
+                  icon={'\u{1F3D6}'}
+                  label="Discover beach tournaments"
+                  subtitle="MyTeam.Click radius search"
+                  available={true}
+                  isCurrent={isCurrentScreen('BeachDiscovery')}
+                  onPress={() => handleSelect('BeachDiscovery')}
+                />
               </View>
 
               {/* ── CONNECTIONS & SETTINGS — quiet utility group near the
@@ -618,12 +639,8 @@ export function HamburgerMenu({
                 <Text style={styles.sectionLabel}>CONNECTIONS & SETTINGS</Text>
                 <MenuRow
                   icon={'\u{1F517}'}
-                  label="OVA MRS"
-                  subtitle={
-                    userProfile?.mrsLinked
-                      ? 'Connected'
-                      : 'Connect to view affiliations'
-                  }
+                  label={tenant.mrsLabel}
+                  subtitle={mrsSubtitleLabel(userProfile)}
                   available={true}
                   isCurrent={isCurrentScreen('MrsConnection')}
                   onPress={() => handleSelect('MrsConnection')}
@@ -639,6 +656,14 @@ export function HamburgerMenu({
                   available={true}
                   isCurrent={isCurrentScreen('CacConnection')}
                   onPress={() => handleSelect('CacConnection')}
+                />
+                <MenuRow
+                  icon={'\u{1F30A}'}
+                  label="MyTeam.Click"
+                  subtitle="Beach tournaments + your registrations"
+                  available={true}
+                  isCurrent={isCurrentScreen('MyTeamClickConnect')}
+                  onPress={() => handleSelect('MyTeamClickConnect')}
                 />
                 <TouchableOpacity
                   style={styles.menuItem}
@@ -717,6 +742,14 @@ export function HamburgerMenu({
                   available={!!userProfile}
                   isCurrent={isCurrentScreen('Athletes')}
                   onPress={() => handleSelect('Athletes')}
+                />
+                <MenuRow
+                  icon={'\u{1F3DF}'}
+                  label="Manage clubs"
+                  subtitle={clubSummaryLabel(userProfile)}
+                  available={!!userProfile}
+                  isCurrent={isCurrentScreen('Clubs')}
+                  onPress={() => handleSelect('Clubs')}
                 />
                 <MenuRow
                   icon={'\u{2753}'}
@@ -856,6 +889,55 @@ function athleteSummaryLabel(profile: UserProfile | null | undefined): string {
     : `${count} athletes · tap to set active`;
 }
 
+/**
+ * Subtitle for the OVA MRS menu row. Reflects the per-athlete link
+ * state — a multi-athlete account can have multiple MRS connections,
+ * and the subtitle now reads correctly in all the shapes (none linked,
+ * one linked, all linked, partial).
+ */
+function mrsSubtitleLabel(
+  profile: UserProfile | null | undefined
+): string {
+  if (!profile) return 'Connect to view affiliations';
+  const totalAthletes = profile.athletes.length;
+  const linked = countMrsLinkedAthletes(profile);
+  if (totalAthletes === 0) {
+    // Legacy / fresh install — fall back to the single account-holder flag.
+    return anyAthleteMrsLinked(profile)
+      ? 'Connected'
+      : 'Connect to view affiliations';
+  }
+  if (linked === 0) {
+    const target = resolveMrsTargetAthlete(profile);
+    return target
+      ? `Connect ${target.displayName}'s account`
+      : 'Connect to view affiliations';
+  }
+  if (linked === totalAthletes) {
+    return totalAthletes === 1
+      ? 'Connected'
+      : `All ${totalAthletes} athletes linked`;
+  }
+  return `${linked} of ${totalAthletes} athletes linked`;
+}
+
+/**
+ * Subtitle for the "Manage clubs" menu row. Mirrors athleteSummaryLabel
+ * — surfaces club count + the size of the largest auto-detected club so
+ * a glance tells the user whether the grouping looks right.
+ */
+function clubSummaryLabel(profile: UserProfile | null | undefined): string {
+  if (!profile) return 'Set up after profile loads';
+  const clubs = Array.isArray(profile.clubs) ? profile.clubs : [];
+  if (clubs.length === 0) {
+    return 'No clubs yet — tap to add one';
+  }
+  if (clubs.length === 1) {
+    return `${clubs[0]!.name} · 1 club`;
+  }
+  return `${clubs.length} clubs · tap to manage`;
+}
+
 function TeamSwitcherRow({
   team,
   isActive,
@@ -869,9 +951,10 @@ function TeamSwitcherRow({
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const tenant = useTenantConfig();
   const sourceLabel =
     team.source === 'mrs-linked'
-      ? 'OVA'
+      ? tenant.shortName
       : team.source === 'mixed'
       ? 'AES+TIMU'
       : team.source.toUpperCase();
@@ -940,9 +1023,10 @@ function RosterPickerRow({
 }) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
+  const tenant = useTenantConfig();
   const sourceLabel =
     team.source === 'mrs-linked'
-      ? 'OVA'
+      ? tenant.shortName
       : team.source === 'mixed'
       ? 'AES+TIMU'
       : team.source.toUpperCase();

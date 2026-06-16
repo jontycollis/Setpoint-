@@ -22,6 +22,16 @@ import { matchesAnyAlias, normalizeName } from './seasonTeamIdentity';
 import { loadNormalisedMatches } from './matchMeta';
 import { deriveMatchState } from './matchEngine';
 import type { Match, Side } from '../types/match';
+import {
+  loadManualTournaments,
+  type ManualTournamentEntry,
+} from './manualTournaments';
+import {
+  loadMtcSeasonIndex,
+  sortedMtcSnapshots,
+  snapshotToUnifiedEntries,
+  type MtcSeasonIndex,
+} from './myteamClickSeasonIndex';
 
 // ── Unified tournament entry (renderable by SeasonHistoryScreen) ──────────
 
@@ -35,8 +45,18 @@ export interface UnifiedTournamentEntry {
    *                   the Sideline HD pipeline). Each scored match
    *                   becomes one entry here, regardless of whether
    *                   it's linked to an AES / Timu tournament.
+   *   • `'manual'` — user-typed tournament summary (beach pool weekends
+   *                   not on AES/Timu, indoor events imported from a
+   *                   PDF, etc.). One entry per tournament, totals are
+   *                   entered directly; no per-match drill.
+   *   • `'myteamclick'` — indexed snapshot from the MyTeam.Click
+   *                   platform. Primary beach data source for
+   *                   Ontario; carries per-pair partner data.
    */
-  source: 'aes' | 'timu' | 'scored';
+  source: 'aes' | 'timu' | 'scored' | 'manual' | 'myteamclick';
+  /** For `source: 'manual'` entries, the ManualTournamentEntry.id so the
+   *  caller can edit/delete the underlying record. */
+  manualEntryId?: string;
   /** Stable tournament key — used for routing and dedup. */
   sourceKey: string;
   // AES-specific
@@ -105,6 +125,15 @@ export interface UnifiedTournamentEntry {
   finalRank: number | null;
   finalRankLabel: string | null;
 
+  /**
+   * Total teams in this entry's division / pool field. Used by
+   * "where I fit in" analytics to derive a percentile (finalRank /
+   * fieldSize). Surfaced from AES `snap.teams.length` and Timu
+   * `snap.finalRankings.length || snap.teams.length`. Undefined for
+   * locally-scored entries — they have no field-size signal.
+   */
+  fieldSize?: number;
+
   /** Pool play aggregate (from standings for AES, from pool stats for Timu). */
   matchesFor: number;
   matchesAgainst: number;
@@ -140,16 +169,36 @@ export interface LoadedIndices {
    * `includeInStats`) are guaranteed to be present.
    */
   scored: Match[];
+  /**
+   * User-typed tournament summaries from `manual.tournaments.v1`.
+   * Today's primary use case is BEACH tournaments — the OVA / VC
+   * platforms don't index those. One entry per tournament, totals
+   * typed directly (no per-match drill).
+   *
+   * Optional so verification scripts + tests that synthesise a
+   * LoadedIndices without manual entries don't need to patch every
+   * fixture. Production code (loadAllSeasonIndices) always populates
+   * it.
+   */
+  manual?: ManualTournamentEntry[];
+  /**
+   * MyTeam.Click event snapshots from `myteamclick.seasonIndex.v1`.
+   * Primary beach data source for Ontario players. Optional for the
+   * same reason as `manual` — legacy fixtures stay green.
+   */
+  myteamclick?: MtcSeasonIndex;
 }
 
 /** Read all sources once. Callers that need fresh data should call this. */
 export async function loadAllSeasonIndices(): Promise<LoadedIndices> {
-  const [timu, aes, scored] = await Promise.all([
+  const [timu, aes, scored, manual, myteamclick] = await Promise.all([
     loadTimuIndex(),
     loadAesSeasonIndex(),
     loadNormalisedMatches(),
+    loadManualTournaments(),
+    loadMtcSeasonIndex(),
   ]);
-  return { timu, aes, scored };
+  return { timu, aes, scored, manual, myteamclick };
 }
 
 /**
@@ -166,6 +215,29 @@ export interface BuildHistoryOpts {
    * an inclusion flag.
    */
   respectIncludeInStats?: boolean;
+
+  /**
+   * TeamProfile ids that scope the manual-tournament filter. Manual
+   * entries are attached to a TeamProfile directly (not aliases), so
+   * when callers know the team(s) they're showing they should pass
+   * the id(s) here so other-team manual entries don't leak in.
+   *
+   * When undefined, EVERY manual entry is included regardless of
+   * teamProfileId — the legacy alias-driven filter is the only gate.
+   * This default lets pre-existing call sites pick up manual entries
+   * without code changes; updated callers should pass the ids
+   * explicitly for tighter scoping.
+   */
+  teamProfileIds?: string[];
+
+  /**
+   * MyTeam.Click player ids to scope the beach-source filter to.
+   * Snapshots are stored per-(event, player) so a multi-athlete
+   * account can have several. Pass the active athlete's linked
+   * MyTeam.Click id here; legacy callers (undefined) see every
+   * snapshot.
+   */
+  myteamClickPlayerIds?: string[];
 }
 
 /**
@@ -214,6 +286,43 @@ export function buildMySeasonHistory(
     if (!entry) continue;
     if (opts.respectIncludeInStats && entry.includeInStats === false) continue;
     out.push(entry);
+  }
+
+  // Manual entries — one per tournament. Beach-heavy today (AES /
+  // Timu don't index beach); also accepts indoor for users importing
+  // prior seasons from PDF / paper standings. Filter is teamProfileId-
+  // driven: each manual entry has a canonical TeamProfile attachment,
+  // so when the caller knows which team they're showing, only that
+  // team's entries should appear. Legacy callers that don't pass
+  // teamProfileIds see every manual entry (matches alias-driven
+  // behavior for the indexed sources).
+  if (indices.manual && indices.manual.length > 0) {
+    const scopeIds = opts.teamProfileIds;
+    for (const m of indices.manual) {
+      if (scopeIds && scopeIds.length > 0) {
+        if (!scopeIds.includes(m.teamProfileId)) continue;
+      }
+      out.push(manualEntryToUnified(m));
+    }
+  }
+
+  // MyTeam.Click snapshots — primary beach data source. Each snapshot
+  // is tied to a specific MyTeam.Click player id; the projection
+  // already filters internally to the right athlete, but the caller
+  // can pass `myteamClickPlayerIds` via opts to narrow further
+  // (e.g. when showing only the active athlete's beach history).
+  if (indices.myteamclick) {
+    const playerScope = opts.myteamClickPlayerIds;
+    for (const snap of sortedMtcSnapshots(indices.myteamclick)) {
+      if (
+        playerScope &&
+        playerScope.length > 0 &&
+        !playerScope.includes(snap.myPlayerId)
+      ) {
+        continue;
+      }
+      out.push(...snapshotToUnifiedEntries(snap));
+    }
   }
 
   // Sort unified list newest → oldest.
@@ -418,6 +527,8 @@ function aesSnapshotToUnified(snap: AesTournamentSnapshot): UnifiedTournamentEnt
     poolRank: finalRank, // AES conflates pool + finish — use finish rank
     finalRank,
     finalRankLabel,
+    // Division field size — the standings list IS the field for AES.
+    fieldSize: snap.teams.length > 0 ? snap.teams.length : undefined,
     matchesFor,
     matchesAgainst,
     setsFor,
@@ -521,6 +632,16 @@ function timuSnapshotToUnified(
     poolRank: myRow?.rank ?? null,
     finalRank: finalR?.rank ?? null,
     finalRankLabel: finalR?.rankLabel ?? null,
+    // Field size — prefer the final-rankings list (covers the full
+    // tournament) over the pool standings (pool-only). Falls back to
+    // pool size when finalRankings is empty (Timu can leave this
+    // unpopulated until results are official).
+    fieldSize:
+      snap.finalRankings.length > 0
+        ? snap.finalRankings.length
+        : snap.teams.length > 0
+          ? snap.teams.length
+          : undefined,
     matchesFor,
     matchesAgainst,
     setsFor,
@@ -528,6 +649,40 @@ function timuSnapshotToUnified(
     matches,
     totalMatchesInSnapshot: snap.results.length,
     indexedAt: snap.indexedAt,
+  };
+}
+
+/**
+ * Project a manual tournament entry onto the unified entry shape.
+ * Trivial — manual entries already carry every field the unified view
+ * needs (no per-match drill, totals are entered directly). Source-
+ * specific fields (manualEntryId) let the screen route to an editor.
+ */
+function manualEntryToUnified(
+  entry: ManualTournamentEntry
+): UnifiedTournamentEntry {
+  return {
+    source: 'manual',
+    sourceKey: `manual:${entry.id}`,
+    manualEntryId: entry.id,
+    sport: entry.sport,
+    tournamentName: entry.tournamentName,
+    subtitle: entry.subtitle,
+    dateText: entry.dateText,
+    dateMs: entry.dateMs,
+    venueName: entry.venueName,
+    beachPartner: entry.beachPartner,
+    poolRank: null,
+    finalRank: entry.finalRank ?? null,
+    finalRankLabel:
+      entry.finalRank != null ? ordinal(entry.finalRank) : null,
+    fieldSize: entry.fieldSize,
+    matchesFor: entry.matchesFor,
+    matchesAgainst: entry.matchesAgainst,
+    setsFor: entry.setsFor,
+    setsAgainst: entry.setsAgainst,
+    matches: [], // Manual entries don't carry per-match detail.
+    indexedAt: entry.updatedAt,
   };
 }
 

@@ -145,6 +145,24 @@ export interface SidelineHdApiGame {
     live_game?: string;
     details?: string;
   };
+  /**
+   * True when the game was scored via the iScore integration, which
+   * means Sideline HD holds rally-level play-by-play data the user
+   * can opt into importing. False / undefined when only the summary
+   * box score is available. Drives the opportunistic PBP enrichment
+   * (`#11`) — see `sidelineHdPbp.ts`.
+   *
+   * Field name MUST match what the Sideline HD bundle surfaces. Until
+   * the PBP endpoint is fully probed, we accept the field if it's
+   * present (forward-compatible) without depending on it.
+   */
+  fromIscore?: boolean;
+  /**
+   * iScore-side identifier for the game, used to fetch PBP when
+   * `fromIscore` is true. Optional — falls back to the regular
+   * SidelineHD game id at the call site if absent.
+   */
+  iscoreGameId?: string;
   /** Extra fields — preserved so callers can opt into surfacing them. */
   [extra: string]: unknown;
 }

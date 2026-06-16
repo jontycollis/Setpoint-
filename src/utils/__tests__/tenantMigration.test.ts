@@ -205,6 +205,8 @@ describe('buildV2FromV1 — v2 short-circuit also backfills', () => {
         },
       ],
       activeTeamId: 'tp_1',
+      clubs: [],
+      clubsBackfilledAt: FIXED_NOW - 500,
       mrsLinked: false,
       cacLinked: false,
       createdAt: FIXED_NOW - 1000,

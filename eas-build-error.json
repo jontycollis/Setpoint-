@@ -1,0 +1,44 @@
+﻿{
+    "id":  "ba148c87-1fd6-40e6-9bc4-b3b46057071d",
+    "status":  "ERRORED",
+    "platform":  "ANDROID",
+    "error":  {
+                  "errorCode":  "INTERNAL_SERVER_ERROR",
+                  "message":  "Failed to start the build. Try again."
+              },
+    "artifacts":  {
+
+                  },
+    "fingerprint":  {
+                        "id":  "019e12ea-227a-7107-8b48-0d88cd274332",
+                        "hash":  "6e4a6e83021cacebc96e1d63eb419600344c6fa9"
+                    },
+    "initiatingActor":  {
+                            "id":  "f5433a83-36a9-4fc8-b2dd-9493ca22ed83",
+                            "displayName":  "joncollis"
+                        },
+    "logFiles":  [
+
+                 ],
+    "project":  {
+                    "id":  "f809fef2-3bf0-4186-8619-96afe8d581b8",
+                    "name":  "aes-score-tracker",
+                    "slug":  "aes-score-tracker",
+                    "ownerAccount":  {
+                                         "id":  "d487e653-201e-49be-95b3-4cf43892a251",
+                                         "name":  "joncollis"
+                                     }
+                },
+    "distribution":  "INTERNAL",
+    "buildProfile":  "preview",
+    "sdkVersion":  "54.0.0",
+    "appVersion":  "1.0.0",
+    "appBuildVersion":  "15",
+    "gitCommitHash":  "1789cc0d055abe9a05db3b47411b9fa878abab3c",
+    "gitCommitMessage":  "chore: bump android versionCode to 6 for preview build",
+    "priority":  "HIGH",
+    "createdAt":  "2026-05-10T17:23:14.643Z",
+    "updatedAt":  "2026-05-10T17:23:15.446Z",
+    "expirationDate":  "2026-08-08T17:23:14.675Z",
+    "isForIosSimulator":  false
+}

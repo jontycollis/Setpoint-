@@ -156,6 +156,32 @@ export function SeasonHistoryScreen({
   // When set, the per-season tournament list filters down to just this
   // season — driven by tapping a row on the YoY card. null = show all.
   const [focusedSeasonId, setFocusedSeasonId] = useState<string | null>(null);
+  // Indoor / beach / all sport filter. The chip row sits below the
+  // header and scopes EVERY downstream block (active / upcoming / YoY /
+  // summary / per-season list). Default 'all' so existing users see
+  // their full history immediately on first load; mixed-sport athletes
+  // get one tap to focus on the season they care about.
+  const [sportFilter, setSportFilter] =
+    useState<'all' | 'indoor' | 'beach'>('all');
+
+  // Snapshot of which sports actually appear in this team's history.
+  // Used to hide the chip row entirely when there's nothing to filter
+  // (single-sport teams get no UI clutter for a no-op control).
+  const sportsPresent = useMemo(() => {
+    const set = new Set<'indoor' | 'beach'>();
+    for (const h of history) set.add(h.sport);
+    return set;
+  }, [history]);
+
+  const filteredHistory = useMemo(() => {
+    if (sportFilter === 'all') return history;
+    return history.filter((h) => h.sport === sportFilter);
+  }, [history, sportFilter]);
+
+  const filteredStats = useMemo<UnifiedAggregateStats | null>(() => {
+    if (sportFilter === 'all') return stats;
+    return aggregateUnifiedStats(filteredHistory);
+  }, [stats, filteredHistory, sportFilter]);
 
   const refresh = async () => {
     // Prefer per-team aliases (from the active TeamProfile) over the legacy
@@ -289,6 +315,18 @@ export function SeasonHistoryScreen({
           <EmptyState teamName={primaryName} onManageSeason={onManageSeason} />
         ) : (
           <>
+            {sportsPresent.size > 1 ? (
+              <SportFilterRow
+                value={sportFilter}
+                onChange={setSportFilter}
+                indoorCount={
+                  history.filter((h) => h.sport === 'indoor').length
+                }
+                beachCount={
+                  history.filter((h) => h.sport === 'beach').length
+                }
+              />
+            ) : null}
             {autoHealing && (
               <View style={styles.autoHealBanner}>
                 <ActivityIndicator size="small" color={colors.primary} />
@@ -302,9 +340,10 @@ export function SeasonHistoryScreen({
                 team is currently playing or about to. Drives the user's
                 immediate attention to today's gym, not last month's
                 results. Mutually exclusive with the Upcoming list below
-                (active entries filter out of Upcoming). */}
+                (active entries filter out of Upcoming). Scoped by the
+                sport filter so "Indoor" mode hides a live beach event. */}
             {(() => {
-              const active = getActiveTournaments(history);
+              const active = getActiveTournaments(filteredHistory);
               if (active.length === 0) return null;
               return (
                 <ActiveTournamentsSection
@@ -321,8 +360,11 @@ export function SeasonHistoryScreen({
               aliases={[primaryName, ...(aliasesProp ?? [])]}
               debugLabel={primaryName}
               onOpenEntry={onOpenUpcomingTournament}
+              sportFilter={sportFilter}
               excludeKeys={
-                new Set(getActiveTournaments(history).map((e) => e.sourceKey))
+                new Set(
+                  getActiveTournaments(filteredHistory).map((e) => e.sourceKey)
+                )
               }
             />
 
@@ -353,7 +395,7 @@ export function SeasonHistoryScreen({
 
             {/* Year-on-year comparison */}
             <YearComparisonCard
-              history={history}
+              history={filteredHistory}
               focusedSeasonId={focusedSeasonId}
               onSelectSeason={(id) =>
                 setFocusedSeasonId((cur) => (cur === id ? null : id))
@@ -370,15 +412,15 @@ export function SeasonHistoryScreen({
                 </Text>
               </TouchableOpacity>
             )}
-            {stats && (
-              <SummaryCard stats={stats} label={
-                distinctSeasons(history).length > 1 ? 'Career Totals' : 'Season Totals'
+            {filteredStats && (
+              <SummaryCard stats={filteredStats} label={
+                summaryCardLabel(filteredHistory, sportFilter)
               } />
             )}
             {(() => {
               // Group history by season (newest first), preserving order within each.
               const groups = new Map<string, { season: Season; items: UnifiedTournamentEntry[] }>();
-              for (const entry of history) {
+              for (const entry of filteredHistory) {
                 const season = seasonForDateOrSynth(entry.dateMs);
                 const key = season?.id || 'unknown';
                 if (!groups.has(key)) {
@@ -577,6 +619,123 @@ function formatRelative(ms: number): string {
   if (weeks < 4) return `${weeks}w ago`;
   const months = Math.floor(days / 30);
   return `${months}mo ago`;
+}
+
+// ── Sport filter chip row ─────────────────────────────────────────────────
+
+/**
+ * Three-button row above all content: All · Indoor · Beach. Only
+ * rendered by the caller when the team has tournaments in BOTH sports
+ * (single-sport teams get no UI clutter). Each chip shows a count so
+ * the user knows how much they're hiding when they pick a sport.
+ */
+function SportFilterRow({
+  value,
+  onChange,
+  indoorCount,
+  beachCount,
+}: {
+  value: 'all' | 'indoor' | 'beach';
+  onChange: (next: 'all' | 'indoor' | 'beach') => void;
+  indoorCount: number;
+  beachCount: number;
+}) {
+  const { colors } = useTheme();
+  const total = indoorCount + beachCount;
+  return (
+    <View style={sportFilterRowStyles.row}>
+      <SportFilterChip
+        label={`All (${total})`}
+        active={value === 'all'}
+        onPress={() => onChange('all')}
+        colors={colors}
+      />
+      <SportFilterChip
+        label={`Indoor (${indoorCount})`}
+        active={value === 'indoor'}
+        onPress={() => onChange('indoor')}
+        colors={colors}
+      />
+      <SportFilterChip
+        label={`Beach (${beachCount})`}
+        active={value === 'beach'}
+        onPress={() => onChange('beach')}
+        colors={colors}
+      />
+    </View>
+  );
+}
+
+function SportFilterChip({
+  label,
+  active,
+  onPress,
+  colors,
+}: {
+  label: string;
+  active: boolean;
+  onPress: () => void;
+  colors: ThemeColors;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.7}
+      style={[
+        sportFilterRowStyles.chip,
+        {
+          backgroundColor: active ? colors.primary : 'transparent',
+          borderColor: active ? colors.primary : colors.divider,
+        },
+      ]}
+    >
+      <Text
+        style={[
+          sportFilterRowStyles.chipLabel,
+          { color: active ? '#ffffff' : colors.textSecondary },
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
+const sportFilterRowStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  chip: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  chipLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+});
+
+/**
+ * Summary-card label: respects the sport filter so a beach-filtered
+ * view doesn't say "Career Totals" (it's actually "Beach Totals").
+ * Falls back to the legacy season-vs-career distinction when filter is
+ * 'all'.
+ */
+function summaryCardLabel(
+  history: UnifiedTournamentEntry[],
+  sportFilter: 'all' | 'indoor' | 'beach'
+): string {
+  if (sportFilter === 'indoor') return 'Indoor Totals';
+  if (sportFilter === 'beach') return 'Beach Totals';
+  return distinctSeasons(history).length > 1
+    ? 'Career Totals'
+    : 'Season Totals';
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────

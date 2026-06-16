@@ -1,0 +1,50 @@
+{
+  "id": "e37071f5-d728-4ad3-929d-eca89cb561d2",
+  "status": "FINISHED",
+  "platform": "ANDROID",
+  "artifacts": {
+    "buildUrl": "https://expo.dev/artifacts/eas/u5Wv5fLk5UNG9bvLXQJ2jJ.apk",
+    "applicationArchiveUrl": "https://expo.dev/artifacts/eas/u5Wv5fLk5UNG9bvLXQJ2jJ.apk"
+  },
+  "fingerprint": {
+    "id": "019e1edd-e22b-720d-91db-f053866ccb6f",
+    "hash": "20abd0e8e9f4ca2af937ac2d28fdc24ec9ac583b"
+  },
+  "initiatingActor": {
+    "id": "f5433a83-36a9-4fc8-b2dd-9493ca22ed83",
+    "displayName": "joncollis"
+  },
+  "logFiles": [
+    "https://job-logs.eascdn.net/production/e37071f5-d728-4ad3-929d-eca89cb561d2/1778634318550-9a117ab8-36e4-4bcf-9b45-534a79761026.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260513%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260513T012127Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=4309f6c024b2d43707a678d4c52282004e379ede56e202684aca8de339aac92ebb21115bb3c82326bce757f3ee038a946bff07f47f69b2a84a4042a5112d4b59949ff5aa2c6d2c8533145ed5592893e3941e59d0854ba233e7b9ad2951b32c79a0b99c7895fe70cf8662e1cf948f66615cb028e641fcb455baf6d2a4cba08340f20627cf850d54278f111947f7c568bcdb4d9ced7cb64559b65527b36b36be975bfd76dab8083fa0d42d6c1755c0af49b3cb561da567dc06d4c5cdeadfa6db14b3460a386144bd4248d8b527fac45520db78a82857a034cdab1a4d66663074852047597cedc98f1d508b7363d3c2f41434bef727d5c5bccd261ed14b5c2f96e9",
+    "https://job-logs.eascdn.net/production/e37071f5-d728-4ad3-929d-eca89cb561d2/1778634322170-99d926a9-8a8e-438c-a7ac-2be8f4e6fc92.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260513%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260513T012127Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=0e172243f1d3632f1f1b9c0b9214c0d41e328a29fc194783752097140d0659bd6b46d0bb1577fe806389971aaa4af325c71bf803e32234eb355059e15497b54457a2151540f190b1eaacf4bcc6af01e0d32a0f23f9edb3b36f1aa5f45e5c9cf469a45d14af6fe66094fd8f1c37cf0c959d97f98e89c531d3e9e32f3f9a33f3e8ae812797e615104137d844256e64fba2b71890d735519360a9bb2a7ce0129ab8f98c64791e59826e5b1771427c7076a5eb97a6b199083678d061939eafd746534b4c58d147c220f35679e0ca755e9dab651d475e58eba76274aaa355f6469ad89a2b77d1758eb3f36d0f91ee483408876811ec4a660ff89c76b3858060adaa4f",
+    "https://job-logs.eascdn.net/production/e37071f5-d728-4ad3-929d-eca89cb561d2/1778634322427-05c020c0-d43f-4ff9-9e34-9208af28d7f4.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260513%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260513T012127Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=69a50b9ecd153855245f152f76db6a72e10df40594f3e3ebd9259498aab05bbb81efdb1e4c9f1fcef2133c8733de4d582d70c98b04c9bc4b6de6f1aa5c9a6c7356db65281ed87e52344193e395b34f4dba9616549a239c22be5a1620135180900a32bca13df895d7261aa63820907776cc92c05bbbd59ad95be58db0e5ab7d9257a073eeedc09c98bfa55f3c241c5569307b7ce6881b968a274dcedfb5b7d16b271481f4b2b93a8a597d099d6d3c0f0d85139b477ecdcf15e002209d3a23c7d9b90f0ff08b590c8a15842cf762ff325686e969c86d69291f2d749481ff5f6b85af3908888088f486c5bc18960e465889cbe427cc987c4c71b19a6429b2c97761",
+    "https://job-logs.eascdn.net/production/e37071f5-d728-4ad3-929d-eca89cb561d2/1778634322636-5f2332cc-4b1f-4ac7-8c01-1be5b8e206cb.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260513%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260513T012127Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=7b1685422a2539078080764ca71e67d5cddfada28d474612e5c19fab4359485aec4a50076410c3c866b73ceb8a67fb24046bfdeeba925a905a4d31e578ca9f23c8ae4c1c60601b726f728fb7ad03a87266ee4943c9ceca520d8bd862dd176183f76ab4939cfeb39f386984286e3939f6731bd68bba6945ded34149404f7705d1b169cecdf5afd2ca5b45f345de2c94440610d110e289deee2ceba10fb8c6065c5954831360bebda7e6ca4d82852f0c91c33696917eccb24054748b13d94ff38cd3f22dbbac5239c9d0348be2e02e184276b402ea272b2181320b51cdaba3dbfd5b8f957aaa1786f969fcbfc156e7924f2727f78aac8c000ac553d6f87adf6ae6"
+  ],
+  "project": {
+    "id": "f809fef2-3bf0-4186-8619-96afe8d581b8",
+    "name": "aes-score-tracker",
+    "slug": "aes-score-tracker",
+    "ownerAccount": {
+      "id": "d487e653-201e-49be-95b3-4cf43892a251",
+      "name": "joncollis"
+    }
+  },
+  "distribution": "INTERNAL",
+  "buildProfile": "preview",
+  "sdkVersion": "54.0.0",
+  "appVersion": "1.0.0",
+  "appBuildVersion": "15",
+  "gitCommitHash": "a76d21589b871b47cbd61651538971c2f641a743",
+  "gitCommitMessage": "chore: bump android versionCode to 11 for preview build",
+  "priority": "HIGH",
+  "createdAt": "2026-05-13T01:05:18.346Z",
+  "updatedAt": "2026-05-13T01:15:55.790Z",
+  "completedAt": "2026-05-13T01:15:44.420Z",
+  "expirationDate": "2026-08-11T01:05:18.370Z",
+  "isForIosSimulator": false,
+  "metrics": {
+    "buildWaitTime": 103,
+    "buildQueueTime": 44486,
+    "buildDuration": 581054
+  }
+}

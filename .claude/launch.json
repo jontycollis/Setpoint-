@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "familyhub-web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "C:\\Dev\\AES2\\.claude\\start-familyhub-web.cmd"],
+      "port": 8081,
+      "autoPort": true
+    },
+    {
+      "name": "reolli-web",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "C:\\Dev\\AES2\\.claude\\start-reolli-web.cmd"],
+      "port": 8082,
+      "autoPort": true
+    },
+    {
+      "name": "reolli-attach",
+      "url": "http://localhost:8092"
+    }
+  ]
+}

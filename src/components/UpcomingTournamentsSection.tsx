@@ -45,6 +45,11 @@ interface Props {
    *  History to keep active tournaments out of the Upcoming section
    *  once they've been pinned at the top. */
   excludeKeys?: ReadonlySet<string>;
+  /** When set to 'indoor' or 'beach', hide entries from the other
+   *  sport. 'all' (default) shows everything. Lets the Season History
+   *  filter chips scope the upcoming section in lockstep with the rest
+   *  of the screen. */
+  sportFilter?: 'all' | 'indoor' | 'beach';
 }
 
 export function UpcomingTournamentsSection({
@@ -52,6 +57,7 @@ export function UpcomingTournamentsSection({
   debugLabel,
   onOpenEntry,
   excludeKeys,
+  sportFilter = 'all',
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -74,10 +80,13 @@ export function UpcomingTournamentsSection({
 
   const upcoming = useMemo(() => {
     if (!indices) return [];
-    const list = getUpcomingTournaments(indices, aliases, { debugLabel });
+    let list = getUpcomingTournaments(indices, aliases, { debugLabel });
+    if (sportFilter !== 'all') {
+      list = list.filter((e) => e.sport === sportFilter);
+    }
     if (!excludeKeys || excludeKeys.size === 0) return list;
     return list.filter((e) => !excludeKeys.has(e.sourceKey));
-  }, [indices, aliases, debugLabel, excludeKeys]);
+  }, [indices, aliases, debugLabel, excludeKeys, sportFilter]);
 
   return (
     <View style={styles.section}>

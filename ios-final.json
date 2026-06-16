@@ -1,0 +1,53 @@
+{
+  "id": "a02c6266-8c5f-4f8b-95c2-eee4da9dce07",
+  "status": "FINISHED",
+  "platform": "IOS",
+  "artifacts": {
+    "buildUrl": "https://expo.dev/artifacts/eas/kMbc4dAhAETmjbCvwBUuvV.ipa",
+    "xcodeBuildLogsUrl": "https://job-logs.eascdn.net/production-xcode-logs/a02c6266-8c5f-4f8b-95c2-eee4da9dce07?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T032952Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=0a63d483d5fe7162eb58b3d5691eecf79adf37f9b3101a8b54a5befb1a07b31600c0414c04b5d85d0e334ffb8272be7eed5873686274aa4b0c5b40c63bddbb2672b5c8c8ca8ad4f27d4173563dc7dc63d48eb748f4670e8ed5c4741f2b8240a1968dc8aa998105c11a14f15d4623c6e7957115b32f3913c8ed179fcfb5f2cbbdce3589b4ead63a2a9c8f54a6ef66918e67cc71f7b3ef428b9ff187154aaa71dc9b55817f6c4a9e8094a91f0354e7d8adf078c9412b342937185f42c93ec9266a11bc6ed8ae240750d517d590a1e0401eef8854052adc749558f706fff0987a3c03323cf8eb9f4a659f7a3e0fd9e24c9b58d0c278df5bd971c376ee6043453c22",
+    "applicationArchiveUrl": "https://expo.dev/artifacts/eas/kMbc4dAhAETmjbCvwBUuvV.ipa"
+  },
+  "fingerprint": {
+    "id": "019e3e40-7ee8-7956-85dd-3d9fc2182b29",
+    "hash": "c9a7bab13727a79fdcc9d54fcb81b5c889796cec"
+  },
+  "initiatingActor": {
+    "id": "f5433a83-36a9-4fc8-b2dd-9493ca22ed83",
+    "displayName": "joncollis"
+  },
+  "logFiles": [
+    "https://job-logs.eascdn.net/production/a02c6266-8c5f-4f8b-95c2-eee4da9dce07/1779160874977-4afc64da-dcee-4b2a-8c8d-6bca65e7e472.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T032952Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=b9e44d5d5c45660c26c623fb547cdcc98735c312b49656fbcceb1cd4180a4b3d4ccc4bf5cc3d74c5e8c1ef7afab4bdf265ba01be12f2e200cdc5fd81c8b0ceae6b7b2eb5d373d17da98919223a97d9b0e34c0ce7c13a3ec83ba726aa54b0620fa374d8f342756400e7dea9ba86b90410e0c8a54d88d1274bc5ae68cae07758ac58a611359556d9218543bbe0e97e41fd85a0d9829fc828e9bdf8e51f853ba33df1a1907df759dc8c98525b74a5fa50fe63c87397b751cb30ac4842d546c85bf4fd099e50a19e9e57a85a12ca96f2d840160b69bdfb356285175567feefb77322105dff8e3cf8ad506a0a2116ca7bccc881426a33b256dfdb27434348c0d464f4",
+    "https://job-logs.eascdn.net/production/a02c6266-8c5f-4f8b-95c2-eee4da9dce07/1779160876265-c42966aa-8c8c-4266-be92-5df4698ff08e.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T032952Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=5b90db7538114f2a157c1cfae53e751430ea6115efeb5572baebf700df9650e169c5ea90100957d24817967446ffd5e31c35c1673ac1d78cb6068588fc9d9cfd730dd23ca318667a859c78f8971d8d329d0fb1abd2f2e87048f305056d4e35170529ecdc11ab5c60d6d19974b7a67aa4cb28e71ac46889a816c6ac3fa8a7e7cb9aed99fa1333314ba3854fc5b4747ad3a03837f0e6174cf9f062b220bf9658d9cae585e45195a9ef5176ea614024bb17fa582bf372d1f85eef5301d35ff0bc1a13e625e6057b42943505099eb64ffb9fda0c9183876210399ce7626a1ea8ec0bc14b26dfbdf1dc164e2e055a4c9d5a26afa85423b9a938908a1a1c1330baacab",
+    "https://job-logs.eascdn.net/production/a02c6266-8c5f-4f8b-95c2-eee4da9dce07/1779160876558-ea1abfc3-4871-4375-8307-cfc5c079aebc.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T032952Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=84dc670be80a592ea342b924cef2dbbc92d01ef33061d00f3eb14221b06c72be749d8fa550074043bc399c6e0f59b23e78dc83344ddfd4ff7136c244e15280001c04913e0b3f9f792a41277f02509d71788b6974f0ac7f6010dc8fc017b96439f67aa4d08d6f09d7b857cc6ee157dbd52bdbcc5002e42c8531407e1593a7b20f31181c400b940decaed5f3397168c99dd14d9dd805ae86a67ffe1472a58a60437fd6a0338762d7c721e1582518b0c75687810ed10d9a8c17c722753bc4ccfe8affe89d07268469930322030b043b06a451da8353d108cfdde629ea831e49c883175a039063375eff1cb09c9123ca01af65c7161740ee4d9d52a09ede0d924085",
+    "https://job-logs.eascdn.net/production/a02c6266-8c5f-4f8b-95c2-eee4da9dce07/1779160876742-e693f4a7-fd70-40db-96f6-70ac09c7bfdc.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T032952Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=5d7f8ca545b58cbd9b5b46a7e5574f971b22d2ee3900fe26c747ebb98c1d917167b913e7a28bb6450b59639436628d35985ad70910abb031a513e7cb6130dfad35e621ede444a3f77f56b5e5ead85a9f46e8497780f41a99dd48b1b606c6106b1fd019b5f0aad7de07baec4bfe8f32b6b81f509ff0a9029a66a41cda0a0c6013f321a613c8cbe1d90b8fcab62ae56ac31668dce348d7027eaec3ce74e29df5a8f26bb599d1f3630078f0cb5f9d6b7b3b7945e41bc30783e065c2430084d75254c2082fae1acd86221bb704ad53ebc1257075997076185dfaddd164edf5a5c6a740fd1e70d510ceb33fc78a61a9dea9af2023675eeff54833e85255292bb91690"
+  ],
+  "project": {
+    "id": "f809fef2-3bf0-4186-8619-96afe8d581b8",
+    "name": "aes-score-tracker",
+    "slug": "aes-score-tracker",
+    "ownerAccount": {
+      "id": "d487e653-201e-49be-95b3-4cf43892a251",
+      "name": "joncollis"
+    }
+  },
+  "channel": "production",
+  "distribution": "STORE",
+  "buildProfile": "production",
+  "sdkVersion": "54.0.0",
+  "appVersion": "1.0.0",
+  "appBuildVersion": "18",
+  "runtimeVersion": "1.0.0",
+  "gitCommitHash": "1a04148e82592b350954e3509f7b253475972b52",
+  "gitCommitMessage": "chore: bump android versionCode to 17 for preview build\n\nNew APK ships expo-print + expo-sharing so the OVA scoresheet PDF\nbutton works end-to-end. Previous APK was versionCode 16.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+  "priority": "HIGH",
+  "createdAt": "2026-05-19T03:21:14.664Z",
+  "updatedAt": "2026-05-19T03:26:52.763Z",
+  "completedAt": "2026-05-19T03:26:47.217Z",
+  "expirationDate": "2026-06-18T03:21:14.718Z",
+  "isForIosSimulator": false,
+  "metrics": {
+    "buildWaitTime": 158,
+    "buildQueueTime": 45524,
+    "buildDuration": 282637
+  }
+}

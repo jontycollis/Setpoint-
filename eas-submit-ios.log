@@ -1,0 +1,10 @@
+
+Ensuring your app exists on App Store Connect. This step can be skipped by
+providing ascAppId in the submit profile. Learn more:
+https://expo.fyi/asc-app-id
+
+› Log in to your Apple Developer account to continue
+Authentication with Apple Developer Portal failed!
+Input is required, but stdin is not readable. Failed to display prompt: Apple ID:
+Submission failed
+    Error: submit command failed.

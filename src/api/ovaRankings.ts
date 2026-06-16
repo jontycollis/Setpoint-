@@ -16,6 +16,7 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { fetchText } from './httpClient';
 
 const URLS = {
   girls: 'https://www.ontariovolleyball.org/girls-team-rankings',
@@ -93,17 +94,11 @@ export async function clearCachedRankings(): Promise<void> {
 // ── Fetch + parse ────────────────────────────────────────────────────────
 
 async function fetchHtml(url: string): Promise<string> {
-  const bust = `_t=${Date.now()}`;
-  const sep = url.includes('?') ? '&' : '?';
-  const res = await fetch(`${url}${sep}${bust}`, {
-    headers: {
-      'Accept': 'text/html,application/xhtml+xml',
-      'Cache-Control': 'no-cache',
-    },
-    cache: 'no-store' as RequestCache,
-  });
-  if (!res.ok) throw new Error(`OVA ${res.status} ${res.statusText}`);
-  return res.text();
+  // Delegates to the shared httpClient — cache-bust + no-cache headers
+  // + ApiError shape come from there. Retries default off (matches
+  // legacy behavior); enable per-call if a future rankings refresh
+  // needs to survive flaky CDN edges.
+  return fetchText(url, { source: 'ova-rankings' });
 }
 
 /** Strip noise (scripts/styles/comments) from raw HTML. */

@@ -35,6 +35,8 @@ interface Props {
   onBack: () => void;
   /** Set the active athlete. Parent persists. */
   onSetActiveAthlete: (athleteId: string) => void;
+  /** Open the detail screen for this athlete (sport tabs + team list). */
+  onOpenAthleteDetail?: (athleteId: string) => void;
   /** Add a new athlete. Parent generates the id, persists, returns it
    *  in case callers want to navigate or activate. */
   onAddAthlete: (params: {
@@ -59,6 +61,7 @@ export function AthletesScreen({
   userProfile,
   onBack,
   onSetActiveAthlete,
+  onOpenAthleteDetail,
   onAddAthlete,
   onRenameAthlete,
   onRemoveAthlete,
@@ -158,7 +161,11 @@ export function AthletesScreen({
               >
                 <TouchableOpacity
                   style={styles.rowMain}
-                  onPress={() => onSetActiveAthlete(athlete.id)}
+                  onPress={() =>
+                    onOpenAthleteDetail
+                      ? onOpenAthleteDetail(athlete.id)
+                      : onSetActiveAthlete(athlete.id)
+                  }
                   activeOpacity={0.7}
                 >
                   <View style={styles.rowText}>
@@ -169,10 +176,19 @@ export function AthletesScreen({
                     <Text style={styles.rowMeta}>
                       {athleteRelationLabel(athlete.relation)} ·{' '}
                       {teamCount === 1 ? '1 team' : `${teamCount} teams`}
+                      {athlete.mrsLinked ? '  ·  MRS linked' : ''}
                     </Text>
                   </View>
                 </TouchableOpacity>
                 <View style={styles.rowActions}>
+                  {!isActive ? (
+                    <TouchableOpacity
+                      onPress={() => onSetActiveAthlete(athlete.id)}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Text style={styles.rowAction}>Set active</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   <TouchableOpacity
                     onPress={() => handleStartRename(athlete)}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}

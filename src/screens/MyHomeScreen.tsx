@@ -132,6 +132,10 @@ interface Props {
    *  dashboard. Optional; the chip hides when undefined. Wired only on
    *  `kind: 'me'` cards (Watching teams have no team-scoped analytics). */
   onOpenAnalytics?: (team: TeamProfile) => void;
+  /** Tap the athlete-scope chip → drill into the athlete detail surface
+   *  (indoor/beach tabs + team list). Optional; the chip becomes
+   *  non-tappable when undefined. */
+  onOpenAthleteDetail?: (athleteId: string) => void;
 }
 
 export function MyHomeScreen({
@@ -153,6 +157,7 @@ export function MyHomeScreen({
   onLongPressTeam,
   onOpenRecent,
   onOpenAnalytics,
+  onOpenAthleteDetail,
 }: Props) {
   const { colors } = useTheme();
   const styles = useMemo(() => makeStyles(colors), [colors]);
@@ -293,12 +298,27 @@ export function MyHomeScreen({
           <RecentlyViewedStrip recents={recents} onOpen={onOpenRecent} />
         ) : null}
 
+        {hasMultipleAthletes && onOpenAthleteDetail ? (
+          // Athlete-primary navigator. One compact card per athlete with
+          // their team-count breakdown — taps drill into AthleteDetail
+          // (per-sport tabs + stats + history). Only renders when the
+          // parent provides the drill-in handler so this is a no-op for
+          // surfaces that haven't wired the route yet.
+          <AthletesSection
+            athletes={profile.athletes}
+            teams={allMeTeams}
+            activeAthleteId={profile.activeAthleteId}
+            onOpenAthleteDetail={onOpenAthleteDetail}
+          />
+        ) : null}
         {hasMultipleAthletes ? (
           <AthleteScopeToggle
             activeAthleteName={activeAthlete?.displayName}
+            activeAthleteId={activeAthlete?.id}
             allCount={allMeTeams.length}
             showingAll={showAllAthletes || !profile.activeAthleteId}
             onToggle={() => setShowAllAthletes((v) => !v)}
+            onOpenAthleteDetail={onOpenAthleteDetail}
           />
         ) : null}
         {meTeams.length > 0 ? (
@@ -850,6 +870,131 @@ function RecentChip({
   );
 }
 
+// ── Athletes section (multi-athlete navigator) ───────────────────────────
+
+/**
+ * Top-of-Home navigator for multi-athlete accounts. Renders a compact
+ * card per athlete with a breakdown of how many teams they own,
+ * tappable to AthleteDetail (per-sport tabs + stats + history). Lives
+ * above the team grid so the parent's first decision is "which kid
+ * am I looking at right now."
+ *
+ * Single-athlete accounts never see this — there's no navigation to
+ * do, and the existing CareerCard already surfaces the totals.
+ */
+function AthletesSection({
+  athletes,
+  teams,
+  activeAthleteId,
+  onOpenAthleteDetail,
+}: {
+  athletes: Array<{
+    id: string;
+    displayName: string;
+    relation: 'self' | 'child' | 'other';
+  }>;
+  teams: TeamProfile[];
+  activeAthleteId: string | null;
+  onOpenAthleteDetail: (athleteId: string) => void;
+}) {
+  const { colors } = useTheme();
+  const styles = useMemo(() => makeStyles(colors), [colors]);
+  return (
+    <View style={styles.section}>
+      <Text style={[styles.sectionLabel, { color: colors.textLight }]}>
+        Athletes
+      </Text>
+      {athletes.map((athlete) => {
+        const owned = teams.filter((t) => t.athleteId === athlete.id);
+        const indoor = owned.filter((t) => t.sport === 'indoor').length;
+        const beach = owned.filter((t) => t.sport === 'beach').length;
+        const isActive = athlete.id === activeAthleteId;
+        return (
+          <TouchableOpacity
+            key={athlete.id}
+            style={[
+              athletesSectionStyles.card,
+              {
+                backgroundColor: colors.surface,
+                borderColor: isActive ? colors.primary : colors.divider,
+                borderWidth: isActive ? 2 : 1,
+              },
+            ]}
+            onPress={() => onOpenAthleteDetail(athlete.id)}
+            activeOpacity={0.7}
+          >
+            <View style={athletesSectionStyles.cardMain}>
+              <Text
+                style={[athletesSectionStyles.name, { color: colors.text }]}
+              >
+                {athlete.displayName}
+                {isActive ? '  ✓' : ''}
+              </Text>
+              <Text
+                style={[
+                  athletesSectionStyles.meta,
+                  { color: colors.textSecondary },
+                ]}
+              >
+                {athleteTeamBreakdown(owned.length, indoor, beach)}
+              </Text>
+            </View>
+            <Text
+              style={[
+                athletesSectionStyles.chevron,
+                { color: colors.textLight },
+              ]}
+            >
+              ›
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+function athleteTeamBreakdown(
+  total: number,
+  indoor: number,
+  beach: number
+): string {
+  if (total === 0) return 'No teams yet';
+  const parts: string[] = [];
+  if (indoor > 0) parts.push(`${indoor} indoor`);
+  if (beach > 0) parts.push(`${beach} beach`);
+  const totalLabel = total === 1 ? '1 team' : `${total} teams`;
+  return parts.length > 0
+    ? `${totalLabel} · ${parts.join(' · ')}`
+    : totalLabel;
+}
+
+const athletesSectionStyles = StyleSheet.create({
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: borderRadius.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  cardMain: {
+    flex: 1,
+  },
+  name: {
+    fontSize: fontSize.md,
+    fontWeight: '700',
+  },
+  meta: {
+    fontSize: fontSize.xs,
+    marginTop: 2,
+  },
+  chevron: {
+    fontSize: fontSize.lg,
+    paddingLeft: spacing.sm,
+  },
+});
+
 // ── My Teams ──────────────────────────────────────────────────────────────
 
 /**
@@ -860,23 +1005,57 @@ function RecentChip({
  */
 function AthleteScopeToggle({
   activeAthleteName,
+  activeAthleteId,
   allCount,
   showingAll,
   onToggle,
+  onOpenAthleteDetail,
 }: {
   activeAthleteName: string | undefined;
+  activeAthleteId: string | undefined;
   allCount: number;
   showingAll: boolean;
   onToggle: () => void;
+  onOpenAthleteDetail?: (athleteId: string) => void;
 }) {
   const { colors } = useTheme();
+  // When showing a single athlete and we have a drill-in handler, the
+  // label itself becomes the affordance — taps route to AthleteDetail
+  // instead of cycling the scope. This delivers the "easily see the
+  // individual athlete" requirement without restructuring Home.
+  const labelTappable =
+    !showingAll && !!activeAthleteId && !!onOpenAthleteDetail;
+  const labelText = showingAll
+    ? `Showing all athletes (${allCount} teams)`
+    : `Showing ${activeAthleteName ?? 'active athlete'}'s teams`;
   return (
     <View style={athleteScopeToggleStyles.row}>
-      <Text style={[athleteScopeToggleStyles.label, { color: colors.textSecondary }]}>
-        {showingAll
-          ? `Showing all athletes (${allCount} teams)`
-          : `Showing ${activeAthleteName ?? 'active athlete'}'s teams`}
-      </Text>
+      {labelTappable && activeAthleteId ? (
+        <TouchableOpacity
+          style={athleteScopeToggleStyles.labelPressable}
+          onPress={() => onOpenAthleteDetail!(activeAthleteId)}
+          hitSlop={{ top: 8, bottom: 8, left: 0, right: 0 }}
+          activeOpacity={0.7}
+        >
+          <Text
+            style={[
+              athleteScopeToggleStyles.label,
+              { color: colors.textSecondary },
+            ]}
+          >
+            {labelText} ›
+          </Text>
+        </TouchableOpacity>
+      ) : (
+        <Text
+          style={[
+            athleteScopeToggleStyles.label,
+            { color: colors.textSecondary },
+          ]}
+        >
+          {labelText}
+        </Text>
+      )}
       <TouchableOpacity
         onPress={onToggle}
         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -902,6 +1081,9 @@ const athleteScopeToggleStyles = StyleSheet.create({
   label: {
     fontSize: fontSize.xs,
     fontWeight: '600',
+    flex: 1,
+  },
+  labelPressable: {
     flex: 1,
   },
   action: {

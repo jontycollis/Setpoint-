@@ -77,6 +77,13 @@ import { StorageSnapshotScreen } from './src/screens/StorageSnapshotScreen';
 import { HistoricalImportScreen } from './src/screens/HistoricalImportScreen';
 import { SidelineImportScreen } from './src/screens/SidelineImportScreen';
 import { AthletesScreen } from './src/screens/AthletesScreen';
+import { AthleteDetailScreen } from './src/screens/AthleteDetailScreen';
+import { ClubsScreen } from './src/screens/ClubsScreen';
+import { ManualTournamentScreen } from './src/screens/ManualTournamentScreen';
+import type { ManualTournamentEntry } from './src/utils/manualTournaments';
+import { MyTeamClickConnectionScreen } from './src/screens/MyTeamClickConnectionScreen';
+import { BeachDiscoveryScreen } from './src/screens/BeachDiscoveryScreen';
+import { BeachTournamentDetailScreen } from './src/screens/BeachTournamentDetailScreen';
 import { AboutScreen } from './src/screens/AboutScreen';
 import { HelpScreen } from './src/screens/HelpScreen';
 import type { HelpSectionId } from './src/help/content';
@@ -153,7 +160,14 @@ import type {
   UserProfile,
   TeamProfile,
   AthleteProfile,
+  Club,
 } from './src/types/profile';
+import { makeClubId } from './src/utils/clubDetection';
+import {
+  resolveMrsTargetAthlete,
+  applyMrsConnect,
+  applyMrsDisconnect,
+} from './src/utils/athleteMrs';
 import {
   ThemeContext,
   lightColors,
@@ -235,6 +249,12 @@ type Screen =
   | 'HistoricalImport'
   | 'SidelineImport'
   | 'Athletes'
+  | 'AthleteDetail'
+  | 'Clubs'
+  | 'ManualTournament'
+  | 'MyTeamClickConnect'
+  | 'BeachDiscovery'
+  | 'BeachTournamentDetail'
   | 'Help'
   | 'About';
 
@@ -570,6 +590,25 @@ function AppInner() {
   // 4th silently (we'd lose Cancel) and tap-outside dismissal isn't
   // reliable across every Android OEM.
   const [teamActionTarget, setTeamActionTarget] = useState<TeamProfile | null>(null);
+  // Which athlete's detail surface is currently being viewed. Null when
+  // we aren't on the AthleteDetail screen. Stored as the id rather than
+  // a snapshot so renames/edits while the screen is open re-render
+  // immediately off userProfile.
+  const [athleteDetailId, setAthleteDetailId] = useState<string | null>(null);
+  // Manual-tournament editor state. Holds (team + existing entry) so the
+  // form can render in both "new" mode (existing = undefined) and "edit"
+  // mode without prop drilling through the route table.
+  const [manualEditTarget, setManualEditTarget] = useState<{
+    team: TeamProfile;
+    existing?: ManualTournamentEntry;
+  } | null>(null);
+  // Target for the beach tournament detail screen — eventId + the name
+  // we already know from the discovery row (used as a header fallback
+  // until the schedule loads).
+  const [beachDetailTarget, setBeachDetailTarget] = useState<{
+    eventId: string;
+    name?: string;
+  } | null>(null);
   const [navigatingToFav, setNavigatingToFav] = useState(false);
   // Boot-time tournament registry enriched with AES discovery data.
   // Passed to TournamentSelectScreen so it doesn't repeat the fetch.
@@ -2035,6 +2074,18 @@ function AppInner() {
           setScreenHistory((prev) => [...prev, screen]);
           setScreen('Athletes');
           break;
+        case 'Clubs':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('Clubs');
+          break;
+        case 'MyTeamClickConnect':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('MyTeamClickConnect');
+          break;
+        case 'BeachDiscovery':
+          setScreenHistory((prev) => [...prev, screen]);
+          setScreen('BeachDiscovery');
+          break;
         case 'Help':
           setScreenHistory((prev) => [...prev, screen]);
           setHelpSectionId(undefined);
@@ -2491,6 +2542,11 @@ function AppInner() {
         return (
           <MyHomeScreen
             profile={userProfile}
+            onOpenAthleteDetail={(athleteId) => {
+              setAthleteDetailId(athleteId);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AthleteDetail');
+            }}
             onOpenTeam={(team) => {
               handleSwitchActiveTeam(team.id);
               openTeamSeasonHistory({ team });
@@ -2580,32 +2636,49 @@ function AppInner() {
             }}
           />
         );
-      case 'MrsConnection':
+      case 'MrsConnection': {
+        // Multi-MRS: the connect/disconnect actions land on the active
+        // athlete (or self-fallback). UserProfile.mrsLinked stays as
+        // the "any athlete linked" aggregate so existing readers
+        // (hamburger subtitle) keep working. Future: per-athlete
+        // cookie isolation requires real OAuth — flagged as a follow-
+        // up in utils/athleteMrs.ts.
+        const target = userProfile
+          ? resolveMrsTargetAthlete(userProfile)
+          : null;
+        const connected = target?.mrsLinked ?? !!userProfile?.mrsLinked;
         return (
           <ConnectionScreen
             config={MRS_CONFIG}
-            connected={!!userProfile?.mrsLinked}
+            connected={connected}
             onBack={goBack}
             onConnect={() => {
-              // First post-login navigation event — flip the flag.
-              setUserProfile((prev) =>
-                prev ? { ...prev, mrsLinked: true, updatedAt: Date.now() } : prev
-              );
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const next = applyMrsConnect(
+                  prev,
+                  target?.id ?? null,
+                  Date.now()
+                );
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
             }}
             onDisconnect={() => {
-              setUserProfile((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      mrsLinked: false,
-                      mrsMemberId: undefined,
-                      updatedAt: Date.now(),
-                    }
-                  : prev
-              );
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const next = applyMrsDisconnect(
+                  prev,
+                  target?.id ?? null,
+                  Date.now()
+                );
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
             }}
           />
         );
+      }
       case 'CacConnection':
         return (
           <ConnectionScreen
@@ -3273,6 +3346,11 @@ function AppInner() {
           <AthletesScreen
             userProfile={userProfile}
             onBack={goBack}
+            onOpenAthleteDetail={(athleteId) => {
+              setAthleteDetailId(athleteId);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AthleteDetail');
+            }}
             onSetActiveAthlete={(athleteId) => {
               setUserProfile((prev) => {
                 if (!prev) return prev;
@@ -3350,6 +3428,219 @@ function AppInner() {
                   teams: prev.teams.map((t) =>
                     t.kind === 'me' && t.athleteId === athleteId
                       ? { ...t, athleteId: reparentTarget.id, updatedAt: now }
+                      : t
+                  ),
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
+          />
+        );
+      case 'AthleteDetail':
+        if (!userProfile || !athleteDetailId) return null;
+        return (
+          <AthleteDetailScreen
+            userProfile={userProfile}
+            athleteId={athleteDetailId}
+            onBack={goBack}
+            onOpenTeam={(team) => {
+              // Match MyHome's onOpenTeam: switch active context, then
+              // route into the team's unified season history. The history
+              // screen itself decides whether to drill into AES, Timu, or
+              // local scoreboard for the current entry.
+              handleSwitchActiveTeam(team.id);
+              openTeamSeasonHistory({ team });
+            }}
+            onAddTeam={(athleteId) => {
+              // Add-team flow expects the active athlete to host the new
+              // team. Swap active to the target before kicking off so the
+              // newly-added team binds to the right athlete.
+              if (userProfile.activeAthleteId !== athleteId) {
+                setUserProfile((prev) => {
+                  if (!prev) return prev;
+                  const now = Date.now();
+                  const next: UserProfile = {
+                    ...prev,
+                    activeAthleteId: athleteId,
+                    updatedAt: now,
+                  };
+                  saveUserProfile(next).catch(() => {});
+                  return next;
+                });
+              }
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('AddTeamChooser');
+            }}
+            onEditAthlete={() => {
+              // Edit flips back to AthletesScreen where the rename modal
+              // lives. Future pass: inline edit on this screen.
+              setAthleteDetailId(null);
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('Athletes');
+            }}
+            onOpenHistoryEntry={(team) => {
+              // First pass: tap routes to the team's SeasonHistory
+              // screen. Drilling straight to the specific entry would
+              // require new plumbing (entry-scroll target); the season
+              // history view is dense enough that the user can spot the
+              // entry quickly from a 5-item recent strip.
+              handleSwitchActiveTeam(team.id);
+              openTeamSeasonHistory({ team });
+            }}
+            onAddManualTournament={(team) => {
+              setManualEditTarget({ team });
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('ManualTournament');
+            }}
+          />
+        );
+      case 'ManualTournament':
+        if (!manualEditTarget) return null;
+        return (
+          <ManualTournamentScreen
+            team={manualEditTarget.team}
+            existing={manualEditTarget.existing}
+            onBack={() => {
+              setManualEditTarget(null);
+              goBack();
+            }}
+            onSaved={() => {
+              // Drop the editor target and bounce back. Downstream
+              // history screens re-read the unified index on mount, so
+              // the saved entry surfaces immediately.
+              setManualEditTarget(null);
+              goBack();
+            }}
+            onDeleted={() => {
+              setManualEditTarget(null);
+              goBack();
+            }}
+          />
+        );
+      case 'MyTeamClickConnect':
+        return (
+          <MyTeamClickConnectionScreen
+            onBack={goBack}
+            onConnected={() => {
+              // Successful link — bounce back. The discovery screen
+              // (or whatever the user opens next) re-reads the saved
+              // session on mount, so it sees the new credentials.
+              goBack();
+            }}
+          />
+        );
+      case 'BeachDiscovery':
+        return (
+          <BeachDiscoveryScreen
+            onBack={goBack}
+            onOpenConnect={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MyTeamClickConnect');
+            }}
+            onOpenTournament={(tournament) => {
+              setBeachDetailTarget({
+                eventId: tournament.eventId,
+                name: tournament.tournamentName,
+              });
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('BeachTournamentDetail');
+            }}
+          />
+        );
+      case 'BeachTournamentDetail':
+        if (!beachDetailTarget) return null;
+        return (
+          <BeachTournamentDetailScreen
+            eventId={beachDetailTarget.eventId}
+            initialName={beachDetailTarget.name}
+            onBack={() => {
+              setBeachDetailTarget(null);
+              goBack();
+            }}
+            onOpenConnect={() => {
+              setScreenHistory((prev) => [...prev, screen]);
+              setScreen('MyTeamClickConnect');
+            }}
+            onIndexed={() => {
+              // Bounce back to the discovery list with a toast-style
+              // alert. The unified history reader re-runs on the next
+              // SeasonHistory / AthleteDetail mount, so the new
+              // snapshot appears immediately.
+              Alert.alert(
+                'Tournament indexed',
+                "It's in your beach history now."
+              );
+            }}
+          />
+        );
+      case 'Clubs':
+        if (!userProfile) return null;
+        return (
+          <ClubsScreen
+            userProfile={userProfile}
+            onBack={goBack}
+            onAddClub={({ name }) => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const newClub: Club = {
+                  id: makeClubId(now),
+                  tenantId: prev.tenantId,
+                  name,
+                  createdAt: now,
+                  updatedAt: now,
+                };
+                const next: UserProfile = {
+                  ...prev,
+                  clubs: [...prev.clubs, newClub],
+                  // First time the user explicitly creates one we still
+                  // stamp the backfill marker so the auto-detect doesn't
+                  // sneak in on a future load.
+                  clubsBackfilledAt: prev.clubsBackfilledAt ?? now,
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
+            onRenameClub={(clubId, name) => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const next: UserProfile = {
+                  ...prev,
+                  clubs: prev.clubs.map((c) =>
+                    c.id === clubId
+                      ? {
+                          ...c,
+                          name,
+                          // User-renamed: the auto-detect flag no longer
+                          // describes the current label, drop it.
+                          detectedFromTeamPrefix: false,
+                          updatedAt: now,
+                        }
+                      : c
+                  ),
+                  updatedAt: now,
+                };
+                saveUserProfile(next).catch(() => {});
+                return next;
+              });
+            }}
+            onRemoveClub={(clubId) => {
+              setUserProfile((prev) => {
+                if (!prev) return prev;
+                const now = Date.now();
+                const next: UserProfile = {
+                  ...prev,
+                  clubs: prev.clubs.filter((c) => c.id !== clubId),
+                  // Un-stamp clubId from any teams that referenced the
+                  // removed club so they don't become dangling references.
+                  teams: prev.teams.map((t) =>
+                    t.clubId === clubId
+                      ? { ...t, clubId: undefined, updatedAt: now }
                       : t
                   ),
                   updatedAt: now,
@@ -3546,6 +3837,7 @@ function AppInner() {
       <DiscoveryConfirmModal pending={confirmDiscovery} />
       <TeamActionsModal
         team={teamActionTarget}
+        clubs={userProfile?.clubs ?? []}
         onClose={() => setTeamActionTarget(null)}
         onToggleKind={(t) => {
           setTeamActionTarget(null);
@@ -3554,6 +3846,29 @@ function AppInner() {
         onManageRoster={(t) => {
           setTeamActionTarget(null);
           handleOpenRosterEditor(t);
+        }}
+        onAssignClub={(t, clubId) => {
+          setTeamActionTarget(null);
+          setUserProfile((prev) => {
+            if (!prev) return prev;
+            const now = Date.now();
+            const next: UserProfile = {
+              ...prev,
+              teams: prev.teams.map((existing) =>
+                existing.id === t.id
+                  ? clubId
+                    ? { ...existing, clubId, updatedAt: now }
+                    : (() => {
+                        const { clubId: _drop, ...rest } = existing;
+                        return { ...rest, updatedAt: now };
+                      })()
+                  : existing
+              ),
+              updatedAt: now,
+            };
+            saveUserProfile(next).catch(() => {});
+            return next;
+          });
         }}
         onRemove={(t) => {
           setTeamActionTarget(null);
@@ -3614,20 +3929,42 @@ export default Sentry.wrap(function App() {
  */
 function TeamActionsModal({
   team,
+  clubs,
   onClose,
   onToggleKind,
   onManageRoster,
+  onAssignClub,
   onRemove,
 }: {
   team: TeamProfile | null;
+  clubs: Club[];
   onClose: () => void;
   onToggleKind: (team: TeamProfile) => void;
   onManageRoster: (team: TeamProfile) => void;
+  /** Assign team to a club, or pass null to unassign. */
+  onAssignClub: (team: TeamProfile, clubId: string | null) => void;
   onRemove: (team: TeamProfile) => void;
 }) {
+  // The modal has two views: the default action list, and a club
+  // picker that swaps in when "Move to club" is tapped. We keep the
+  // picker open across renders so the user can scroll through a long
+  // club list. Reset whenever the `team` target changes so opening a
+  // new team starts on the action list.
+  const [view, setView] = useState<'actions' | 'clubs'>('actions');
+  const teamId = team?.id ?? null;
+  React.useEffect(() => {
+    setView('actions');
+  }, [teamId]);
+
   if (!team) return null;
   const promoteLabel =
     team.kind === 'me' ? 'Stop tracking as my team' : 'Make this my team';
+  const currentClub = team.clubId
+    ? clubs.find((c) => c.id === team.clubId)
+    : null;
+  const moveLabel = currentClub
+    ? `Move to club (currently: ${currentClub.name})`
+    : 'Move to club';
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       {/* Backdrop is a TouchableOpacity so a tap anywhere outside the
@@ -3643,36 +3980,91 @@ function TeamActionsModal({
           onPress={(e) => e.stopPropagation()}
         >
           <Text style={modalStyles.title}>{team.label}</Text>
-          <TouchableOpacity
-            style={teamActionsModalStyles.row}
-            onPress={() => onToggleKind(team)}
-            activeOpacity={0.7}
-          >
-            <Text style={teamActionsModalStyles.rowText}>{promoteLabel}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={teamActionsModalStyles.row}
-            onPress={() => onManageRoster(team)}
-            activeOpacity={0.7}
-          >
-            <Text style={teamActionsModalStyles.rowText}>Manage roster</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={teamActionsModalStyles.row}
-            onPress={() => onRemove(team)}
-            activeOpacity={0.7}
-          >
-            <Text style={teamActionsModalStyles.rowTextDestructive}>
-              Remove team
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={teamActionsModalStyles.cancelRow}
-            onPress={onClose}
-            activeOpacity={0.7}
-          >
-            <Text style={teamActionsModalStyles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
+          {view === 'actions' ? (
+            <>
+              <TouchableOpacity
+                style={teamActionsModalStyles.row}
+                onPress={() => onToggleKind(team)}
+                activeOpacity={0.7}
+              >
+                <Text style={teamActionsModalStyles.rowText}>
+                  {promoteLabel}
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={teamActionsModalStyles.row}
+                onPress={() => onManageRoster(team)}
+                activeOpacity={0.7}
+              >
+                <Text style={teamActionsModalStyles.rowText}>
+                  Manage roster
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={teamActionsModalStyles.row}
+                onPress={() => setView('clubs')}
+                activeOpacity={0.7}
+              >
+                <Text style={teamActionsModalStyles.rowText}>{moveLabel}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={teamActionsModalStyles.row}
+                onPress={() => onRemove(team)}
+                activeOpacity={0.7}
+              >
+                <Text style={teamActionsModalStyles.rowTextDestructive}>
+                  Remove team
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={teamActionsModalStyles.cancelRow}
+                onPress={onClose}
+                activeOpacity={0.7}
+              >
+                <Text style={teamActionsModalStyles.cancelText}>Cancel</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              {clubs.length === 0 ? (
+                <View style={teamActionsModalStyles.row}>
+                  <Text style={teamActionsModalStyles.rowMutedText}>
+                    No clubs yet. Add one from Manage clubs.
+                  </Text>
+                </View>
+              ) : (
+                clubs.map((c) => (
+                  <TouchableOpacity
+                    key={c.id}
+                    style={teamActionsModalStyles.row}
+                    onPress={() => onAssignClub(team, c.id)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={teamActionsModalStyles.rowText}>
+                      {c.name}
+                      {c.id === team.clubId ? '  ✓' : ''}
+                    </Text>
+                  </TouchableOpacity>
+                ))
+              )}
+              <TouchableOpacity
+                style={teamActionsModalStyles.row}
+                onPress={() => onAssignClub(team, null)}
+                activeOpacity={0.7}
+              >
+                <Text style={teamActionsModalStyles.rowMutedText}>
+                  No club (unassign)
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={teamActionsModalStyles.cancelRow}
+                onPress={() => setView('actions')}
+                activeOpacity={0.7}
+              >
+                <Text style={teamActionsModalStyles.cancelText}>← Back</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </TouchableOpacity>
       </TouchableOpacity>
     </Modal>
@@ -3695,6 +4087,11 @@ const teamActionsModalStyles = StyleSheet.create({
     fontSize: 16,
     color: '#c0392b',
     fontWeight: '600',
+  },
+  rowMutedText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
   },
   cancelRow: {
     paddingTop: 16,

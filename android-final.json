@@ -1,0 +1,52 @@
+{
+  "id": "4ed05a32-cfa0-4270-bfc6-5a4c7193bff8",
+  "status": "FINISHED",
+  "platform": "ANDROID",
+  "artifacts": {
+    "buildUrl": "https://expo.dev/artifacts/eas/aJtnkyCr6QHDBVCxiCTYHW.apk",
+    "applicationArchiveUrl": "https://expo.dev/artifacts/eas/aJtnkyCr6QHDBVCxiCTYHW.apk"
+  },
+  "fingerprint": {
+    "id": "019e3e30-d933-70ed-a4dc-8182b2576198",
+    "hash": "f4612f77ce262e14bfbfdb632bc293ac96363fea"
+  },
+  "initiatingActor": {
+    "id": "f5433a83-36a9-4fc8-b2dd-9493ca22ed83",
+    "displayName": "joncollis"
+  },
+  "logFiles": [
+    "https://job-logs.eascdn.net/production/4ed05a32-cfa0-4270-bfc6-5a4c7193bff8/1779159849510-dcbce861-6276-41db-b5f3-2051cb4a83f3.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T031916Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=b519b4818e6a4ff3714dda6ed1c6ac4609322f43b9b9e21706bee7939724d031f7b16be9785961c39e173ce7579ede4b3886b88e31297188201339e846cf9f220533245a56d174d8860faf2c49b6a866110ace2c94c3c0e40bf05594712d7f4da9a3edd1af4c9c67d9c440d0873552eea97537a6fd459d5aa3f79290e99686b5f03b3eb8933a8c2fc54f47d8d7f0264c020a75c6cf7031e754fb2e0b64c501a46f7b44142cac78345b170a8ce67b93d0e432ad20bcdf64cda0dd9bdc970d9976bdaaa35e1ae66e5897422275b9acd0e1dca34bdaa68e85580a3f5bcf67e471df457376cd2d5967fce118663e138f72c7631feea585d5065bd01e63e051e62376",
+    "https://job-logs.eascdn.net/production/4ed05a32-cfa0-4270-bfc6-5a4c7193bff8/1779159851931-d98af936-8a19-462b-b663-8aae28042743.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T031916Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=1b6e063909ca74a03502fefe2dd20dcdb036917d70fba77cc319c15d7e9c2eb8673c3381e80735090eb843a118959018d6ecebf319a73ba24e5893f5b23639943a2782f8ef1d7a6e74002664b1b2354172b66f9072110f38525b2bd277538087880495a0a6a3ad279f146676b9ab7fbdd058a89b3ca16e1b2eb0e78254d7028bc9c75310b17478bc4625ac51e3ab923378860a1de2437893bec3df3306245e52d1b0fb7747759753482e7d8d817d7763bf017290fffcafa961e7b8c21024ad9888e3ec2f9bbaee2f8a508728315e7f5d440a6ff5006353b477f63944e02b210b967cc05f9b7df3b4a184364537a0cce6ef17365b7380a9b5dc406c333c396b56",
+    "https://job-logs.eascdn.net/production/4ed05a32-cfa0-4270-bfc6-5a4c7193bff8/1779159852224-d718c872-f70f-473d-a155-789c827ed126.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T031916Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=9f4e852b4d24b0873f942fd1d69711a5dfb2113735907cc0e9f868c6b9311abd963edf932a71726b62b733903d4bda12f927b334b7a9025656235a497c496e37a18321497b2756f680b6f68093df7b80e2ee2fb598634ecb712c7d7ee4b48dead94ccf07425287df8fc390c80b024dbcc7692f8aec45553785df43590131ed84912ddb3e97bd73daa5dd2b282821e568eb36582385d5133af4c755ddf60af32d72dc1e5b2a9cd9d066dbdcff77b71ad9469d100f37ab5a5bac7a5f171f8b50925d617344d4cea736bc99d128254eb11f4a3ec430f6ae344af47d0feeb0fea2169447d6e61e48cc6f4320cd890c750419bd68d04d812aa2eb857483b86f1c25eb",
+    "https://job-logs.eascdn.net/production/4ed05a32-cfa0-4270-bfc6-5a4c7193bff8/1779159852439-5dcd07d4-da59-4c37-a758-0acc95e95de0.txt?X-Goog-Algorithm=GOOG4-RSA-SHA256&X-Goog-Credential=www-production%40exponentjs.iam.gserviceaccount.com%2F20260519%2Fauto%2Fstorage%2Fgoog4_request&X-Goog-Date=20260519T031916Z&X-Goog-Expires=900&X-Goog-SignedHeaders=host&X-Goog-Signature=b2b18e7e7f8b1d1e77fa3ffa26be637a3abdcb99ffd761c088a90a838b50a6d36a8d2296a10ed44a80f17a5289e964034271cf531c0af5101d3736414358418f5e0b28a012efdcef008bd031da69893765510c63d1ebcda0bcdc44ded4c4f2cf95f0905760fec3e17c98707556006dc740646933ef3e72254fb7ef30effea429d9a4564e8e71850b631ef976f8299f3f33bc2669ba4af58881bb86534c095fcbde2a5e2d8a5797c7d5448d0127d839d29c266901b16755ac2eb5dc2329d483fdbc804a52265ec0fb7f1d54efbca377faea2a41ba8e917aa8efa44b0a6d989e808410ceb5b9896de52a4cc38d7b62f04b476e253b6c9106cf9389bbadd457ab18"
+  ],
+  "project": {
+    "id": "f809fef2-3bf0-4186-8619-96afe8d581b8",
+    "name": "aes-score-tracker",
+    "slug": "aes-score-tracker",
+    "ownerAccount": {
+      "id": "d487e653-201e-49be-95b3-4cf43892a251",
+      "name": "joncollis"
+    }
+  },
+  "channel": "preview",
+  "distribution": "INTERNAL",
+  "buildProfile": "preview",
+  "sdkVersion": "54.0.0",
+  "appVersion": "1.0.0",
+  "appBuildVersion": "16",
+  "runtimeVersion": "1.0.0",
+  "gitCommitHash": "1a04148e82592b350954e3509f7b253475972b52",
+  "gitCommitMessage": "chore: bump android versionCode to 17 for preview build\n\nNew APK ships expo-print + expo-sharing so the OVA scoresheet PDF\nbutton works end-to-end. Previous APK was versionCode 16.\n\nCo-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>",
+  "priority": "HIGH",
+  "createdAt": "2026-05-19T03:04:09.189Z",
+  "updatedAt": "2026-05-19T03:17:57.044Z",
+  "completedAt": "2026-05-19T03:17:54.641Z",
+  "expirationDate": "2026-08-17T03:04:09.236Z",
+  "isForIosSimulator": false,
+  "metrics": {
+    "buildWaitTime": 185,
+    "buildQueueTime": 46752,
+    "buildDuration": 777922
+  }
+}
